@@ -423,7 +423,9 @@ Two paths exist in qmk.top/v4. RT75 Studio uses only the first.
   - The RT75 Pro declares `sleep24.sleep` and `sleepBT.sleep` as 0–18 h and `sleepBT.deep` as
     10 s–18 h. It declares no 2.4G deep sleep, so RT75 Studio always writes that value back
     unchanged.
-  - Implemented in RT75 Studio and tested on the simulated keyboard; not yet run on the real one.
+  - Implemented in RT75 Studio and tested on the simulated keyboard, then verified on the real
+    keyboard (2026-10-15): values written from RT75 Studio showed the same in qmk.top for all
+    three timers, which confirms the byte order.
 - These writes were tested against the demo's simulated keyboard (packets, read-back, refusals),
   then verified on the real keyboard (2026-10-15): the polling-rate change with read-back and
   Undo, and switching profile 1 → 2 → 1 all worked as expected.
