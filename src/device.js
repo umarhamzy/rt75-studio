@@ -1,11 +1,12 @@
 // RY5088 protocol for the Yunzii RT75 Pro. See protocol-notes.md.
-// Reads go through query(), which only accepts READ_COMMANDS. The only write is the
-// per-key magnet command (0x65, single-key form) for actuation, release, Rapid Trigger
-// sensitivity and the RT bit of the key mode; send() rejects anything else, and every
-// packet in a batch is validated before the first one is sent.
+// Reads go through query(), which only accepts READ_COMMANDS. Writes go through send() with a
+// validator for their command: per-key magnet (0x65, single-key form), polling rate, profile,
+// sleep timers, key map and lighting. Every packet in a batch is validated before the first
+// one is sent.
 
 import { KEYS, DEFAULT_MATRIX, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX } from './layout.js';
 import { FUNCTIONS, MODIFIERS, HID_NAMES } from './actions.js';
+import { effectById, isOffered, decodeLighting, lightingBytes, lightingFields, MAX_LEVEL } from './lighting.js';
 
 const VID = 0x3151;
 // Matrix slots of real magnetic keys (the knob entries are excluded).
@@ -24,6 +25,7 @@ const CMD = {
   GET_USB_VERSION: 0x8f,
   GET_MAGNETISM: 0xe5,
   GET_FEATURE_LIST: 0xe6,
+  GET_LEDPARAM: 0x87,
 };
 const READ_COMMANDS = new Set(Object.values(CMD));
 const SET_MAGNETISM = 0x65;
@@ -191,7 +193,7 @@ export async function findGrantedKeyboard() {
 export async function readSettings(dev, onProgress = () => {}) {
   if (!dev.opened) await dev.open();
   const t = new Transport(dev);
-  const total = 9 + MAGNET_PARAMS.length;
+  const total = 10 + MAGNET_PARAMS.length;
   let done = 0;
   const step = label => onProgress(++done / total, label);
 
@@ -225,6 +227,8 @@ export async function readSettings(dev, onProgress = () => {}) {
     s.debounce = (await t.query([CMD.GET_DEBOUNCE]))[1];
     s.sleep = decodeSleep(await t.query([CMD.GET_SLEEPTIME]));
     step('Sleep timers');
+    s.lighting = decodeLighting(await t.query([CMD.GET_LEDPARAM]));
+    step('Lighting');
     step('Debounce');
 
     s.keymap = await t.readPages([CMD.GET_KEYMATRIX, s.profile, 0xff, 0, 0], 8);
@@ -264,6 +268,7 @@ export function settingsFromDump(d) {
     reportRateHz: d.reportRateHz,
     debounce: d.debounce,
     sleep: d.sleep,
+    lighting: d.lighting,
     keymap: d.keymap['0'],
     fnWin: d.fnWin,
     fnMac: d.fnMac,
@@ -659,5 +664,53 @@ export async function writeKeymap(dev, settings, edits, onProgress = () => {}) {
     }
     const mismatches = bad.map(p => ({ layer: p.layer, slot: p.slot, expected: p.action, actual: layers[p.layer].slice(p.slot * 4, p.slot * 4 + 4) }));
     return { layers, mismatches, retried };
+  });
+}
+
+// ---------- Lighting ----------
+// Main backlight only: the RT75 Pro's qmk.top entry has a lightLayout and no sideLightLayout.
+// [0x07, effect, 4 - speed, brightness, option << 4 | colour mode, r, g, b, Bit8 checksum]
+// (qmk.top setLightSetting, sendMsg(…, Bit8), then vendorSleep 100 ms). Read with 0x87 (Bit7).
+const SET_LEDPARAM = 0x07;
+
+function assertAllowedLightWrite(p) {
+  const fail = why => { throw new Error(`Blocked lighting write (${why}): ${[...p.slice(0, 9)].map(b => b.toString(16).padStart(2, '0')).join(' ')}`); };
+  if (p.length !== 64 || p[0] !== SET_LEDPARAM) fail('not the lighting command');
+  const e = effectById(p[1]);
+  if (!isOffered(e)) fail('effect not offered');
+  if (p[2] > MAX_LEVEL || p[3] > MAX_LEVEL) fail('speed or brightness out of range');
+  const option = p[4] >> 4, mode = p[4] & 15;
+  if (option >= (e.options?.length ?? 1)) fail('bad option');
+  if (e.key === 'LightUserPicture') {
+    if (mode !== 0 || p[5] !== 0 || p[6] !== 200 || p[7] !== 200) fail('bad custom-pattern bytes');
+  } else if (mode !== 7 && mode !== 8) fail('bad colour mode');
+  if (p[8] !== 255 - (p.slice(0, 8).reduce((a, b) => a + b, 0) & 0xff)) fail('checksum');
+  if (p.slice(9).some(b => b !== 0)) fail('unexpected bytes');
+}
+
+export function buildLightingPacket(light) {
+  const pkt = new Uint8Array(64);
+  pkt.set(lightingBytes(light));
+  pkt[8] = 255 - (pkt.slice(0, 8).reduce((a, b) => a + b, 0) & 0xff);
+  assertAllowedLightWrite(pkt);
+  return pkt;
+}
+
+// Writes the lighting setting, reads it back and re-sends once if it differs.
+// Returns { lighting (as read back), mismatches: [field…], retried }.
+export async function writeLighting(dev, settings, light) {
+  const pkt = buildLightingPacket(light);
+  return withDevice(dev, settings, async t => {
+    const write = async () => {
+      await t.send(pkt, null, assertAllowedLightWrite);
+      await sleep(300); // qmk.top waits 100 ms
+      return decodeLighting(await t.query([CMD.GET_LEDPARAM]));
+    };
+    const wrong = got => (got ? lightingFields(light).filter(f => got[f] !== light[f]) : ['effect']);
+    let got = await write();
+    let bad = wrong(got);
+    const retried = bad.length ? 1 : 0;
+    if (bad.length) { await sleep(500); got = await write(); bad = wrong(got); }
+    return { lighting: got, mismatches: bad, retried };
   });
 }

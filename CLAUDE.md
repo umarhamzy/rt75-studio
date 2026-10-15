@@ -27,7 +27,8 @@ touching device code.
 | `src/device.js` | Everything that touches HID: transport (wired and 2.4G dongle relay), reads, validated writes, live depth, keyboard-wide settings |
 | `src/app.js` | UI state and rendering: board, inspector/editor, pending edits, review dialog, Undo, live test, presets, keyboard section |
 | `src/layout.js` | RT75 key positions (from qmk.top) and the factory key matrix; `slot` = key-matrix index |
-| `src/demo.js` | Simulated keyboard (per-profile settings, polling rate, sleep timers, live reports) |
+| `src/lighting.js` | Lighting effects table (from qmk.top's RT75 entry), packet encode/decode, diffs |
+| `src/demo.js` | Simulated keyboard (per-profile settings, polling rate, sleep timers, lighting, live reports) |
 | `src/styles.css` | Theme tokens with light and dark modes |
 
 ## Rules that must not be broken
@@ -35,7 +36,8 @@ touching device code.
 1. **Find qmk.top's code path first and mirror it exactly** (packet layout, order, flags, delays).
    Record the evidence in protocol-notes.md.
 2. **Every outgoing packet passes an allowlist validator before anything is sent**:
-   `assertAllowedWrite` (per-key magnet), `assertAllowedKeyboardWrite`, the sleep validator, and the
+   `assertAllowedWrite` (per-key magnet), `assertAllowedKeyboardWrite`, the sleep validator,
+   `assertAllowedKeymapWrite`, `assertAllowedLightWrite`, and the
    read allowlist `READ_COMMANDS`. New commands get their own validator.
 3. **Writes go through review → write → read back → report mismatches → Undo.** No silent writes.
 4. **Never send:**
@@ -88,11 +90,9 @@ Dead-zone writes and presets have been tested in the simulation and demo only.
 **Key map editing (feature/key-remap):** base and Fn layers, read and written, with the Fn key and
 system keys locked. Verified on the real keyboard: reads, a base remap, an Fn-layer remap, a combo and a restore.
 
-**Was next: key remapping and Fn layers.** What's known so far (details in protocol-notes.md):
-- Key matrix read: `[0x8A, profile, 0xFF, page 0–7, sub]`, 4 bytes per slot. Plain key
-  `[0, 0, HID, 0]`; media `[3, 0, usage lo, hi]`; Fn `[10, 1, 0, 0]`; knob `[13, …]`.
-- Byte 4 (`sub`) is a sub-layer, not the profile.
-- Fn matrix read is `0x90`, with the OS (win 0 / mac 1) in byte 1. Single-key matrix write is
-  `setKeyConfigSimple` (`0x0A`) in the RY5088 base.
+**Lighting (feature/lighting):** main backlight read (`0x87`) and write (`0x07`, Bit8 checksum),
+with effect, brightness, speed, colour/rainbow and direction. Format decoded from qmk.top
+(protocol-notes.md, "Lighting"); the RT75 has no side light. Tested in the simulation and demo;
+**awaiting the user's check on the real keyboard.**
 
-**After that: lighting** (`0x07`/`0x08`, format not decoded).
+**Possible next steps:** custom lighting patterns (`0x0C`/`0x8C`), macros, mouse and mod-tap actions.

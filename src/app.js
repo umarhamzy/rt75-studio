@@ -3,9 +3,10 @@ import { decodeAction, encodeKey, splitKey, FUNCTIONS, RISKY, KEY_CHOICES, CODE_
 import {
   isSupported, requestKeyboard, findGrantedKeyboard, readSettings, settingsFromDump,
   writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, writeSleepTimes,
-  writeKeymap, isWritableAction, LOCKED_SLOTS,
+  writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting,
   LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS,
 } from './device.js';
+import { EFFECTS, effectById, isOffered, normalizeLighting, lightingDiff, lightingFields, hex, MAX_LEVEL } from './lighting.js';
 
 // ---------- Key naming ----------
 const HID = {
@@ -59,6 +60,7 @@ const state = {
   pending: new Map(),        // slot -> { field: raw value } differing from settings
   pendingKb: {},             // keyboard-wide edits, e.g. { reportRateHz: 8000 }
   pendingKeys: new Map(),    // key map edits: 'layer:slot' -> 4 action bytes
+  pendingLight: null,        // lighting setting to write, or null
   capture: null,             // { layer, slot } while waiting for a key press to assign
   picking: null,             // slot waiting for a Snap Tap partner click
   // "Release at the same point" / "Same for press and release" unticked by the user. Kept per
@@ -153,6 +155,8 @@ function renderBoard() {
   const actuations = s ? MAGNETIC.map(k => keyData(k).actuation) : [];
   const lo = Math.min(...actuations), hi = Math.max(...actuations);
   const pairs = s ? snapPairs() : new Map();
+  const led = s && state.view === 'lighting' ? ledPreview() : null;
+  board.classList.toggle('led-board', !!led);
 
   // The three knob entries share one physical knob.
   const knobKeys = KEYS.filter(k => k.knob);
@@ -162,7 +166,8 @@ function renderBoard() {
   knob.className = 'knob' + (state.knob ? ' is-selected' : '');
   place(knob, { x: kx, y: 0, w: kw, h: knobKeys[0].h });
   knob.setAttribute('aria-label', 'Volume knob');
-  knob.onclick = () => { state.knob = !state.knob; state.selected.clear(); refresh(); };
+  if (led) knob.tabIndex = -1;
+  else knob.onclick = () => { state.knob = !state.knob; state.selected.clear(); refresh(); };
   board.appendChild(knob);
 
   for (const key of MAGNETIC) {
@@ -221,6 +226,8 @@ function renderBoard() {
         if (a.changed) el.classList.add('km-changed');
         if (state.pendingKeys.has(`${state.layer}:${key.slot}`)) el.classList.add('is-pending');
         if (state.capture?.slot === key.slot) el.classList.add('is-capturing');
+      } else if (led) {
+        led.paint(el, key);
       }
       el.appendChild(value);
 
@@ -235,7 +242,10 @@ function renderBoard() {
     } else {
       el.setAttribute('aria-label', key.label);
     }
-    el.onclick = e => clickKey(key.slot, e.ctrlKey || e.metaKey || e.shiftKey);
+    if (led) {
+      el.tabIndex = -1; // lighting is keyboard-wide, so keys aren't selectable here
+      el.setAttribute('aria-hidden', 'true');
+    } else el.onclick = e => clickKey(key.slot, e.ctrlKey || e.metaKey || e.shiftKey);
     board.appendChild(el);
   }
   fitKeyLabels(board);
@@ -302,6 +312,13 @@ function renderLegend(lo, hi) {
         ${Object.entries(LAYERS).map(([id, l]) => `<button type="button" data-layer="${id}" aria-pressed="${state.layer === id}">${l.label}</button>`).join('')}
       </div><span class="swatch swatch-km"></span><span class="muted">changed from factory</span>`;
     el.querySelectorAll('[data-layer]').forEach(b => b.onclick = () => { state.layer = b.dataset.layer; refresh(); });
+  } else if (state.view === 'lighting') {
+    const l = currentLight();
+    const e = l && effectById(l.effect);
+    el.innerHTML = l
+      ? `<span class="swatch led-swatch" style="--sw:${l.rainbow || !e?.color ? 'conic-gradient(from 90deg, #f55, #fc4, #5e7, #4cf, #a6f, #f55)' : hex(l.color)}"></span>
+         <span>${e?.name ?? `Effect ${l.effect}`} · brightness ${l.brightness}/${MAX_LEVEL}</span><span class="muted">preview is approximate</span>`
+      : '<span class="muted">Lighting wasn’t read from this source.</span>';
   } else {
     el.innerHTML = '<span class="swatch swatch-snap"></span><span>Snap Tap pairs: the last key pressed wins</span>';
   }
@@ -309,7 +326,7 @@ function renderLegend(lo, hi) {
 
 function renderSelectionTools() {
   const el = $('selectTools');
-  if (!state.settings) { el.hidden = true; return; }
+  if (!state.settings || state.view === 'lighting') { el.hidden = true; return; }
   el.hidden = false;
   $('selectCount').textContent = state.selected.size ? `${state.selected.size} selected` : 'Ctrl/Shift-click to select several';
   $('btnClearSel').disabled = !state.selected.size;
@@ -351,14 +368,16 @@ function renderDevice() {
 // ---------- Pending bar ----------
 function renderPendingBar() {
   const edits = pendingEdits();
-  const n = edits.length, kb = kbChanges().length, km = keymapChanges().length;
+  const n = edits.length, kb = kbChanges().length, km = keymapChanges().length, lt = lightChange() ? 1 : 0;
   const settingsCount = edits.reduce((a, e) => a + Object.keys(e).length - 1, 0);
-  $('pendingBar').hidden = n === 0 && kb === 0 && km === 0;
+  $('pendingBar').hidden = n === 0 && kb === 0 && km === 0 && !lt;
   const parts = [];
   if (n) parts.push(`${settingsCount} unsaved change${settingsCount === 1 ? '' : 's'} on ${n} key${n === 1 ? '' : 's'}`);
   if (kb) parts.push(n ? `${kb} keyboard setting${kb === 1 ? '' : 's'}` : `${kb} unsaved keyboard setting${kb === 1 ? '' : 's'}`);
   if (km) parts.push(`${km} key mapping${km === 1 ? '' : 's'}`);
-  $('pendingText').textContent = parts.length === 1 && km && !n && !kb ? `${km} unsaved key mapping${km === 1 ? '' : 's'}` : parts.join(' + ');
+  if (lt) parts.push('lighting');
+  $('pendingText').textContent = parts.length === 1 && km && !n && !kb ? `${km} unsaved key mapping${km === 1 ? '' : 's'}`
+    : parts.length === 1 && lt ? 'Unsaved lighting change' : parts.join(' + ');
   $('btnReview').disabled = !editable();
   $('btnDiscard').disabled = state.busy;
 }
@@ -377,6 +396,7 @@ function common(datas, f) {
 function renderInspector() {
   const el = $('inspector');
   if (state.view === 'live' && state.settings) { renderLivePanel(); return; }
+  if (state.view === 'lighting' && state.settings) { renderLightingPanel(); return; }
   if (state.view === 'keymap' && state.settings && !state.knob && state.selected.size) { renderKeymapPanel(); return; }
   if (!state.settings || (!state.knob && !state.selected.size)) {
     el.innerHTML = '<p class="inspector-hint">Select a key to see its settings. Ctrl- or Shift-click to select several.</p>';
@@ -978,7 +998,7 @@ function renderLivePanel() {
   drawLive();
 }
 
-function hasAnyPending() { return pendingEdits().length > 0 || kbChanges().length > 0 || keymapChanges().length > 0; }
+function hasAnyPending() { return pendingEdits().length > 0 || kbChanges().length > 0 || keymapChanges().length > 0 || !!lightChange(); }
 
 // Keyboard-wide edits that differ from the keyboard: [{ field, label, from, to }].
 function kbChanges() {
@@ -1251,7 +1271,7 @@ function openReview() {
   $('reviewBody').innerHTML = `
     <p>These settings will be written to the keyboard (profile ${(state.settings.profile ?? 0) + 1}). Nothing else changes.</p>
     <div class="table-wrap"><table class="changes"><thead><tr><th>Key</th><th>Setting</th><th>Now</th><th>New</th></tr></thead>
-    <tbody>${changeRows(edits, (slot, f) => state.settings.magnet[f][slot])}${kbRows(kbChanges())}${kmRows(keymapChanges())}</tbody></table></div>
+    <tbody>${changeRows(edits, (slot, f) => state.settings.magnet[f][slot])}${kbRows(kbChanges())}${kmRows(keymapChanges())}${lightRows(lightChange())}</tbody></table></div>
     <label class="check"><input type="checkbox" id="chkBackup" checked> Download a backup of the current settings first</label>`;
   $('reviewStatus').textContent = '';
   $('reviewStatus').className = 'review-status';
@@ -1262,7 +1282,7 @@ function openReview() {
   $('reviewDialog').showModal();
 }
 
-async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChanges() }) {
+async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChanges(), light = lightChange() }) {
   const before = new Map(edits.map(e => [e.slot, Object.fromEntries(Object.keys(e).filter(f => f !== 'slot').map(f => [f, state.settings.magnet[f][e.slot]]))]));
   if (backup) downloadBackup();
   state.busy = true;
@@ -1304,18 +1324,27 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
       result.retried += km.retried;
       for (const m of km.mismatches) result.mismatches.push({ kb: true, label: `${keyBySlot(m.slot).label} (${LAYERS[m.layer].label})`, expected: actionLabel(m.layer, m.expected), actual: actionLabel(m.layer, m.actual) });
     }
+    if (light) {
+      status.textContent = 'Writing lighting…';
+      const lr = await writeLighting(state.dev, state.settings, light.to);
+      if (lr.lighting) state.settings.lighting = lr.lighting; // trust the read-back
+      state.pendingLight = null;
+      result.retried += lr.retried;
+      for (const f of lr.mismatches) result.mismatches.push({ kb: true, label: `Lighting ${LIGHT_LABELS[f].toLowerCase()}`, expected: fmtLight(f, light.to), actual: lr.lighting ? fmtLight(f, lr.lighting) : 'no reply' });
+    }
     if (result.mismatches.length) {
       status.className = 'review-status is-error';
       status.textContent = `Written and retried once, but ${result.mismatches.length} value(s) still read back differently: ` +
         result.mismatches.map(m => m.kb ? `${m.label} expected ${m.expected}, got ${m.actual}`
           : `${keyBySlot(m.slot).label} ${FIELD_LABELS[m.field]} expected ${fmt(m.field, m.expected)}, got ${fmt(m.field, m.actual)}`).join('; ');
     } else {
-      const n = edits.reduce((a, e) => a + Object.keys(e).length - 1, 0) + kb.length + keys.length;
+      const n = edits.reduce((a, e) => a + Object.keys(e).length - 1, 0) + kb.length + keys.length + (light?.fields.length ?? 0);
       status.className = 'review-status is-ok';
       status.textContent = `Done. All ${n} setting${n === 1 ? '' : 's'} written and confirmed by reading them back.` +
         (result.retried ? ` (${result.retried} needed a second try.)` : '');
     }
-    state.lastApplied = { undo: [...before].map(([slot, fields]) => ({ slot, ...fields })), undoKb: kb.map(c => ({ ...c, from: c.to, to: c.from })), undoKeys: keys.map(c => ({ ...c, from: c.to, to: c.from })) };
+    state.lastApplied = { undo: [...before].map(([slot, fields]) => ({ slot, ...fields })), undoKb: kb.map(c => ({ ...c, from: c.to, to: c.from })), undoKeys: keys.map(c => ({ ...c, from: c.to, to: c.from })),
+      undoLight: light && isOffered(effectById(light.from.effect)) ? { from: light.to, to: normalizeLighting(light.from), fields: light.fields } : null };
     $('btnApply').hidden = true;
     $('btnUndo').hidden = false;
     $('btnCancel').textContent = 'Close';
@@ -1342,12 +1371,13 @@ async function undoLast() {
   const allUndoKeys = state.lastApplied.undoKeys ?? [];
   const undoKeys = allUndoKeys.filter(c => isWritableAction(c.to, c.layer, c.slot));
   const skippedKeys = allUndoKeys.length - undoKeys.length;
+  const undoLight = state.lastApplied.undoLight ?? null;
   state.lastApplied = null;
   $('btnUndo').hidden = true;
   $('reviewBody').innerHTML = `<p>Restoring the previous values:</p>
     <div class="table-wrap"><table class="changes"><thead><tr><th>Key</th><th>Setting</th><th>Now</th><th>Restored</th></tr></thead>
-    <tbody>${changeRows(undo, (slot, f) => state.settings.magnet[f][slot])}${kbRows(undoKb)}${kmRows(undoKeys)}</tbody></table></div>${skippedKeys ? `<p class="hint-warn">${skippedKeys} key(s) had a macro, mouse or mod-tap action that RT75 Studio can’t write back; reassign those in qmk.top.</p>` : ''}`;
-  await applyEdits(undo, { backup: false, kb: undoKb, keys: undoKeys });
+    <tbody>${changeRows(undo, (slot, f) => state.settings.magnet[f][slot])}${kbRows(undoKb)}${kmRows(undoKeys)}${lightRows(undoLight)}</tbody></table></div>${skippedKeys ? `<p class="hint-warn">${skippedKeys} key(s) had a macro, mouse or mod-tap action that RT75 Studio can’t write back; reassign those in qmk.top.</p>` : ''}`;
+  await applyEdits(undo, { backup: false, kb: undoKb, keys: undoKeys, light: undoLight });
   $('btnUndo').hidden = true;
 }
 
@@ -1359,7 +1389,7 @@ function downloadBackup() {
     device: { productName: s.productName, viaDongle: s.viaDongle },
     raw: { id: id.map(b => b.toString(16).padStart(2, '0')).join(' ') },
     deviceId: s.deviceId, rfVersion: s.rfVersion, battery: s.battery,
-    featureListSupported: false, profile: s.profile, reportRateHz: s.reportRateHz, debounce: s.debounce, sleep: s.sleep,
+    featureListSupported: false, profile: s.profile, reportRateHz: s.reportRateHz, debounce: s.debounce, sleep: s.sleep, lighting: s.lighting,
     keymap: { 0: s.keymap }, fnWin: s.fnWin, fnMac: s.fnMac, magnet: s.magnet, savedAt: new Date().toISOString(),
   };
   const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
@@ -1368,6 +1398,173 @@ function downloadBackup() {
   a.download = `rt75-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// ---------- Lighting ----------
+const LIGHT_LABELS = { effect: 'Effect', brightness: 'Brightness', speed: 'Speed', option: 'Direction', rainbow: 'Colour mode', color: 'Colour' };
+const SWATCHES = [[0xff0000, 'Red'], [0xff8000, 'Orange'], [0xffff00, 'Yellow'], [0x00ff00, 'Green'], [0x00ffff, 'Cyan'], [0x0000ff, 'Blue'], [0xff00ff, 'Purple'], [0xffffff, 'White']];
+const LED_SECONDS = [6, 4.5, 3.2, 2.2, 1.4]; // preview cycle length for speed 0–4
+
+const currentLight = () => state.pendingLight ?? state.settings?.lighting ?? null;
+
+function lightChange() {
+  const from = state.settings?.lighting, to = state.pendingLight;
+  if (!from || !to) return null;
+  const fields = lightingDiff(from, to);
+  return fields.length ? { from, to, fields } : null;
+}
+
+const optionHeading = e => (e?.key === 'LightUserPicture' ? 'Pattern' : e?.key === 'LightMusicFollow2' ? 'Style' : 'Direction');
+
+// Plain-text value of one lighting field.
+function fmtLight(f, l) {
+  const e = effectById(l.effect);
+  if (f === 'effect') return e?.name ?? `Effect ${l.effect}`;
+  if (f === 'option') return e?.options?.[l.option] ?? String(l.option);
+  if (f === 'rainbow') return l.rainbow ? 'Rainbow' : 'Single colour';
+  if (f === 'color') return SWATCHES.find(([c]) => c === l.color)?.[1] ?? hex(l.color).toUpperCase();
+  return `${l[f]} of ${MAX_LEVEL}`;
+}
+
+function lightRows(c) {
+  if (!c) return '';
+  const cell = (f, l) => !lightingFields(l).includes(f) ? '<span class="muted">—</span>'
+    : (f === 'color' ? `<span class="swatch-dot" style="background:${hex(l.color)}"></span>` : '') + fmtLight(f, l);
+  return c.fields.map(f => `<tr><td>Lighting</td><td>${f === 'option' ? optionHeading(effectById(c.to.effect)) : LIGHT_LABELS[f]}</td>
+    <td>${cell(f, c.from)}</td><td><strong>${cell(f, c.to)}</strong></td></tr>`).join('');
+}
+
+// Brightness, speed and colour carry over between effects; returning to the keyboard's own effect
+// brings back its direction and speed, so trying effects and coming back leaves nothing pending.
+function setLight(patch, { quiet = false } = {}) {
+  const saved = state.settings.lighting, cur = currentLight();
+  let next;
+  if (patch.effect !== undefined && patch.effect !== cur.effect) {
+    const e = effectById(patch.effect), had = effectById(cur.effect);
+    next = patch.effect === saved.effect
+      ? { ...saved, brightness: cur.brightness, rainbow: cur.rainbow, color: cur.color }
+      : { ...cur, effect: patch.effect, option: 0, speed: e.speed ? (had?.speed ? cur.speed : 2) : 0 };
+  } else next = { ...cur, ...patch };
+  next = normalizeLighting(next);
+  state.pendingLight = lightingDiff(saved, next).length ? next : null;
+  if (quiet) { renderBoard(); renderPendingBar(); return; }
+  // Re-rendering replaces the buttons; keep keyboard focus on the one just used.
+  const a = document.activeElement;
+  const attr = a?.closest?.('#inspector') ? [...a.attributes].find(x => x.name.startsWith('data-')) : null;
+  refresh();
+  if (attr) $('inspector').querySelector(`[${attr.name}="${CSS.escape(attr.value)}"]`)?.focus();
+}
+
+const hash = n => ((n * 2654435761) >>> 0) / 2 ** 32;
+
+// Approximate board preview: colour (or a rainbow), brightness, and a motion pattern per effect.
+function ledPreview() {
+  const l = currentLight();
+  if (!l) return null;
+  const e = effectById(l.effect) ?? { key: '', motion: 'none', color: true, speed: false };
+  const secs = LED_SECONDS[e.speed ? l.speed : 2];
+  const rainbow = !e.color || l.rainbow;
+  const react = e.motion === 'react';
+  const level = l.brightness / MAX_LEVEL;
+  const spiral = e.key === 'LightSnake' && l.option === 1;
+  const phase = key => {
+    const kx = (key.x + key.w / 2) / LAYOUT_WIDTH, ky = (key.y + key.h / 2) / LAYOUT_HEIGHT;
+    const angle = (Math.atan2(ky - 0.5, (kx - 0.5) * LAYOUT_WIDTH / LAYOUT_HEIGHT) / (2 * Math.PI) + 1) % 1;
+    switch (spiral ? 'spin' : e.motion) {
+      case 'wave': return [1 - kx, kx, 1 - ky, ky][e.options ? l.option : 0] ?? 1 - kx;
+      case 'rows': case 'fall': return 1 - ky;
+      case 'radial': { const d = Math.min(1, Math.hypot(kx - 0.5, (ky - 0.5) * LAYOUT_HEIGHT / LAYOUT_WIDTH) * 1.8); return l.option ? d : 1 - d; }
+      case 'spin': return l.option ? angle : 1 - angle;
+      case 'twinkle': case 'react': return hash(key.slot + 1);
+      case 'none': case 'breathe': return kx;
+      default: return 0;
+    }
+  };
+  const anim = {
+    wave: rainbow ? 'hue' : 'pulse', rows: rainbow ? 'hue' : 'pulse', fall: 'pulse', radial: rainbow ? 'hue' : 'pulse',
+    spin: rainbow ? 'hue' : 'pulse', twinkle: 'twinkle', react: 'twinkle', breathe: 'breathe', cycle: 'hue',
+  }[spiral ? 'spin' : e.motion];
+  return {
+    paint(el, key) {
+      const p = phase(key);
+      el.classList.add('led-key');
+      if (level === 0) { el.classList.add('led-dark'); return; }
+      const c = rainbow ? `hsl(${Math.round((e.motion === 'cycle' ? 0 : p) * 360)} 90% 56%)` : hex(l.color);
+      el.style.setProperty('--led', c);
+      el.style.setProperty('--led-mix', `${Math.round(level * (react ? 30 : 64))}%`);
+      el.style.setProperty('--led-glow', `${Math.round(level * (react ? 20 : 55))}%`);
+      if (!anim) return;
+      // Delays come from a shared clock, so re-rendering the board doesn't restart the animation.
+      const cycle = anim === 'twinkle' ? secs * 1.6 : secs;
+      el.dataset.led = anim;
+      el.style.animationDuration = `${cycle}s`;
+      el.style.animationDelay = `${(-((performance.now() / 1000) % cycle) - p * cycle).toFixed(3)}s`;
+    },
+  };
+}
+
+function renderLightingPanel() {
+  const el = $('inspector');
+  const s = state.settings, l = currentLight();
+  if (!l) {
+    el.innerHTML = `<h2>Lighting</h2><p class="note">${s.source === 'device'
+      ? 'The keyboard didn’t report its lighting. Refresh to try again.'
+      : 'This file has no lighting settings. Connect the keyboard to see and change them.'}</p>`;
+    return;
+  }
+  const can = editable();
+  const e = effectById(l.effect);
+  const change = lightChange();
+  const dis = can ? '' : 'disabled';
+  const changed = f => (change?.fields.includes(f) ? ' is-changed' : '');
+  const revert = can && change ? '<button class="revert-chip" id="btnRevertLight" type="button" title="Discard the unsaved lighting change">Unsaved · Revert</button>' : '';
+  const levels = (attr, value, on) => `<div class="segmented segmented-sm level-picker" role="group">
+      ${Array.from({ length: MAX_LEVEL + 1 }, (_, i) => `<button type="button" data-${attr}="${i}" aria-pressed="${on && value === i}" ${can && on ? '' : 'disabled'}>${i}</button>`).join('')}
+    </div>`;
+  const offered = EFFECTS.filter(isOffered);
+  const effects = (isOffered(e) ? offered : [e ?? { id: l.effect, name: `Effect ${l.effect}`, motion: 'none' }, ...offered])
+    .map(x => `<button type="button" class="fx" data-fx="${x.id}" aria-pressed="${x.id === l.effect}" ${can && isOffered(x) ? '' : 'disabled'}>
+        <span class="fx-icon fx-${x.motion}" aria-hidden="true"></span><span class="fx-name">${x.name}</span></button>`).join('');
+  const hasColor = !!e?.color;
+  const swatches = `<button type="button" class="sw sw-rainbow" data-rainbow="1" aria-pressed="${hasColor && l.rainbow}" title="Rainbow" aria-label="Rainbow" ${can && hasColor ? '' : 'disabled'}></button>
+    ${SWATCHES.map(([c, name]) => `<button type="button" class="sw" data-color="${c}" style="--sw:${hex(c)}" aria-pressed="${hasColor && !l.rainbow && l.color === c}" title="${name}" aria-label="${name}" ${can && hasColor ? '' : 'disabled'}></button>`).join('')}
+    <label class="sw sw-custom${hasColor && !l.rainbow && !SWATCHES.some(([c]) => c === l.color) ? ' is-on' : ''}" title="Custom colour">
+      <input type="color" id="ledColor" value="${hex(l.color)}" aria-label="Custom colour" ${can && hasColor ? '' : 'disabled'}></label>`;
+  const notes = [];
+  if (e && !isOffered(e)) notes.push(`<strong>${e.name}</strong> was set in qmk.top and runs from its ${e.key === 'LightMusicFollow2' ? 'music' : 'screen'} sync, so RT75 Studio doesn’t set it. Picking another effect replaces it.`);
+  if (!e) notes.push(`The keyboard reports effect ${l.effect}, which qmk.top doesn’t list for the RT75 Pro.`);
+  if (e?.key === 'LightUserPicture') notes.push('Shows one of five per-key colour patterns stored on the keyboard. Edit the patterns in qmk.top.');
+  if (e?.motion === 'react') notes.push('Lights keys up as you type.');
+  if (!can) notes.push(s.source === 'device' ? (state.busy ? 'Writing…' : 'Editing is off while the live test runs.') : 'Viewing a file. Connect the keyboard to change the lighting.');
+
+  el.innerHTML = `<div class="insp-head"><h2>Lighting</h2>${revert}</div>
+    <p class="sub">Backlight effect for the whole keyboard</p>
+    <h3 class="lt-head${changed('effect')}">Effect</h3>
+    <div class="fx-grid" role="group" aria-label="Effect">${effects}</div>
+    <div class="lt-row">
+      <div><h3 class="lt-head${changed('brightness')}">Brightness</h3>${levels('bright', l.brightness, true)}</div>
+      <div><h3 class="lt-head${changed('speed')}">Speed <span class="muted">${e?.speed ? 'slow → fast' : 'fixed'}</span></h3>${levels('speed', l.speed, !!e?.speed)}</div>
+    </div>
+    <h3 class="lt-head${changed('rainbow') || changed('color')}">Colour ${hasColor ? '' : '<span class="muted">set by the effect</span>'}</h3>
+    <div class="sw-row${hasColor ? '' : ' is-off'}" role="group" aria-label="Colour">${swatches}</div>
+    ${e?.options ? `<h3 class="lt-head${changed('option')}">${optionHeading(e)}</h3>
+      <div class="segmented segmented-sm opt-picker" role="group" aria-label="${optionHeading(e)}">
+        ${e.options.map((o, i) => `<button type="button" data-opt="${i}" aria-pressed="${l.option === i}" ${can && isOffered(e) ? '' : 'disabled'}>${o}</button>`).join('')}
+      </div>` : ''}
+    ${notes.map(n => `<p class="note">${n}</p>`).join('')}`;
+
+  if (!can) return;
+  el.querySelectorAll('[data-fx]').forEach(b => b.onclick = () => setLight({ effect: Number(b.dataset.fx) }));
+  el.querySelectorAll('[data-bright]').forEach(b => b.onclick = () => setLight({ brightness: Number(b.dataset.bright) }));
+  el.querySelectorAll('[data-speed]').forEach(b => b.onclick = () => setLight({ speed: Number(b.dataset.speed) }));
+  el.querySelectorAll('[data-opt]').forEach(b => b.onclick = () => setLight({ option: Number(b.dataset.opt) }));
+  el.querySelectorAll('[data-color]').forEach(b => b.onclick = () => setLight({ rainbow: false, color: Number(b.dataset.color) }));
+  el.querySelector('[data-rainbow]')?.addEventListener('click', () => setLight({ rainbow: true }));
+  // While the picker is open only the board updates, so the input isn't replaced mid-drag.
+  const picker = $('ledColor');
+  picker?.addEventListener('input', () => setLight({ rainbow: false, color: parseInt(picker.value.slice(1), 16) }, { quiet: true }));
+  picker?.addEventListener('change', () => setLight({ rainbow: false, color: parseInt(picker.value.slice(1), 16) }));
+  $('btnRevertLight')?.addEventListener('click', () => { state.pendingLight = null; refresh(); });
 }
 
 // ---------- Keyboard-wide settings ----------
@@ -1478,7 +1675,8 @@ function refresh() {
 
 function setView(view) {
   if (view !== 'live' && state.live) stopLive();
-  const inspectorChanges = (view === 'live') !== (state.view === 'live');
+  const own = v => v === 'live' || v === 'lighting'; // views with their own inspector panel
+  const inspectorChanges = own(view) || own(state.view);
   state.view = view;
   document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === view)));
   if (inspectorChanges) refresh(); else renderBoard();
@@ -1491,6 +1689,7 @@ function load(settings, dev = null) {
   state.pending.clear();
   state.pendingKb = {};
   state.pendingKeys.clear();
+  state.pendingLight = null;
   state.capture = null;
   state.lastApplied = null;
   refresh();
@@ -1553,7 +1752,7 @@ $('btnSample').onclick = async () => {
 };
 $('btnSelectAll').onclick = () => { state.knob = false; state.selected = new Set(MAGNETIC.map(k => k.slot)); refresh(); };
 $('btnClearSel').onclick = () => { state.selected.clear(); refresh(); };
-$('btnDiscard').onclick = () => { state.pending.clear(); state.pendingKb = {}; state.pendingKeys.clear(); state.capture = null; refresh(); };
+$('btnDiscard').onclick = () => { state.pending.clear(); state.pendingKb = {}; state.pendingKeys.clear(); state.pendingLight = null; state.capture = null; refresh(); };
 $('btnReview').onclick = openReview;
 $('btnApply').onclick = () => applyEdits(pendingEdits(), { backup: $('chkBackup')?.checked });
 $('btnUndo').onclick = undoLast;

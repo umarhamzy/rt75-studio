@@ -18,6 +18,8 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
   let profile = 0, rateCode = 3; // 1000 Hz
   // Sleep timers (seconds, uint16 LE): BT backlight 120, 2.4G backlight 120, BT deep 1680, 2.4G deep 1680
   let sleepBytes = Uint8Array.from([120, 0, 120, 0, 0x90, 0x06, 0x90, 0x06]);
+  // Lighting reply bytes 1–7: Flowing Light, speed 2, brightness 3, rainbow, white (FAFFFA).
+  let ledBytes = Uint8Array.from([4, 2, 3, 0x08, 0xfa, 0xff, 0xfa]);
   const store = () => profiles[profile];
 
   // Vendor report interface: while 0x1B 01 is on, push a repeating press cycle
@@ -70,6 +72,7 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
       if (last[0] === 0x03) { rateCode = last[2]; return; }
       if (last[0] === 0x04) { profile = last[1]; return; }
       if (last[0] === 0x11) { sleepBytes = last.slice(8, 16); return; }
+      if (last[0] === 0x07) { ledBytes = last.slice(1, 8); return; }
       if (last[0] === 0x0a) { keymaps[last[1]].splice(last[2] * 4, 4, ...last.slice(8, 12)); return; }
       if (last[0] === 0x10) { fnLayers[last[2]][last[1]].splice(last[3] * 4, 4, ...last.slice(8, 12)); return; }
       if (last[0] === 0x65 && ignore.some(x => x.slot === last[3] && x.param === last[1])) return;
@@ -87,6 +90,7 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
         case 0xe6: r.set([0xe6]); break;          // no feature list, like the real keyboard
         case 0x84: r.set([0x84, profile]); break;
         case 0x91: r.set([0x91]); r.set(sleepBytes, 8); break;
+        case 0x87: r.set([0x87, ...ledBytes]); break;
         case 0x83: r.set([0x83, 0, rateCode]); break;
         case 0x86: r.set([0x86, 0]); break;
         case 0x8a: r.set(keymaps[last[1]].slice(last[3] * 64, last[3] * 64 + 64)); break;

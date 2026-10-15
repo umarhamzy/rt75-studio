@@ -76,6 +76,18 @@ Edits go through the same review → write → read-back → Undo flow. Locked, 
 Keys holding a macro, mouse or mod-tap action from qmk.top can be overwritten, with a warning,
 but Undo can't restore those actions.
 
+## Lighting
+
+The **Lighting** tab sets the backlight for the whole keyboard:
+- **effect:** the 19 effects qmk.top offers for the RT75 Pro, by the same names
+- **brightness** and **speed** (0–4)
+- **colour:** rainbow, a preset or any custom colour
+- **direction** or pattern, for effects that have one
+
+The board shows an approximate animated preview. Changes go through the same review → write →
+read-back → Undo flow. Music Sync and Light Shadow run from qmk.top's own sync, so RT75 Studio
+shows them when they're active but doesn't set them.
+
 ## Live test
 
 The **Live test** tab shows how deep the key you're pressing goes, live, against that key's
@@ -95,7 +107,7 @@ be exported to a file and imported again. Demo-mode presets are stored separatel
 
 ## Safety
 
-- **Reads** use only `0x80 0x83 0x84 0x86 0x8A 0x8F 0xE5 0xE6`, plus 2.4G dongle status and routing.
+- **Reads** use only `0x80 0x83 0x84 0x86 0x87 0x8A 0x8F 0x90 0x91 0xE5 0xE6`, plus 2.4G dongle status and routing.
 - **Writes** use only the single-key magnet command (`0x65`, params 0/1/2/3/6/7/9/251), the
   same form qmk.top uses for one key. Every packet is validated before the first is sent:
   - real key slots only (not the knob or unused slots)
@@ -116,10 +128,13 @@ be exported to a file and imported again. Demo-mode presets are stored separatel
   - the slot's exact factory value
 
   It refuses the Fn key, the knob, macros, mouse, mod-tap and unknown actions.
+- **Lighting writes** are only `[07, effect, speed, brightness, option/colour mode, r, g, b]`
+  with qmk.top's byte-8 checksum. The validator allows only the offered effects, values 0–4,
+  each effect's own options, and colour mode single colour or rainbow.
 - **The live test** sends only `0x1B 01` and `0x1B 00`, which turn depth reporting on and off.
   The same toggle is used by qmk.top's Simulation Test. It's turned off when you stop, leave the
   tab, refresh or close the page.
 - qmk.top's all-keys depth read only works inside switch calibration mode, which rewrites
   calibration, so it isn't used.
-- Bulk table writes, key remapping, lighting, calibration, firmware and reset commands aren't
-  implemented.
+- Bulk table writes, side lights, custom lighting patterns, calibration, firmware and reset
+  commands aren't implemented.

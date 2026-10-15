@@ -460,3 +460,38 @@ Two paths exist in qmk.top/v4. RT75 Studio uses only the first.
 - **Verified on the real keyboard (2026-10-15):** RT75 Studio's Key map (base and Windows Fn layer)
   matched qmk.top's Custom Keys and Fn Layer pages. The user's Fn layer has a qmk.top macro on
   Fn+F (`9,0,0,0` → Macro 1).
+
+## Lighting (main backlight)
+
+Source: RY5088 base `setLightSetting` / `getLightSetting`, and the RT75PRO device entry in the v4
+bundle (`lightLayout: v`, **no `sideLightLayout`**, so `0x08`/`0x88` side-light commands don't
+apply to this keyboard).
+
+- **Read** `0x87` (Bit7). Reply: `[0x87, effect, 4 - speed, brightness, option << 4 | mode, r, g, b]`.
+- **Write** `[0x07, effect, 4 - speed, brightness, option << 4 | mode, r, g, b, cs]` with the
+  **Bit8** checksum: `cs = byte 8 = 255 - (sum(bytes 0..7) & 0xFF)`. qmk.top sends it with
+  `sendMsg(…, Bit8)` (10 ms before), then `vendorSleep` (100 ms). No reply is read.
+- **Speed and brightness are 0–4** (`maxSpeed 4`, `maxValue 4`, `MAXSPEED = 4`); speed goes out
+  inverted.
+- **Colour mode (low nibble of byte 4):** 7 = `NORMAL` (colour in bytes 5–7), 8 = `DAZZLE` (rainbow).
+  Reads can also return 0–6, which qmk.top shows as preset colours (`COMMONCOLOR`: red, orange,
+  yellow, green, cyan, blue, magenta). White `FFFFFF` is written as `FAFFFA` and read back as white.
+- **Special cases in qmk.top:** Custom (`LightUserPicture`, 13) sends `option << 4` and
+  colour `00 C8 C8`; Music Sync (`LightMusicFollow2`, 22) uses mode 0 for rainbow and 4 otherwise;
+  Light Shadow (`LightScreenColor`, 21) sends byte 4 = 0. Effects without colour controls (Spectrum
+  Cycle) go out as mode 7 with the stored colour.
+- **RT75 effect list** (qmk.top order, id, controls):
+  Flowing Light 4 (speed, colour, Right/Left/Down/Up) · Water Ripple 5 · Star Dots 6 · Flow 7
+  (Zigzag/Spiral) · Shadow 8 · Layers 9 · Sine Wave 10 · Color Spring 11 (Outward/Inward) ·
+  Silent Snow 19 · Neon 12 (Right/Left) · Radiant 14 · Loop 15 (Counter-clockwise/Clockwise) ·
+  Color Grid 16 · Snowfall 17 · Meteor 18 · Constant Light 1 (no speed) · Breathing 2 ·
+  Spectrum Cycle 3 (no colour) · Custom 13 (Pattern 1–5, no speed or colour) · Music Sync 22 ·
+  Light Shadow 21. "Off" (0) is **not** in the RT75 list.
+- **RT75 Studio** offers all of these except Music Sync and Light Shadow, which depend on qmk.top's
+  host-side music/screen sync; it shows them if the keyboard reports one. The validator
+  (`assertAllowedLightWrite`) checks the effect, ranges, option count, colour mode, the Custom
+  bytes, the Bit8 checksum and that bytes 9–63 are zero. Each write is read back and re-sent once
+  if it differs.
+- **Unknowns:** whether lighting is stored per profile (RT75 Studio re-reads it on profile switch
+  either way) and what brightness 0 looks like on the keyboard. Editing Custom patterns
+  (`0x0C`/`0x8C` user picture) is not implemented.
