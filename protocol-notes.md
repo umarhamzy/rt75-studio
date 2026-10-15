@@ -450,6 +450,8 @@ Two paths exist in qmk.top/v4. RT75 Studio uses only the first.
     - The user doesn't recall editing Fn keys on profiles 2–4 in RT75 Studio.
     - Fn reads and writes now always use layer 0, and `query()` and the key-map validator refuse
       any other.
+    - **Verified on the real keyboard (2026-10-15, fix/fn-layer):** RT75 Studio shows the same Fn
+      layer on every profile.
   - An all-zero Fn slot means "no Fn action".
 - **Key-map writes verified on the real keyboard (2026-10-15):** a base remap, an Fn · Windows remap,
   a captured combo and a restore all wrote, read back and matched qmk.top.
