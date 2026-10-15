@@ -651,6 +651,7 @@ function renderKeymapPanel() {
     return `<div class="km-row${id === state.layer ? ' is-current' : ''}">
       <span class="km-layer">${l.label}</span>
       <span class="km-now">${a.label}${a.changed ? ' <span class="km-badge">changed</span>' : ''}</span>
+      ${a.note ? `<span class="km-factory muted">${a.note}</span>` : ''}
       ${a.kind === 'unknown' ? `<span class="km-factory muted">A built-in keyboard function qmk.top doesn’t name either (bytes ${a.raw}); left untouched.</span>` : ''}
       <span class="km-factory muted">Factory: ${factoryLabel(id, key.slot)}</span>
     </div>`;

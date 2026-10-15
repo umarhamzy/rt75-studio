@@ -45,7 +45,7 @@ export const FUNCTIONS = [
   ['Keyboard', 'Fn', [10, 1, 0, 0]], ['Keyboard', 'Win key lock', [10, 3, 0, 0]], ['Keyboard', 'Switch to Windows', [10, 5, 0, 0]],
   ['Keyboard', 'Switch to Mac', [10, 5, 1, 0]], ['Keyboard', 'Switch OS (cycle)', [10, 5, 3, 0]], ['Keyboard', 'Keyboard lock', [10, 7, 0, 0]],
   ['Keyboard', 'Check battery', [10, 8, 0, 0]], ['Keyboard', 'WASD ↔ arrows', [10, 10, 0, 0]], ['Keyboard', 'Power saving', [10, 12, 0, 0]],
-  ['Keyboard', 'Fn lock', [10, 13, 0, 0]], ['Keyboard', 'Knob: volume ↔ brightness', [10, 15, 0, 0]], ['Keyboard', 'Alt+Tab', [10, 20, 0, 0]],
+  ['Keyboard', 'Fn lock', [10, 13, 0, 0]], ['Keyboard', 'Volume ↔ keyboard brightness', [10, 15, 0, 0]], ['Keyboard', 'Alt+Tab', [10, 20, 0, 0]],
   ['Keyboard', 'Reset to factory', [10, 2, 0, 0]],
   ['Profile', 'Next profile', [8, 0, 1, 0]], ['Profile', 'Previous profile', [8, 0, 2, 0]], ['Profile', 'Cycle profiles', [8, 0, 3, 0]],
   ['Profile', 'Profile 1', [8, 0, 4, 0]], ['Profile', 'Profile 2', [8, 0, 4, 1]], ['Profile', 'Profile 3', [8, 0, 4, 2]],
@@ -65,7 +65,7 @@ const FN_SHORT = {
   'Web forward': 'Fwd', 'Web refresh': 'Reload', 'Web favourites': 'Fav', 'Launchpad (Mac)': 'Launch', 'Task view': 'Tasks',
   'Siri (Mac)': 'Siri', 'System sleep': 'Sleep', 'System wake': 'Wake', 'System power': 'Power', Fn: 'Fn', 'Win key lock': 'Win lock',
   'Switch to Windows': 'Win OS', 'Switch to Mac': 'Mac OS', 'Switch OS (cycle)': 'OS', 'Keyboard lock': 'KB lock',
-  'Check battery': 'Battery', 'WASD ↔ arrows': 'WASD', 'Power saving': 'Eco', 'Fn lock': 'Fn lock', 'Knob: volume ↔ brightness': 'Knob ⇄',
+  'Check battery': 'Battery', 'WASD ↔ arrows': 'WASD', 'Power saving': 'Eco', 'Fn lock': 'Fn lock', 'Volume ↔ keyboard brightness': 'Vol⇄Bri',
   'Alt+Tab': 'Alt+Tab', 'Reset to factory': 'Reset', 'Next profile': 'Prof +', 'Previous profile': 'Prof −',
   'Cycle profiles': 'Prof', 'Profile 1': 'P1', 'Profile 2': 'P2', 'Profile 3': 'P3', 'Profile 4': 'P4', 'Bluetooth 1': 'BT 1',
   'Bluetooth 2': 'BT 2', 'Bluetooth 3': 'BT 3', '2.4G': '2.4G', Wired: 'USB', 'Cycle connection': 'Conn', 'Lighting on/off': 'Light',
@@ -77,6 +77,11 @@ const FN_SHORT = {
 export const RISKY = new Set(['Reset to factory', 'Keyboard lock', 'System power']);
 
 const FN_BY_BYTES = new Map(FUNCTIONS.map(([group, name, b]) => [b.join(','), { group, name }]));
+
+// Functions whose name comes only from qmk.top's tables and whose effect on the RT75 isn't confirmed.
+export const FN_NOTES = {
+  'Volume ↔ keyboard brightness': 'qmk.top’s name for it (音量<->键盘亮度). What it does on the RT75 Pro isn’t confirmed: it doesn’t switch the knob, which changes mode by holding it down.',
+};
 const MOUSE = { 240: 'Left click', 241: 'Right click', 242: 'Middle click', 243: 'Mouse back', 244: 'Mouse forward', 245: 'Wheel', 246: 'Wheel', 247: 'Wheel', 248: 'Wheel' };
 
 export const keyName = code => HID_NAMES[code] ?? `Key 0x${code.toString(16)}`;
@@ -91,7 +96,7 @@ export function decodeAction(b, { mac = false } = {}) {
   const key = b.join(',');
   if (key === '0,0,0,0' || key === '0,0,3,0') return { kind: 'disabled', label: 'Disabled', short: '—', editable: true };
   const fn = FN_BY_BYTES.get(key);
-  if (fn) return { kind: 'function', label: fn.name, short: FN_SHORT[fn.name] ?? fn.name, group: fn.group, editable: true };
+  if (fn) return { kind: 'function', label: fn.name, short: FN_SHORT[fn.name] ?? fn.name, group: fn.group, note: FN_NOTES[fn.name], editable: true };
   if (b[0] === 0) {
     const codes = b.slice(1).filter(Boolean);
     const name = mac ? c => macName(keyName(c)) : keyName;

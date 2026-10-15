@@ -443,10 +443,14 @@ Two paths exist in qmk.top/v4. RT75 Studio uses only the first.
   - Fn key: `[0x10, os, profile, slot, 0, 0, 0, cs, a0..a3]` (`setFnKeyConfigSimple`, no save byte).
 - **Action encodings** are in `src/actions.js`.
 - **qmk.top keeps two function-name tables (K0 and h5/uc) whose byte values overlap with different
-  meanings.** For the RT75 Pro its UI uses h5. Example: `10,15,0,0` is "Caps Swap" in K0, but
-  "音量<->键盘亮度" (knob: volume ↔ keyboard brightness) in h5, and that is what the RT75's
-  Fn+R-Alt does. The knob's extra slots 94–97 (`13,2,1/2,0` and `13,3,1/2,0`) are the knob's
-  brightness/speed mode.
+  meanings.** For the RT75 Pro its UI uses h5.
+  - Example: `10,15,0,0` (the RT75's Fn+R-Alt) is "Caps Swap" in K0, but "音量<->键盘亮度"
+    ("volume ↔ keyboard brightness") in h5. RT75 Studio uses qmk.top's h5 name.
+  - **The effect is unconfirmed.** The user tested it: it does **not** switch the knob. The knob
+    changes mode (brightness, lighting presets, volume, mute) by holding it down. Treat the name as
+    a label only.
+  - The knob's extra slots 94–97 (`13,2,1/2,0` and `13,3,1/2,0`) decode as lighting brightness and
+    speed up/down, presumably the actions for the knob's lighting modes; not confirmed.
 - **Unidentified actions:** qmk.top shows anything it can't identify (`ConfigUnknown`) as a red,
   non-selectable "System Key" (系统按键). It also applies that label to keys it locks
   (`needDisableKeys`). The RT75's Fn+Tab `10,4,0,0` is one of these; RT75 Studio labels it
