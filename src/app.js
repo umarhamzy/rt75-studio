@@ -1,7 +1,7 @@
 import { KEYS, DEFAULT_MATRIX, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX, LAYOUT_WIDTH, LAYOUT_HEIGHT, DEVICE_ID } from './layout.js';
 import { decodeAction, encodeKey, splitKey, FUNCTIONS, RISKY, KEY_CHOICES, CODE_TO_HID, MODIFIERS, keyName, DISABLED, HID_NAMES } from './actions.js';
 import {
-  isSupported, requestKeyboard, findGrantedKeyboard, readSettings, settingsFromDump, setDongleTiming,
+  isSupported, requestKeyboard, findGrantedKeyboard, readSettings, readKeymaps, settingsFromDump, setDongleTiming,
   writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, writeSleepTimes,
   writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot,
   LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS,
@@ -97,7 +97,7 @@ function keyData(key) {
   const m = s.magnet, i = key.slot, step = s.travelStep;
   const modeByte = raw(i, 'mode') ?? 0;
   const modeId = modeByte & 0x7f;
-  const current = s.keymap.slice(i * 4, i * 4 + 4);
+  const current = s.keymap?.slice(i * 4, i * 4 + 4); // undefined until the key map is loaded
   const factory = DEFAULT_MATRIX.slice(i * 4, i * 4 + 4);
   const partnerSlot = modeId === 7 ? raw(i, 'snapPartner') : undefined;
   return {
@@ -111,8 +111,8 @@ function keyData(key) {
     bottomDeadZone: raw(i, 'bottomDeadZone') / step,
     topDeadZone: (raw(i, 'topDeadZone') ?? 0) / step,
     switchType: switchName(m.switchType?.[i]),
-    action: actionName(current),
-    remapped: current.join() !== factory.join(),
+    action: current ? actionName(current) : null,
+    remapped: current ? current.join() !== factory.join() : null,
     pending: hasPending(i),
     partner: partnerSlot !== undefined && partnerSlot !== 0xff ? keyBySlot(partnerSlot) : undefined,
   };
@@ -373,7 +373,7 @@ function renderStats() {
     ['Actuation points', acts.join(' · ') + ' mm'],
     ['Rapid Trigger', `${rt} key${rt === 1 ? '' : 's'}`],
     ['Snap Tap', `${pairs} pair${pairs === 1 ? '' : 's'}`],
-    ['Remapped', `${remapped} key${remapped === 1 ? '' : 's'}`],
+    ['Remapped', state.settings.keymap ? `${remapped} key${remapped === 1 ? '' : 's'}` : 'Open Key map to load'],
   ];
   $('stats').innerHTML = items.map(([k, v]) => `<div class="stat"><span class="stat-label">${k}</span><span class="stat-value">${v}</span></div>`).join('');
 }
@@ -451,7 +451,7 @@ function renderInspector() {
   const single = keys.length === 1 ? datas[0] : null;
   const title = single ? keys[0].label : `${keys.length} keys`;
   const subtitle = single
-    ? `${single.remapped ? `Remapped to <strong>${single.action}</strong>` : `Sends ${single.action}`} · ${single.mode}`
+    ? `${single.action === null ? '' : single.remapped ? `Remapped to <strong>${single.action}</strong> · ` : `Sends ${single.action} · `}${single.mode}`
     : keys.map(k => k.label).join(', ');
 
   // Revert sits in the title row so showing it never moves the controls below.
@@ -740,7 +740,7 @@ const kmRows = changes => changes.map(c => `<tr><td>${keyBySlot(c.slot).label}</
 
 function layerAction(layer, slot) {
   const b = layerBytes(layer, slot);
-  if (!b) return { none: true, short: '?', label: 'Not read (this dump has no Fn layers)' };
+  if (!b) return { none: true, short: '·', label: state.settings?.source === 'device' ? 'Loading…' : 'Not in this file' };
   const factory = LAYERS[layer].defaults.slice(slot * 4, slot * 4 + 4);
   const changed = b.join() !== factory.join();
   if (LAYERS[layer].fn && b.every(x => x === 0)) return { none: true, changed, short: '·', label: 'No Fn action', bytes: b, factory };
@@ -2098,7 +2098,7 @@ async function changeProfile(index) {
     setBusy(0.05, `Switching to profile ${index + 1}…`);
     const now = await switchProfile(dev, s, index);
     if (now !== index) throw new Error(`the keyboard stayed on profile ${now + 1}`);
-    const settings = await readSettings(dev, (f, label) => setBusy(f, `Reading profile ${index + 1}: ${label}…`));
+    const settings = await readSettings(dev, (f, label) => setBusy(f, `Reading profile ${index + 1}: ${label}…`), { keymaps: false });
     settings.demo = s.demo;
     state.busy = false;
     load(settings, dev);
@@ -2132,6 +2132,33 @@ function setView(view) {
   state.view = view;
   document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === view)));
   refresh(); // the inspector differs per view (key map, macros, lighting, live test)
+  if (KEYMAP_VIEWS.has(view)) ensureKeymaps();
+}
+
+// The key map and Fn layers (24 reads, slow over 2.4G) are read the first time a tab needs them.
+const KEYMAP_VIEWS = new Set(['keymap', 'macros']);
+let keymapsLoading = null;
+function ensureKeymaps() {
+  const s = state.settings;
+  if (!s || s.source !== 'device' || s.keymap || !state.dev) return Promise.resolve();
+  if (keymapsLoading) return keymapsLoading;
+  keymapsLoading = (async () => {
+    if (state.live) await stopLive();
+    state.busy = true;
+    refresh();
+    try {
+      const km = await readKeymaps(state.dev, s, (f, label) => setBusy(f, `Reading ${label}…`));
+      if (state.settings === s) Object.assign(s, km); // ignore if the keyboard was re-read meanwhile
+    } catch (e) {
+      showError('Couldn’t read the key map: ' + e.message + ' Switch tabs to try again.');
+    } finally {
+      state.busy = false;
+      setBusy(null);
+      keymapsLoading = null;
+      refresh();
+    }
+  })();
+  return keymapsLoading;
 }
 
 function load(settings, dev = null) {
@@ -2147,6 +2174,7 @@ function load(settings, dev = null) {
   state.capture = null;
   state.lastApplied = null;
   refresh();
+  if (KEYMAP_VIEWS.has(state.view)) setTimeout(ensureKeymaps, 0); // after the caller's own busy state clears
 }
 
 function showError(msg) {
@@ -2174,7 +2202,7 @@ async function connect() {
     const dev = state.settings?.source === 'device' ? (await findGrantedKeyboard() ?? await requestKeyboard()) : await requestKeyboard();
     if (!dev) return;
     setBusy(0, 'Connecting…');
-    const settings = await readSettings(dev, (f, label) => setBusy(f, `Reading ${label}…`));
+    const settings = await readSettings(dev, (f, label) => setBusy(f, `Reading ${label}…`), { keymaps: false });
     if (settings.deviceId !== DEVICE_ID) showError(`This device reports ID ${settings.deviceId}, not the RT75 Pro (2865). Values may be wrong, so editing is off.`);
     load(settings, settings.deviceId === DEVICE_ID ? dev : null);
   } catch (e) {
@@ -2244,7 +2272,7 @@ async function startDemo() {
   const ignore = (new URLSearchParams(location.search).get('ignore') ?? '').split(',').filter(Boolean)
     .map(s => { const [slot, param] = s.split(':').map(Number); return { slot, param }; });
   const dev = createDemoDevice(dump, { ignore });
-  const settings = await readSettings(dev);
+  const settings = await readSettings(dev, () => {}, { keymaps: false });
   settings.demo = true;
   load(settings, dev);
   $('btnConnect').hidden = true;

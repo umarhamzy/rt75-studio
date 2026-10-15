@@ -225,68 +225,100 @@ export async function findGrantedKeyboard() {
   return devices.find(d => d.vendorId === VID && d.collections.some(c => c.featureReports.length)) ?? null;
 }
 
-// Reads everything the keyboard view needs. onProgress(fraction, label) is optional.
-export async function readSettings(dev, onProgress = () => {}) {
-  if (!dev.opened) await dev.open();
-  const t = new Transport(dev);
-  const started = Date.now();
-  const total = 10 + MAGNET_PARAMS.length;
-  let done = 0;
-  const step = label => onProgress(++done / total, label);
+// Device operations run one at a time: each opens the keyboard, works, and closes it again, so
+// two at once (say, loading the key map while a write runs) would trip over each other.
+let deviceQueue = Promise.resolve();
+function exclusive(fn) {
+  const run = deviceQueue.then(fn, fn);
+  deviceQueue = run.catch(() => {});
+  return run;
+}
 
-  try {
-    const s = { productName: dev.productName, viaDongle: t.viaDongle, battery: undefined };
-    if (t.viaDongle) {
-      const st = await t.dongleStatus();
-      if (!st.keyboardOnline) throw new Error('Keyboard is asleep or out of range. Press a key and try again.');
-      s.battery = st.battery;
+const MAGNET_LABELS = {
+  mode: 'Key modes', actuation: 'Actuation points', release: 'Release points', bottomDeadZone: 'Dead zones',
+  rtPress: 'Rapid Trigger', rtRelease: 'Rapid Trigger', topDeadZone: 'Dead zones', snapPartner: 'Snap Tap',
+  switchType: 'Switch types',
+};
+const STARTUP_READS = 8 + MAGNET_PARAMS.reduce((a, p) => a + p[2], 0); // single reads + magnet pages
+const KEYMAP_READS = 8 + 16; // base layer + two Fn layers
+
+// Reads everything the keyboard view needs. onProgress(fraction, label) is optional; the label
+// names what is being read now. With { keymaps: false } the base layer and Fn layers (24 reads)
+// are left out (settings.keymap etc. stay undefined) and can be read later with readKeymaps.
+export function readSettings(dev, onProgress = () => {}, { keymaps = true } = {}) {
+  return exclusive(async () => {
+    if (!dev.opened) await dev.open();
+    const t = new Transport(dev);
+    const started = Date.now();
+    const expected = STARTUP_READS + (keymaps ? KEYMAP_READS : 0);
+    const reading = label => onProgress(Math.min(1, t.reads / expected), label);
+
+    try {
+      const s = { productName: dev.productName, viaDongle: t.viaDongle, battery: undefined };
+      if (t.viaDongle) {
+        reading('Keyboard status');
+        const st = await t.dongleStatus();
+        if (!st.keyboardOnline) throw new Error('Keyboard is asleep or out of range. Press a key and try again.');
+        s.battery = st.battery;
+      }
+
+      reading('Device ID');
+      const id = await t.query([CMD.GET_USB_VERSION]);
+      if (id[0] !== CMD.GET_USB_VERSION) throw new Error('Keyboard did not answer the ID query.');
+      s.deviceId = new DataView(id.buffer).getUint32(1, true);
+      s.usbVersion = (id[8] << 8 | id[7]) || undefined;
+
+      reading('Firmware');
+      const rf = await t.query([CMD.GET_RF_VERSION]);
+      s.rfVersion = rf[0] === CMD.GET_RF_VERSION ? ((rf[2] << 8 | rf[1]) || undefined) : undefined;
+      const fl = await t.query([CMD.GET_FEATURE_LIST]);
+      const precision = fl[1] === 0xaa ? { 0: '0.01mm', 1: '0.005mm', 2: '0.001mm' }[fl[2]] : undefined;
+      s.travelStep = travelStep(precision, s.usbVersion, s.rfVersion);
+
+      reading('Profile and polling rate');
+      s.profile = (await t.query([CMD.GET_PROFILE]))[1];
+      s.reportRateHz = REPORT_RATES[(await t.query([CMD.GET_REPORT_RATE]))[2]];
+      reading('Debounce and sleep timers');
+      s.debounce = (await t.query([CMD.GET_DEBOUNCE]))[1];
+      s.sleep = decodeSleep(await t.query([CMD.GET_SLEEPTIME]));
+      reading('Lighting');
+      s.lighting = decodeLighting(await t.query([CMD.GET_LEDPARAM]));
+
+      if (keymaps) Object.assign(s, await readLayers(t, s.profile, reading));
+
+      s.magnet = {};
+      for (const [param, name, pages, wide] of MAGNET_PARAMS) {
+        reading(MAGNET_LABELS[name] ?? name);
+        const bytes = await t.readPages([CMD.GET_MAGNETISM, param, 1, 0], pages);
+        s.magnet[name] = wide ? u16(bytes) : bytes;
+      }
+      onProgress(1, 'Done');
+      s.source = 'device';
+      s.loadStats = { ms: Date.now() - started, reads: t.reads, timing: t.viaDongle ? dongleTiming : 'usb' };
+      return s;
+    } finally {
+      try { await dev.close(); } catch { /* already closed */ }
     }
+  });
+}
 
-    const id = await t.query([CMD.GET_USB_VERSION]);
-    if (id[0] !== CMD.GET_USB_VERSION) throw new Error('Keyboard did not answer the ID query.');
-    s.deviceId = new DataView(id.buffer).getUint32(1, true);
-    s.usbVersion = (id[8] << 8 | id[7]) || undefined;
-    step('Device ID');
+// Base layer of the profile, then the shared Fn layers ([0x90, os, Fn layer 0, 0xFF, page]).
+async function readLayers(t, profile, reading = () => {}) {
+  reading('Key map');
+  const keymap = await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, 0], 8);
+  reading('Fn layers');
+  const fnWin = await readFnLayer(t, 0);
+  const fnMac = await readFnLayer(t, 1);
+  return { keymap, fnWin, fnMac };
+}
 
-    const rf = await t.query([CMD.GET_RF_VERSION]);
-    s.rfVersion = rf[0] === CMD.GET_RF_VERSION ? ((rf[2] << 8 | rf[1]) || undefined) : undefined;
-    step('Firmware');
-
-    const fl = await t.query([CMD.GET_FEATURE_LIST]);
-    const precision = fl[1] === 0xaa ? { 0: '0.01mm', 1: '0.005mm', 2: '0.001mm' }[fl[2]] : undefined;
-    s.travelStep = travelStep(precision, s.usbVersion, s.rfVersion);
-    step('Features');
-
-    s.profile = (await t.query([CMD.GET_PROFILE]))[1];
-    step('Profile');
-    s.reportRateHz = REPORT_RATES[(await t.query([CMD.GET_REPORT_RATE]))[2]];
-    step('Polling rate');
-    s.debounce = (await t.query([CMD.GET_DEBOUNCE]))[1];
-    s.sleep = decodeSleep(await t.query([CMD.GET_SLEEPTIME]));
-    step('Sleep timers');
-    s.lighting = decodeLighting(await t.query([CMD.GET_LEDPARAM]));
-    step('Lighting');
-    step('Debounce');
-
-    s.keymap = await t.readPages([CMD.GET_KEYMATRIX, s.profile, 0xff, 0, 0], 8);
-    // Fn layers: [0x90, os (0 = Windows, 1 = Mac), profile, 0xFF, page]; the page is in byte 4 here.
-    s.fnWin = await readFnLayer(t, 0);
-    s.fnMac = await readFnLayer(t, 1);
-    step("Fn layers");
-    step('Key map');
-
-    s.magnet = {};
-    for (const [param, name, pages, wide] of MAGNET_PARAMS) {
-      const bytes = await t.readPages([CMD.GET_MAGNETISM, param, 1, 0], pages);
-      s.magnet[name] = wide ? u16(bytes) : bytes;
-      step(name);
-    }
-    s.source = 'device';
-    s.loadStats = { ms: Date.now() - started, reads: t.reads, timing: t.viaDongle ? dongleTiming : 'usb' };
-    return s;
-  } finally {
-    try { await dev.close(); } catch { /* already closed */ }
-  }
+// Reads the key map and Fn layers on their own (24 reads), for loading them when they're needed.
+// Returns { keymap, fnWin, fnMac }.
+export function readKeymaps(dev, settings, onProgress = () => {}) {
+  return withDevice(dev, settings, t => {
+    const base = t.reads;
+    return readLayers(t, settings.profile, label => onProgress(Math.min(1, (t.reads - base) / KEYMAP_READS), label));
+  });
 }
 
 // Builds the same shape from a dump.html JSON export, for offline viewing.
@@ -307,7 +339,7 @@ export function settingsFromDump(d) {
     debounce: d.debounce,
     sleep: d.sleep,
     lighting: d.lighting,
-    keymap: d.keymap['0'],
+    keymap: d.keymap?.['0'],
     fnWin: d.fnWin,
     fnMac: d.fnMac,
     magnet: d.magnet,
@@ -526,17 +558,19 @@ function assertAllowedKeyboardWrite(p) {
   }
 }
 
-async function withDevice(dev, settings, fn) {
-  if (!dev.opened) await dev.open();
-  const t = new Transport(dev);
-  try {
-    if (t.viaDongle && !(await t.dongleStatus()).keyboardOnline) throw new Error('Keyboard is asleep or out of range. Press a key and try again.');
-    const id = await t.query([CMD.GET_USB_VERSION]);
-    if (new DataView(id.buffer).getUint32(1, true) !== settings.deviceId) throw new Error('A different keyboard is connected. Refresh first.');
-    return await fn(t);
-  } finally {
-    try { await dev.close(); } catch { /* already closed */ }
-  }
+function withDevice(dev, settings, fn) {
+  return exclusive(async () => {
+    if (!dev.opened) await dev.open();
+    const t = new Transport(dev);
+    try {
+      if (t.viaDongle && !(await t.dongleStatus()).keyboardOnline) throw new Error('Keyboard is asleep or out of range. Press a key and try again.');
+      const id = await t.query([CMD.GET_USB_VERSION]);
+      if (new DataView(id.buffer).getUint32(1, true) !== settings.deviceId) throw new Error('A different keyboard is connected. Refresh first.');
+      return await fn(t);
+    } finally {
+      try { await dev.close(); } catch { /* already closed */ }
+    }
+  });
 }
 
 // Sets the polling rate and reads it back. Returns the rate the keyboard reports.

@@ -310,6 +310,13 @@ So every read costs at least ~0.25 s on 2.4G, and a full RT75 Studio load (60 re
   tooltip shows the read count and timing.
 - **Tests:** `tests/dongle.test.mjs` uses a simulated dongle (routing once, no fixed waits in fast
   mode, slow and dead dongles, writes, classic timing).
+- **The key map loads later:** startup reads 36 times instead of 60. The base layer and Fn layers
+  (24 reads) load the first time the Key map or Macros tab opens (`readKeymaps`), and again after a
+  profile switch while on those tabs. Until then the "Remapped" count says "Open Key map to load".
+- **Progress labels** name what is being read now. Before, they showed the last finished step, so
+  "Debounce" stayed on screen through the 24 key-map reads.
+- **One operation at a time:** all device operations (`readSettings`, everything through
+  `withDevice`) queue behind each other, so a key-map load can't overlap a write.
 - **Measured on the real keyboard (user, 2026-10-15):** a full load over 2.4G took **5.0 s** with
   the fast timing and **24.7 s** with `?dongle=classic` (qmk.top's timing). That's about 5× faster,
   and the settings loaded normally.

@@ -78,6 +78,8 @@ touching device code.
   created there by Git Bash.
 - **Long inline `node -e` or heredoc scripts containing backticks break in the shell tool.** Write
   a script file, or use the Edit tool.
+- **Git Bash rewrites arguments that start with `//`** (MSYS path conversion: `// Foo` becomes `/ Foo`).
+  Prefix the command with `MSYS_NO_PATHCONV=1` when passing comment markers to a script.
 - **The browser pane sometimes switches to a static file preview after an edit.** Navigate back to
   http://127.0.0.1:5180/?demo.
 - Demo presets use their own storage key (`rt75-studio-presets-demo-2865`).
