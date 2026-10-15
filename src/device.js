@@ -17,6 +17,7 @@ const CMD = {
   GET_REPORT_RATE: 0x83,
   GET_PROFILE: 0x84,
   GET_DEBOUNCE: 0x86,
+  GET_SLEEPTIME: 0x91,
   GET_KEYMATRIX: 0x8a,
   GET_USB_VERSION: 0x8f,
   GET_MAGNETISM: 0xe5,
@@ -188,7 +189,7 @@ export async function findGrantedKeyboard() {
 export async function readSettings(dev, onProgress = () => {}) {
   if (!dev.opened) await dev.open();
   const t = new Transport(dev);
-  const total = 7 + MAGNET_PARAMS.length;
+  const total = 8 + MAGNET_PARAMS.length;
   let done = 0;
   const step = label => onProgress(++done / total, label);
 
@@ -220,6 +221,8 @@ export async function readSettings(dev, onProgress = () => {}) {
     s.reportRateHz = REPORT_RATES[(await t.query([CMD.GET_REPORT_RATE]))[2]];
     step('Polling rate');
     s.debounce = (await t.query([CMD.GET_DEBOUNCE]))[1];
+    s.sleep = decodeSleep(await t.query([CMD.GET_SLEEPTIME]));
+    step('Sleep timers');
     step('Debounce');
 
     s.keymap = await t.readPages([CMD.GET_KEYMATRIX, s.profile, 0xff, 0, 0], 8);
@@ -507,3 +510,42 @@ export async function switchProfile(dev, settings, index) {
     return (await t.query([CMD.GET_PROFILE]))[1];
   });
 }
+
+// ---------- Sleep timers ----------
+// [0x11, 0…, checksum, BT backlight-off, 2.4G backlight-off, BT deep sleep, 2.4G deep sleep],
+// each uint16 LE seconds at bytes 8–15 (qmk.top setSleepTime / getSleepTime, read 0x91).
+// RT75 Pro ranges: backlight-off 0 (never) to 18 h; BT deep sleep 10 s to 18 h. 2.4G deep sleep
+// is not offered for this keyboard and is always written back unchanged.
+const SET_SLEEPTIME = 0x11;
+const SLEEP_FIELDS = ['time_bt', 'time_24', 'deepTime_bt', 'deepTime_24'];
+export const SLEEP_LIMITS = { time_bt: [0, 64800], time_24: [0, 64800], deepTime_bt: [10, 64800] };
+
+function decodeSleep(r) {
+  if (r[0] !== CMD.GET_SLEEPTIME) return undefined;
+  return Object.fromEntries(SLEEP_FIELDS.map((f, i) => [f, r[8 + i * 2] | (r[9 + i * 2] << 8)]));
+}
+
+function assertAllowedSleepWrite(p, sleep) {
+  const fail = why => { throw new Error(`Blocked write (${why})`); };
+  if (p.length !== 64 || p[0] !== SET_SLEEPTIME) fail('not the sleep command');
+  if (p.slice(1, 7).some(b => b !== 0) || p.slice(16).some(b => b !== 0)) fail('unexpected bytes');
+  if (p[7] !== 255 - (p.slice(0, 7).reduce((a, b) => a + b, 0) & 0xff)) fail('checksum');
+  for (const [f, [lo, hi]] of Object.entries(SLEEP_LIMITS)) {
+    const v = sleep[f];
+    if (!Number.isInteger(v) || v < lo || v > hi) fail(`${f} ${v} outside ${lo}–${hi}`);
+  }
+}
+
+// Writes all four timers (unchanged ones as read) and reads them back.
+export async function writeSleepTimes(dev, settings, sleep) {
+  const full = { ...settings.sleep, ...sleep };
+  const bytes = SLEEP_FIELDS.flatMap(f => [full[f] & 0xff, (full[f] >> 8) & 0xff]);
+  const pkt = encode([SET_SLEEPTIME, 0, 0, 0, 0, 0, 0, 0, ...bytes]);
+  assertAllowedSleepWrite(pkt, full);
+  return withDevice(dev, settings, async t => {
+    await t.send(pkt, null, p => assertAllowedSleepWrite(p, full));
+    await sleep_(300);
+    return decodeSleep(await t.query([CMD.GET_SLEEPTIME]));
+  });
+}
+const sleep_ = ms => new Promise(r => setTimeout(r, ms));
