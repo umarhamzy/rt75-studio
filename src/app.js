@@ -1111,7 +1111,7 @@ function renderKeyboardSettings() {
   if (!s) return;
   const can = editable();
   const rate = state.pendingKb.reportRateHz ?? s.reportRateHz;
-  const ratePending = kbChanges().length > 0;
+  const ratePending = kbChanges().some(c => c.field === 'reportRateHz');
   el.innerHTML = `
     <div class="kb-item">
       <span class="stat-label">Profile</span>
@@ -1137,7 +1137,7 @@ function renderKeyboardSettings() {
     </div>` : ''}
     ${s.source !== 'device' ? '<p class="note kb-note">Connect the keyboard to change these.</p>' : ''}`;
   el.querySelectorAll('[data-sleep]').forEach(inp => inp.onchange = () => {
-    const field = inp.dataset.sleep, [lo, hi] = SLEEP_LIMITS[field];
+    const field = inp.dataset.sleep, [lo, hi] = uiSleepLimits(field);
     if (inp.value === '') return;
     const sec = Math.min(hi, Math.max(lo, Math.round(Number(inp.value) * 60)));
     if (sec === s.sleep[field]) delete state.pendingKb[field]; else state.pendingKb[field] = sec;
@@ -1151,12 +1151,19 @@ function renderKeyboardSettings() {
   };
 }
 
+// The inputs work in whole minutes, so deep sleep starts at 1 minute (the keyboard allows 10 s;
+// a minimum of 10/60 made the browser's arrows step 0.17, 1.17, …).
+function uiSleepLimits(field) {
+  const [lo, hi] = SLEEP_LIMITS[field];
+  return [lo > 0 ? Math.max(lo, 60) : 0, hi];
+}
+
 function sleepInput(field, label, can) {
   const s = state.settings, sec = state.pendingKb[field] ?? s.sleep[field];
-  const [lo, hi] = SLEEP_LIMITS[field];
+  const [lo, hi] = uiSleepLimits(field);
   const pending = state.pendingKb[field] !== undefined && state.pendingKb[field] !== s.sleep[field];
   return `<label class="sleep-field${pending ? ' is-pending' : ''}"><span>${label}</span>
-    <input type="number" data-sleep="${field}" min="${+(lo / 60).toFixed(2)}" max="${hi / 60}" step="1" value="${+(sec / 60).toFixed(2)}" ${can ? '' : 'disabled'}>
+    <input type="number" data-sleep="${field}" min="${lo / 60}" max="${hi / 60}" step="1" value="${+(sec / 60).toFixed(2)}" ${can ? '' : 'disabled'}>
     <span class="muted">${fmtSecs(sec)}</span></label>`;
 }
 
