@@ -1,12 +1,14 @@
 import { KEYS, DEFAULT_MATRIX, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX, LAYOUT_WIDTH, LAYOUT_HEIGHT, DEVICE_ID } from './layout.js';
-import { decodeAction, encodeKey, splitKey, FUNCTIONS, RISKY, KEY_CHOICES, CODE_TO_HID, MODIFIERS, keyName, DISABLED } from './actions.js';
+import { decodeAction, encodeKey, splitKey, FUNCTIONS, RISKY, KEY_CHOICES, CODE_TO_HID, MODIFIERS, keyName, DISABLED, HID_NAMES } from './actions.js';
 import {
   isSupported, requestKeyboard, findGrantedKeyboard, readSettings, settingsFromDump,
   writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, writeSleepTimes,
-  writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting,
+  writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot,
   LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS,
 } from './device.js';
 import { EFFECTS, effectById, isOffered, normalizeLighting, lightingDiff, lightingFields, hex, MAX_LEVEL } from './lighting.js';
+import { MACRO_MODES, MOUSE_BUTTONS, MAX_DELAY, MAX_REPEAT, MACRO_BYTES, stepLabel, macroSummary, macroProblem, macroSize, heldAtEnd } from './macros.js';
+import { loadLibrary, saveLibrary, newId, isOutdated, uniqueName, exportLibrary, parseLibraryFile, validSlot } from './library.js';
 
 // ---------- Key naming ----------
 const HID = {
@@ -61,6 +63,10 @@ const state = {
   pendingKb: {},             // keyboard-wide edits, e.g. { reportRateHz: 8000 }
   pendingKeys: new Map(),    // key map edits: 'layer:slot' -> 4 action bytes
   pendingLight: null,        // lighting setting to write, or null
+  library: [],               // macro library (this browser): [{ id, name, repeat, steps, slot?, written? }]
+  pendingMacroWrites: new Map(), // macro slot -> library macro id to write there
+  macroDraft: null,          // macro open in the editor dialog
+  recording: null,           // { last: timestamp } while the editor records keys
   capture: null,             // { layer, slot } while waiting for a key press to assign
   picking: null,             // slot waiting for a Snap Tap partner click
   // "Release at the same point" / "Same for press and release" unticked by the user. Kept per
@@ -226,6 +232,17 @@ function renderBoard() {
         if (a.changed) el.classList.add('km-changed');
         if (state.pendingKeys.has(`${state.layer}:${key.slot}`)) el.classList.add('is-pending');
         if (state.capture?.slot === key.slot) el.classList.add('is-capturing');
+      } else if (state.view === 'macros') {
+        // Keys that run a macro show its name; the rest are dimmed.
+        const b = layerBytes(state.layer, key.slot);
+        if (b && b[0] === 9) {
+          const { entry } = macroForSlot(b[2]);
+          value.textContent = entry?.name ?? `Slot ${b[2] + 1}`;
+          value.title = entry ? `${entry.name} · ${MACRO_MODES[b[1]]?.name ?? ''}` : `Macro slot ${b[2] + 1}, made elsewhere`;
+          el.classList.add(entry ? 'mc-key' : 'mc-elsewhere');
+          if (state.pendingKeys.has(`${state.layer}:${key.slot}`)) el.classList.add('is-pending');
+          if (entry) el.dataset.macroId = entry.id;
+        } else el.classList.add('dim');
       } else if (led) {
         led.paint(el, key);
       }
@@ -245,6 +262,10 @@ function renderBoard() {
     if (led) {
       el.tabIndex = -1; // lighting is keyboard-wide, so keys aren't selectable here
       el.setAttribute('aria-hidden', 'true');
+    } else if (state.view === 'macros') {
+      // Clicking a key that runs a library macro opens that macro; other keys do nothing here.
+      if (el.dataset.macroId) el.onclick = () => openMacroEditor(libById(el.dataset.macroId));
+      else el.tabIndex = -1;
     } else el.onclick = e => clickKey(key.slot, e.ctrlKey || e.metaKey || e.shiftKey);
     board.appendChild(el);
   }
@@ -312,6 +333,11 @@ function renderLegend(lo, hi) {
         ${Object.entries(LAYERS).map(([id, l]) => `<button type="button" data-layer="${id}" aria-pressed="${state.layer === id}">${l.label}</button>`).join('')}
       </div><span class="swatch swatch-km"></span><span class="muted">changed from factory</span>`;
     el.querySelectorAll('[data-layer]').forEach(b => b.onclick = () => { state.layer = b.dataset.layer; refresh(); });
+  } else if (state.view === 'macros') {
+    el.innerHTML = `<div class="segmented segmented-sm" role="group" aria-label="Layer">
+        ${Object.entries(LAYERS).map(([id, l]) => `<button type="button" data-layer="${id}" aria-pressed="${state.layer === id}">${l.label}</button>`).join('')}
+      </div><span class="swatch swatch-mc"></span><span class="muted">runs a macro · click to edit it</span>`;
+    el.querySelectorAll('[data-layer]').forEach(b => b.onclick = () => { state.layer = b.dataset.layer; refresh(); });
   } else if (state.view === 'lighting') {
     const l = currentLight();
     const e = l && effectById(l.effect);
@@ -326,7 +352,7 @@ function renderLegend(lo, hi) {
 
 function renderSelectionTools() {
   const el = $('selectTools');
-  if (!state.settings || state.view === 'lighting') { el.hidden = true; return; }
+  if (!state.settings || state.view === 'lighting' || state.view === 'macros') { el.hidden = true; return; }
   el.hidden = false;
   $('selectCount').textContent = state.selected.size ? `${state.selected.size} selected` : 'Ctrl/Shift-click to select several';
   $('btnClearSel').disabled = !state.selected.size;
@@ -368,16 +394,18 @@ function renderDevice() {
 // ---------- Pending bar ----------
 function renderPendingBar() {
   const edits = pendingEdits();
-  const n = edits.length, kb = kbChanges().length, km = keymapChanges().length, lt = lightChange() ? 1 : 0;
+  const n = edits.length, kb = kbChanges().length, km = keymapChanges().length, lt = lightChange() ? 1 : 0, mw = macroWrites().length;
   const settingsCount = edits.reduce((a, e) => a + Object.keys(e).length - 1, 0);
-  $('pendingBar').hidden = n === 0 && kb === 0 && km === 0 && !lt;
+  $('pendingBar').hidden = n === 0 && kb === 0 && km === 0 && !lt && !mw;
   const parts = [];
   if (n) parts.push(`${settingsCount} unsaved change${settingsCount === 1 ? '' : 's'} on ${n} key${n === 1 ? '' : 's'}`);
   if (kb) parts.push(n ? `${kb} keyboard setting${kb === 1 ? '' : 's'}` : `${kb} unsaved keyboard setting${kb === 1 ? '' : 's'}`);
   if (km) parts.push(`${km} key mapping${km === 1 ? '' : 's'}`);
   if (lt) parts.push('lighting');
+  if (mw) parts.push(`${mw} macro${mw === 1 ? '' : 's'}`);
   $('pendingText').textContent = parts.length === 1 && km && !n && !kb ? `${km} unsaved key mapping${km === 1 ? '' : 's'}`
-    : parts.length === 1 && lt ? 'Unsaved lighting change' : parts.join(' + ');
+    : parts.length === 1 && lt ? 'Unsaved lighting change'
+    : parts.length === 1 && mw ? `${mw} macro${mw === 1 ? '' : 's'} to write` : parts.join(' + ');
   $('btnReview').disabled = !editable();
   $('btnDiscard').disabled = state.busy;
 }
@@ -397,6 +425,7 @@ function renderInspector() {
   const el = $('inspector');
   if (state.view === 'live' && state.settings) { renderLivePanel(); return; }
   if (state.view === 'lighting' && state.settings) { renderLightingPanel(); return; }
+  if (state.view === 'macros' && state.settings) { renderLibraryPanel(); return; }
   if (state.view === 'keymap' && state.settings && !state.knob && state.selected.size) { renderKeymapPanel(); return; }
   if (!state.settings || (!state.knob && !state.selected.size)) {
     el.innerHTML = '<p class="inspector-hint">Select a key to see its settings. Ctrl- or Shift-click to select several.</p>';
@@ -690,8 +719,15 @@ function keymapChanges() {
   }).filter(c => c.from && c.to.join() !== c.from.join());
 }
 
-const actionLabel = (layer, bytes) => (LAYERS[layer].fn && bytes.every(b => b === 0) ? 'No Fn action' : decodeAction(bytes, { mac: layer === 'fnMac' }).label);
-const kmRows = changes => changes.map(c => `<tr><td>${keyBySlot(c.slot).label}</td><td>${LAYERS[c.layer].label}</td><td>${actionLabel(c.layer, c.from)}</td><td><strong>${actionLabel(c.layer, c.to)}</strong></td></tr>`).join('');
+const actionLabel = (layer, bytes) => {
+  if (LAYERS[layer].fn && bytes.every(b => b === 0)) return 'No Fn action';
+  if (bytes[0] === 9) { // a macro: use its library name when RT75 Studio knows it
+    const entry = macroForSlot(bytes[2]).entry;
+    return `${entry ? `“${entry.name}”` : `Macro slot ${bytes[2] + 1}`} · ${MACRO_MODES[bytes[1]]?.name ?? `mode ${bytes[1]}`}`;
+  }
+  return decodeAction(bytes, { mac: layer === 'fnMac' }).label;
+};
+const kmRows = changes => changes.map(c => `<tr><td>${keyBySlot(c.slot).label}</td><td>${LAYERS[c.layer].label}</td><td>${escapeHtml(actionLabel(c.layer, c.from))}</td><td><strong>${escapeHtml(actionLabel(c.layer, c.to))}</strong></td></tr>`).join('');
 
 function layerAction(layer, slot) {
   const b = layerBytes(layer, slot);
@@ -706,6 +742,370 @@ function factoryLabel(layer, slot) {
   const f = LAYERS[layer].defaults.slice(slot * 4, slot * 4 + 4);
   if (LAYERS[layer].fn && f.every(x => x === 0)) return 'No Fn action';
   return decodeAction(f, { mac: layer === 'fnMac' }).label;
+}
+
+// ---------- Macro library ----------
+// Named macros live in RT75 Studio's library (this browser); the keyboard only holds their steps in
+// numbered slots and can't give them back. Keys point at slots with [9, mode, slot, 0].
+const validMacroKey = c => c in HID_NAMES;
+const fmtMs = ms => (ms >= 1000 ? `${+(ms / 1000).toFixed(2)} s` : `${ms} ms`);
+const macroLength = m => `${m.steps.length} step${m.steps.length === 1 ? '' : 's'}, ${fmtMs(m.steps.reduce((t, s) => t + s.delay, 0))}`;
+const libById = id => state.library.find(e => e.id === id);
+const persistLibrary = () => { if (!saveLibrary(state.library, !!state.settings?.demo)) showError('Couldn’t save the macro library in this browser (storage is blocked or full).'); };
+
+// Library macro for a slot: a pending write to that slot first, then the macro written there.
+function macroForSlot(slot) {
+  const pendingId = state.pendingMacroWrites.get(slot);
+  if (pendingId) return { entry: libById(pendingId), pending: true };
+  return { entry: state.library.find(e => e.slot === slot), pending: false };
+}
+
+// Keys (on the current profile's base layer and the Fn layers) that run a slot, with unsaved edits.
+function slotUsers(slot) {
+  const users = [];
+  for (const layer of Object.keys(LAYERS)) {
+    for (const key of MAGNETIC) {
+      const b = layerBytes(layer, key.slot);
+      if (b && b[0] === 9 && b[2] === slot) users.push({ key, layer });
+    }
+  }
+  return users;
+}
+const userLabel = u => `${u.layer === 'base' ? '' : 'Fn+'}${u.key.label}${u.layer === 'fnMac' ? ' (Mac)' : ''}`;
+
+// Slots keys use that no library macro claims: made in qmk.top, or before the library existed.
+function elsewhereSlots() {
+  const slots = new Map();
+  for (const layer of Object.keys(LAYERS)) {
+    for (const key of MAGNETIC) {
+      const b = layerBytes(layer, key.slot);
+      if (!b || b[0] !== 9 || macroForSlot(b[2]).entry) continue;
+      if (!slots.has(b[2])) slots.set(b[2], []);
+      slots.get(b[2]).push({ key, layer });
+    }
+  }
+  return [...slots].sort((a, b) => a[0] - b[0]);
+}
+
+// Queued macro writes: [{ slot, entry, macro }].
+function macroWrites() {
+  return [...state.pendingMacroWrites]
+    .map(([slot, id]) => ({ slot, entry: libById(id) }))
+    .filter(w => w.entry)
+    .map(w => ({ ...w, macro: { repeat: w.entry.repeat, steps: w.entry.steps } }))
+    .sort((a, b) => a.slot - b.slot);
+}
+function macroWriteRows(writes) {
+  return writes.map(w => {
+    const before = w.before ?? (w.entry.slot === w.slot && w.entry.written ? w.entry.written : null);
+    const users = slotUsers(w.slot).map(userLabel);
+    return `<tr><td>Macro slot ${w.slot + 1}${users.length ? `<br><span class="muted">used by ${escapeHtml(users.join(', '))}</span>` : ''}</td><td>“${escapeHtml(w.entry.name)}”</td>
+      <td>${before ? macroLength(before) : '<span class="muted">unknown</span>'}</td><td><strong>${macroLength(w.macro)}</strong></td></tr>`;
+  }).join('');
+}
+
+// Key map: what a macro key runs.
+function macroCardHtml(bytes) {
+  const slot = bytes[2];
+  const { entry, pending } = macroForSlot(slot);
+  const mode = MACRO_MODES[bytes[1]]?.name ?? `Mode ${bytes[1]}`;
+  if (!entry) {
+    return `<div class="macro-card"><div class="macro-head"><strong>Macro slot ${slot + 1}</strong><span class="muted">${mode}</span></div>
+      <p class="muted macro-empty">Made outside RT75 Studio (for example in qmk.top), so its name and steps aren’t known here. The Macros tab can re-create it.</p></div>`;
+  }
+  return `<div class="macro-card${pending ? ' is-pending' : ''}">
+    <div class="macro-head"><strong>${escapeHtml(entry.name)}${pending ? ' <span class="km-badge km-badge-pending">not written yet</span>' : ''}</strong>
+      <span class="muted">${mode}${bytes[1] === 0 ? ` · ${entry.repeat}×` : ''} · ${macroLength(entry)}</span></div>
+    ${entry.steps.length ? `<ol class="macro-steps">${entry.steps.map(s => `<li class="${s.down ? 'is-down' : 'is-up'}">
+        <span class="macro-arrow" aria-hidden="true">${s.down ? '↓' : '↑'}</span>
+        <span class="macro-what">${escapeHtml(stepLabel(s, keyName))}</span>
+        <span class="macro-delay muted">${fmtMs(s.delay)}</span></li>`).join('')}</ol>` : '<p class="muted macro-empty">No steps yet.</p>'}
+    <div class="btn-row macro-actions"><button class="btn btn-small" type="button" data-edit-macro="${entry.id}">Edit macro…</button></div>
+  </div>`;
+}
+
+// Key editor: run a library macro, a slot made elsewhere, or a new macro; and the play mode.
+function macroEditorHtml(cur) {
+  const isMacro = cur[0] === 9;
+  const curLabel = isMacro ? (macroForSlot(cur[2]).entry?.name ?? `Macro slot ${cur[2] + 1}`) : 'Run a macro…';
+  return `<span class="km-edit-label">Macro</span>
+    <div class="km-key-row">
+      <select id="kmMacroSelect" aria-label="Run a macro">
+        <option value="">${escapeHtml(curLabel)}</option>
+        ${state.library.map(e => `<option value="lib:${e.id}">${escapeHtml(e.name)}</option>`).join('')}
+        ${elsewhereSlots().map(([slot]) => `<option value="slot:${slot}">Macro slot ${slot + 1} (made elsewhere)</option>`).join('')}
+        <option value="new">New macro…</option>
+      </select>
+      ${isMacro ? `<select id="kmMacroMode" aria-label="Play mode">
+        ${Object.entries(MACRO_MODES).map(([id, m]) => `<option value="${id}" ${Number(id) === cur[1] ? 'selected' : ''}>${m.name}</option>`).join('')}
+      </select>` : ''}
+    </div>`;
+}
+
+// Points a key at a library macro. A macro without a slot gets the lowest slot that no key on any
+// profile uses (read from the keyboard) and that no other library macro holds.
+async function assignLibraryMacro(layer, slot, entry, mode) {
+  showError(null);
+  let target = [...state.pendingMacroWrites].find(([, id]) => id === entry.id)?.[0] ?? entry.slot;
+  if (target === undefined) {
+    state.busy = true;
+    refresh();
+    try {
+      const used = await readMacroSlotsInUse(state.dev, state.settings, (f, label) => setBusy(f, `Finding a free macro slot: ${label}…`));
+      const claimed = [...state.library.map(e => e.slot).filter(validSlot), ...state.pendingMacroWrites.keys()];
+      target = pickFreeSlot(used, claimed);
+    } catch (e) {
+      showError('Couldn’t pick a macro slot: ' + e.message);
+      return;
+    } finally {
+      state.busy = false;
+      setBusy(null);
+    }
+  }
+  // Always (re)write the steps: the slot may have been changed since (by qmk.top, or a factory
+  // reset), and the keyboard can't be asked what it holds.
+  state.pendingMacroWrites.set(target, entry.id);
+  setKeyPending(layer, slot, [9, mode, target, 0]);
+  refresh();
+}
+
+// Macros view: the library.
+let libraryStatus = '';
+function renderLibraryPanel() {
+  const el = $('inspector');
+  const can = editable();
+  const items = state.library.map(e => {
+    const pendingSlot = [...state.pendingMacroWrites].find(([, id]) => id === e.id)?.[0];
+    const users = e.slot !== undefined ? slotUsers(e.slot) : [];
+    let status, cls = '';
+    if (pendingSlot !== undefined) { status = `Will be written to slot ${pendingSlot + 1} when you review your changes.`; cls = ' is-pending'; }
+    else if (e.slot !== undefined && users.length && isOutdated(e)) { status = `On ${users.map(userLabel).join(', ')}, but changed since it was written.`; cls = ' is-outdated'; }
+    else if (users.length) status = `On ${users.map(userLabel).join(', ')} · slot ${e.slot + 1}`;
+    else status = e.slot !== undefined ? `Not on a key on this profile · keeps slot ${e.slot + 1}` : 'Not on a key yet';
+    return `<li class="lib-item${cls}">
+      <div class="lib-top"><span class="lib-name">${escapeHtml(e.name)}</span><span class="lib-meta">${macroLength(e)}</span></div>
+      <div class="lib-summary">${escapeHtml(macroSummary(e, keyName))}</div>
+      <p class="lib-status${cls === ' is-outdated' ? ' is-warn' : ''}">${status}</p>
+      <div class="lib-buttons">
+        <button class="btn btn-small" type="button" data-lib-edit="${e.id}">Edit…</button>
+        ${cls === ' is-outdated' && can ? `<button class="btn btn-small btn-primary" type="button" data-lib-write="${e.id}">Write to keyboard</button>` : ''}
+        <button class="btn btn-small" type="button" data-lib-dup="${e.id}">Duplicate</button>
+        <button class="btn btn-small" type="button" data-lib-del="${e.id}">Delete</button>
+      </div></li>`;
+  }).join('');
+  const elsewhere = elsewhereSlots();
+  el.innerHTML = `<div class="insp-head"><h2>Macros</h2></div>
+    <p class="sub">Named macros, kept in this browser. Put one on a key in the Key map tab.</p>
+    <div class="lib-actions">
+      <button class="btn btn-small btn-primary" id="libNew" type="button">New macro</button>
+      <button class="btn btn-small" id="libImport" type="button">Import…</button>
+      <button class="btn btn-small" id="libExport" type="button" ${state.library.length ? '' : 'disabled'}>Export</button>
+      <input type="file" id="libFile" accept="application/json,.json" hidden>
+    </div>
+    <p class="review-status" id="libStatus" role="status">${escapeHtml(libraryStatus)}</p>
+    ${state.library.length ? `<ul class="lib-list">${items}</ul>` : '<p class="note">No macros yet. Create one, or import a library you exported.</p>'}
+    ${elsewhere.length ? `<div class="lib-elsewhere"><h3>Made elsewhere</h3><ul class="lib-list">${elsewhere.map(([slot, users]) => `<li class="lib-item">
+        <div class="lib-top"><span class="lib-name">Macro slot ${slot + 1}</span><span class="lib-meta">steps unknown</span></div>
+        <p class="lib-status">On ${users.map(userLabel).join(', ')}. Made outside RT75 Studio, for example in qmk.top.</p>
+        <div class="lib-buttons"><button class="btn btn-small" type="button" data-lib-recreate="${slot}">Re-create here…</button></div></li>`).join('')}</ul></div>` : ''}
+    <p class="note">The keyboard can’t give macro steps back, so this library is the only copy of their names and steps. Export it to keep a backup or move it to another browser.</p>`;
+
+  const byId = b => libById(b.dataset[Object.keys(b.dataset)[0]]);
+  el.querySelectorAll('[data-lib-edit]').forEach(b => b.onclick = () => openMacroEditor(byId(b)));
+  el.querySelectorAll('[data-lib-write]').forEach(b => b.onclick = () => { const e = byId(b); state.pendingMacroWrites.set(e.slot, e.id); refresh(); });
+  el.querySelectorAll('[data-lib-dup]').forEach(b => b.onclick = () => {
+    const e = byId(b);
+    state.library.push({ id: newId(), name: uniqueName(state.library, e.name), repeat: e.repeat, steps: e.steps.map(s => ({ ...s })) });
+    persistLibrary();
+    refresh();
+  });
+  el.querySelectorAll('[data-lib-del]').forEach(b => b.onclick = () => {
+    const e = byId(b);
+    const users = e.slot !== undefined ? slotUsers(e.slot) : [];
+    const msg = users.length
+      ? `Delete “${e.name}” from the library? ${users.map(userLabel).join(', ')} will keep running it from the keyboard, but RT75 Studio won’t know its name or steps any more.`
+      : `Delete “${e.name}” from the library?`;
+    if (!confirm(msg)) return;
+    state.library = state.library.filter(x => x.id !== e.id);
+    for (const [slot, id] of state.pendingMacroWrites) if (id === e.id) state.pendingMacroWrites.delete(slot);
+    persistLibrary();
+    refresh();
+  });
+  el.querySelectorAll('[data-lib-recreate]').forEach(b => b.onclick = () => openMacroEditor(null, { slot: Number(b.dataset.libRecreate) }));
+  $('libNew').onclick = () => openMacroEditor(null);
+  $('libExport').onclick = () => {
+    const blob = new Blob([exportLibrary(state.library)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `rt75-macros-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  $('libImport').onclick = () => $('libFile').click();
+  $('libFile').onchange = async ev => {
+    const file = ev.target.files[0];
+    ev.target.value = '';
+    if (!file) return;
+    try {
+      const macros = parseLibraryFile(await file.text(), validMacroKey);
+      for (const m of macros) state.library.push({ id: newId(), name: uniqueName(state.library, m.name), repeat: m.repeat, steps: m.steps });
+      persistLibrary();
+      libraryStatus = `Imported ${macros.length} macro${macros.length === 1 ? '' : 's'}.`;
+    } catch (e) {
+      libraryStatus = 'Import failed: ' + e.message;
+    }
+    refresh();
+    setTimeout(() => { libraryStatus = ''; }, 0);
+  };
+}
+
+const macroNote = macros => (macros.length ? ` ${macros.length} macro${macros.length === 1 ? '' : 's'} written; the keyboard can’t confirm macro steps, so press the key to check.` : '');
+
+// ---------- Macro editor (dialog) ----------
+const DEFAULT_STEP_DELAY = 20;
+let afterMacroSave = null; // called with the saved entry (used by "New macro…" in the key editor)
+
+// entry: a library macro, or null for a new one. opts.slot: re-create a macro made elsewhere.
+function openMacroEditor(entry, opts = {}) {
+  afterMacroSave = opts.then ?? null;
+  state.macroDraft = entry
+    ? { id: entry.id, name: entry.name, repeat: entry.repeat, steps: entry.steps.map(s => ({ ...s })) }
+    : { id: null, name: uniqueName(state.library, opts.slot !== undefined ? `Macro slot ${opts.slot + 1}` : 'New macro'), repeat: 1, steps: [], slot: opts.slot };
+  renderMacroDialog();
+  $('macroDialog').showModal();
+  if (!entry) $('mcName').select();
+}
+
+function closeMacroEditor() {
+  state.recording = null;
+  state.macroDraft = null;
+  afterMacroSave = null;
+  $('macroDialog').close();
+}
+
+function macroDialogStatus() {
+  const d = state.macroDraft;
+  const problem = !d.name.trim() ? 'Give the macro a name.' : macroProblem(d, validMacroKey);
+  const held = heldAtEnd(d).map(s => (s.kind === 'key' ? keyName(s.code) : MOUSE_BUTTONS[s.code]));
+  $('mcStats').textContent = state.recording
+    ? `Recording… ${d.steps.length} steps. Press Esc or Stop to finish.`
+    : `${d.steps.length} step${d.steps.length === 1 ? '' : 's'} · ${fmtMs(d.steps.reduce((t, s) => t + s.delay, 0))} · ${macroSize(d)} of ${MACRO_BYTES} bytes`;
+  const warn = problem ?? (held.length ? `${held.join(', ')} ${held.length === 1 ? 'is' : 'are'} still held when the macro ends. Add ${held.length === 1 ? 'a release' : 'releases'} unless that’s intended.` : '');
+  $('mcWarn').textContent = warn;
+  $('mcWarn').classList.toggle('is-error', !!problem);
+  $('mcWarn').hidden = !warn;
+  $('btnMacroDone').disabled = !!problem || !!state.recording;
+}
+
+function renderMacroDialog() {
+  const d = state.macroDraft;
+  if (!d) return;
+  const entry = d.id ? libById(d.id) : null;
+  const onKeyboard = entry?.slot !== undefined && slotUsers(entry.slot).length > 0;
+  $('macroTitle').textContent = d.id ? 'Edit macro' : 'New macro';
+  const rec = !!state.recording;
+  const dis = rec ? 'disabled' : '';
+  $('macroBody').innerHTML = `
+    <label class="mc-name">Name <input type="text" id="mcName" maxlength="40" value="${escapeHtml(d.name)}" ${dis}></label>
+    <div class="mc-toolbar">
+      <button class="btn btn-small${rec ? ' btn-stop' : ''}" id="mcRecord" type="button">${rec ? '■ Stop' : '● Record'}</button>
+      <select id="mcAddKey" aria-label="Add a key press and release" ${dis}>
+        <option value="">+ Key…</option>${KEY_CHOICES.map(c => `<option value="${c}">${keyName(c)}</option>`).join('')}
+        <optgroup label="Modifiers">${MODIFIERS.map(c => `<option value="${c}">${keyName(c)}</option>`).join('')}</optgroup>
+      </select>
+      <select id="mcAddMouse" aria-label="Add a mouse button click" ${dis}>
+        <option value="">+ Mouse button…</option>${Object.entries(MOUSE_BUTTONS).map(([c, n]) => `<option value="${c}">${n}</option>`).join('')}
+      </select>
+      <button class="btn btn-small" id="mcClear" type="button" ${rec || !d.steps.length ? 'disabled' : ''}>Clear</button>
+    </div>
+    <p class="mc-stats muted" id="mcStats" role="status"></p>
+    ${d.steps.length ? `<ol class="mc-steps">${d.steps.map((s, i) => `<li>
+        <span class="mc-n muted">${i + 1}</span>
+        <button type="button" class="mc-dir ${s.down ? 'is-down' : 'is-up'}" data-dir="${i}" title="Switch between press and release" ${dis}>${s.down ? '↓ Press' : '↑ Release'}</button>
+        <span class="mc-what">${escapeHtml(s.kind === 'key' ? keyName(s.code) : MOUSE_BUTTONS[s.code] ?? `Code ${s.code}`)}</span>
+        <label class="mc-delay"><input type="number" data-delay="${i}" min="1" max="${MAX_DELAY}" step="1" value="${s.delay}" aria-label="Wait after step ${i + 1}, ms" ${dis}> ms</label>
+        <span class="mc-tools">
+          <button type="button" data-move="${i}:-1" title="Move up" aria-label="Move step ${i + 1} up" ${rec || i === 0 ? 'disabled' : ''}>▲</button>
+          <button type="button" data-move="${i}:1" title="Move down" aria-label="Move step ${i + 1} down" ${rec || i === d.steps.length - 1 ? 'disabled' : ''}>▼</button>
+          <button type="button" data-del="${i}" title="Delete" aria-label="Delete step ${i + 1}" ${dis}>✕</button>
+        </span></li>`).join('')}</ol>`
+      : '<p class="mc-empty muted">No steps yet. Press <strong>Record</strong> and type, or add keys and mouse buttons.</p>'}
+    <div class="mc-footer">
+      <label>Every delay <input type="number" id="mcAllDelay" min="1" max="${MAX_DELAY}" step="1" value="${DEFAULT_STEP_DELAY}"> ms
+        <button class="btn btn-small" id="mcApplyDelay" type="button" ${rec || !d.steps.length ? 'disabled' : ''}>Apply</button></label>
+      <label>Repeat count <input type="number" id="mcRepeat" min="1" max="${MAX_REPEAT}" step="1" value="${d.repeat}" ${dis}>
+        <span class="muted">used in Loop count mode</span></label>
+    </div>
+    <p class="hint-warn" id="mcWarn" hidden></p>
+    <p class="note">The delay is the wait after each step. Recording captures key presses and releases with their timing; the browser can’t capture some keys (such as the Windows key or Alt+Tab), so add those from the list.
+      ${onKeyboard ? ' This macro is on the keyboard: saving queues a write, which you review before anything is sent.' : ' Saving keeps it in the library; nothing is written to the keyboard until you put it on a key and review.'}</p>`;
+  macroDialogStatus();
+  const body = $('macroBody');
+  const pushPair = (kind, code) => {
+    d.steps.push({ kind, code, down: true, delay: DEFAULT_STEP_DELAY }, { kind, code, down: false, delay: DEFAULT_STEP_DELAY });
+    renderMacroDialog();
+  };
+  $('mcName').oninput = e => { d.name = e.target.value; macroDialogStatus(); };
+  $('mcRecord').onclick = () => { state.recording = state.recording ? null : { last: null }; renderMacroDialog(); };
+  $('mcAddKey').onchange = e => { if (e.target.value) pushPair('key', Number(e.target.value)); };
+  $('mcAddMouse').onchange = e => { if (e.target.value) pushPair('mouse', Number(e.target.value)); };
+  $('mcClear').onclick = () => { d.steps = []; renderMacroDialog(); };
+  $('mcApplyDelay').onclick = () => {
+    const v = Math.round(Number($('mcAllDelay').value));
+    if (v >= 1 && v <= MAX_DELAY) { d.steps.forEach(s => (s.delay = v)); renderMacroDialog(); }
+  };
+  $('mcRepeat').oninput = e => { d.repeat = Math.round(Number(e.target.value)); macroDialogStatus(); };
+  body.querySelectorAll('[data-delay]').forEach(inp => inp.oninput = () => { d.steps[Number(inp.dataset.delay)].delay = Math.round(Number(inp.value)); macroDialogStatus(); });
+  body.querySelectorAll('[data-dir]').forEach(b => b.onclick = () => { const s = d.steps[Number(b.dataset.dir)]; s.down = !s.down; renderMacroDialog(); });
+  body.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { d.steps.splice(Number(b.dataset.del), 1); renderMacroDialog(); });
+  body.querySelectorAll('[data-move]').forEach(b => b.onclick = () => {
+    const [i, dir] = b.dataset.move.split(':').map(Number);
+    [d.steps[i], d.steps[i + dir]] = [d.steps[i + dir], d.steps[i]];
+    renderMacroDialog();
+    $('macroBody').querySelector(`[data-move="${i + dir}:${dir}"]:not(:disabled)`)?.focus();
+  });
+  const list = body.querySelector('.mc-steps');
+  if (rec && list) list.scrollTop = list.scrollHeight;
+}
+
+// While recording, every key press and release becomes a step; the time to the next one becomes
+// its delay (1 ms to 65.5 s). Esc stops recording instead of being recorded.
+function onRecordKey(e) {
+  const r = state.recording, d = state.macroDraft;
+  if (!r || !d) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (e.key === 'Escape') { if (e.type === 'keydown') { state.recording = null; renderMacroDialog(); } return; }
+  if (e.repeat) return;
+  const hid = CODE_TO_HID[e.code];
+  if (hid === undefined || !validMacroKey(hid)) return;
+  const now = performance.now();
+  if (d.steps.length && r.last !== null) d.steps[d.steps.length - 1].delay = Math.min(MAX_DELAY, Math.max(1, Math.round(now - r.last)));
+  d.steps.push({ kind: 'key', code: hid, down: e.type === 'keydown', delay: DEFAULT_STEP_DELAY });
+  r.last = now;
+  if (macroSize(d) > MACRO_BYTES) { d.steps.pop(); state.recording = null; }
+  renderMacroDialog();
+}
+
+// Saves the draft into the library (this browser). A macro that keys already run gets a queued
+// write, reviewed like any other change.
+function saveMacroDraft() {
+  const d = state.macroDraft;
+  if (!d || !d.name.trim() || macroProblem(d, validMacroKey)) return;
+  const steps = d.steps.map(({ kind, code, down, delay }) => ({ kind, code, down, delay }));
+  let entry = d.id ? libById(d.id) : null;
+  if (entry) Object.assign(entry, { name: d.name.trim(), repeat: d.repeat, steps });
+  else {
+    entry = { id: newId(), name: d.name.trim(), repeat: d.repeat, steps };
+    state.library.push(entry);
+    if (d.slot !== undefined) state.pendingMacroWrites.set(d.slot, entry.id); // re-created macro made elsewhere
+  }
+  if (entry.slot !== undefined && slotUsers(entry.slot).length && isOutdated(entry)) state.pendingMacroWrites.set(entry.slot, entry.id);
+  persistLibrary();
+  const then = afterMacroSave;
+  closeMacroEditor();
+  refresh();
+  then?.(entry);
 }
 
 function renderKeymapPanel() {
@@ -735,11 +1135,11 @@ function renderKeymapPanel() {
     const pending = state.pendingKeys.has(`${id}:${key.slot}`);
     return `<button type="button" class="km-row${id === layer ? ' is-current' : ''}${pending ? ' is-pending' : ''}" data-layer-row="${id}">
       <span class="km-layer">${l.label}</span>
-      <span class="km-now">${a.label}${a.changed ? ' <span class="km-badge">changed</span>' : ''}${pending ? ' <span class="km-badge km-badge-pending">unsaved</span>' : ''}</span>
+      <span class="km-now">${a.kind === 'macro' ? escapeHtml(macroForSlot(a.bytes[2]).entry?.name ?? `Macro slot ${a.bytes[2] + 1}`) + ` · ${MACRO_MODES[a.bytes[1]]?.name ?? ''}` : a.label}${a.changed ? ' <span class="km-badge">changed</span>' : ''}${pending ? ' <span class="km-badge km-badge-pending">unsaved</span>' : ''}</span>
       ${a.note ? `<span class="km-factory muted">${a.note}</span>` : ''}
       ${a.kind === 'unknown' ? `<span class="km-factory muted">A built-in keyboard function qmk.top doesn’t name either (bytes ${a.raw}); left untouched.</span>` : ''}
       <span class="km-factory muted">Factory: ${factoryLabel(id, key.slot)}</span>
-    </button>`;
+    </button>${a.kind === 'macro' ? macroCardHtml(a.bytes) : ''}`;
   }).join('');
 
   const block = keyEditBlock(layer, key.slot);
@@ -757,6 +1157,7 @@ function renderKeymapPanel() {
   el.querySelectorAll('[data-layer-row]').forEach(b => b.onclick = () => { state.layer = b.dataset.layerRow; state.capture = null; refresh(); });
   $('kmRevert')?.addEventListener('click', () => { Object.keys(LAYERS).forEach(l => state.pendingKeys.delete(`${l}:${key.slot}`)); refresh(); });
   if (canEdit && !block) wireKeyEditor(layer, key.slot);
+  el.querySelectorAll('[data-edit-macro]').forEach(b => b.onclick = () => openMacroEditor(libById(b.dataset.editMacro)));
 }
 
 const factoryBytes = (layer, slot) => LAYERS[layer].defaults.slice(slot * 4, slot * 4 + 4);
@@ -783,10 +1184,10 @@ function keyEditorHtml(layer, slot) {
   const modNames = mac ? { 224: 'Ctrl', 225: 'Shift', 226: 'Opt', 227: 'Cmd' } : { 224: 'Ctrl', 225: 'Shift', 226: 'Alt', 227: 'Win' };
   const groups = [...new Set(FUNCTIONS.map(f => f[0]))];
   const fnValue = a.kind === 'function' ? cur.join(',') : '';
-  const overwriting = ['macro', 'mouse', 'modtap'].includes(decodeAction(deviceBytes(layer, slot), { mac }).kind);
+  const overwriting = ['mouse', 'modtap'].includes(decodeAction(deviceBytes(layer, slot), { mac }).kind);
   return `
     <h3>Change ${L.label}</h3>
-    ${overwriting ? '<p class="hint-warn">This key currently runs a macro, mouse or mod-tap action set in qmk.top. Replacing it here can’t be undone from RT75 Studio; reassign it in qmk.top if you change your mind.</p>' : ''}
+    ${overwriting ? '<p class="hint-warn">This key currently runs a mouse or mod-tap action set in qmk.top. Replacing it here can’t be undone from RT75 Studio; reassign it in qmk.top if you change your mind.</p>' : ''}
     <div class="km-edit">
       <span class="km-edit-label">Key</span>
       <div class="km-key-row">
@@ -800,6 +1201,7 @@ function keyEditorHtml(layer, slot) {
         ${[224, 225, 226, 227].map(m => `<label class="check"><input type="checkbox" data-mod="${m}" ${mods.includes(m) ? 'checked' : ''} ${!isKey || (mods.length >= 2 && !mods.includes(m)) ? 'disabled' : ''}> ${modNames[m]}</label>`).join('')}
         <span class="muted km-mods-hint">up to 2</span>
       </div>
+      ${macroEditorHtml(cur)}
       <span class="km-edit-label">Function</span>
       <select id="kmFnSelect" aria-label="Choose a function">
         <option value="">${a.kind === 'function' ? a.label : 'Choose a function…'}</option>
@@ -833,6 +1235,13 @@ function wireKeyEditor(layer, slot) {
     if (RISKY.has(f[1]) && !confirm(`"${f[1]}" can be disruptive if pressed by accident. Assign it anyway?`)) { refresh(); return; }
     set(f[2]);
   };
+  $('kmMacroSelect').onchange = e => {
+    const v = e.target.value, mode = cur()[0] === 9 ? cur()[1] : 0;
+    if (v === 'new') { openMacroEditor(null, { then: entry => assignLibraryMacro(layer, slot, entry, mode) }); return; }
+    if (v.startsWith('lib:')) { assignLibraryMacro(layer, slot, libById(v.slice(4)), mode); return; }
+    if (v.startsWith('slot:')) set([9, mode, Number(v.slice(5)), 0]);
+  };
+  $('kmMacroMode')?.addEventListener('change', e => set([9, Number(e.target.value), cur()[2], 0]));
   $('kmDisable').onclick = () => set(DISABLED);
   $('kmFactory').onclick = () => set(factoryBytes(layer, slot));
 }
@@ -998,7 +1407,7 @@ function renderLivePanel() {
   drawLive();
 }
 
-function hasAnyPending() { return pendingEdits().length > 0 || kbChanges().length > 0 || keymapChanges().length > 0 || !!lightChange(); }
+function hasAnyPending() { return pendingEdits().length > 0 || kbChanges().length > 0 || keymapChanges().length > 0 || !!lightChange() || macroWrites().length > 0; }
 
 // Keyboard-wide edits that differ from the keyboard: [{ field, label, from, to }].
 function kbChanges() {
@@ -1271,7 +1680,8 @@ function openReview() {
   $('reviewBody').innerHTML = `
     <p>These settings will be written to the keyboard (profile ${(state.settings.profile ?? 0) + 1}). Nothing else changes.</p>
     <div class="table-wrap"><table class="changes"><thead><tr><th>Key</th><th>Setting</th><th>Now</th><th>New</th></tr></thead>
-    <tbody>${changeRows(edits, (slot, f) => state.settings.magnet[f][slot])}${kbRows(kbChanges())}${kmRows(keymapChanges())}${lightRows(lightChange())}</tbody></table></div>
+    <tbody>${changeRows(edits, (slot, f) => state.settings.magnet[f][slot])}${kbRows(kbChanges())}${kmRows(keymapChanges())}${macroWriteRows(macroWrites())}${lightRows(lightChange())}</tbody></table></div>
+    ${macroWrites().length ? '<p class="hint-warn">This keyboard can’t give macro steps back, so they can’t be confirmed after writing. Press the key afterwards to check it.</p>' : ''}
     <label class="check"><input type="checkbox" id="chkBackup" checked> Download a backup of the current settings first</label>`;
   $('reviewStatus').textContent = '';
   $('reviewStatus').className = 'review-status';
@@ -1282,7 +1692,9 @@ function openReview() {
   $('reviewDialog').showModal();
 }
 
-async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChanges(), light = lightChange() }) {
+async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChanges(), light = lightChange(), macros = macroWrites() }) {
+  // What each macro slot held before (when RT75 Studio wrote it), for Undo.
+  for (const w of macros) w.before ??= w.entry.slot === w.slot && w.entry.written ? w.entry.written : null;
   const before = new Map(edits.map(e => [e.slot, Object.fromEntries(Object.keys(e).filter(f => f !== 'slot').map(f => [f, state.settings.magnet[f][e.slot]]))]));
   if (backup) downloadBackup();
   state.busy = true;
@@ -1324,6 +1736,18 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
       result.retried += km.retried;
       for (const m of km.mismatches) result.mismatches.push({ kb: true, label: `${keyBySlot(m.slot).label} (${LAYERS[m.layer].label})`, expected: actionLabel(m.layer, m.expected), actual: actionLabel(m.layer, m.actual) });
     }
+    // Macros go after the key map, as in qmk.top (setKeyConfigSimple, then setMacro). Their steps
+    // can't be read back from this keyboard, so they're reported as written, not confirmed.
+    if (macros.length) {
+      await writeMacros(state.dev, state.settings, macros.map(w => ({ slot: w.slot, macro: w.macro })),
+        (f, label) => { status.textContent = `${label}… ${Math.round(f * 100)}%`; });
+      for (const w of macros) {
+        const lib = libById(w.entry.id);
+        if (lib) Object.assign(lib, { slot: w.slot, written: { repeat: w.macro.repeat, steps: w.macro.steps.map(x => ({ ...x })) } });
+        state.pendingMacroWrites.delete(w.slot);
+      }
+      persistLibrary();
+    }
     if (light) {
       status.textContent = 'Writing lighting…';
       const lr = await writeLighting(state.dev, state.settings, light.to);
@@ -1334,16 +1758,18 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
     }
     if (result.mismatches.length) {
       status.className = 'review-status is-error';
-      status.textContent = `Written and retried once, but ${result.mismatches.length} value(s) still read back differently: ` +
+      status.textContent = macroNote(macros).trim() + (macros.length ? ' ' : '') + `Written and retried once, but ${result.mismatches.length} value(s) still read back differently: ` +
         result.mismatches.map(m => m.kb ? `${m.label} expected ${m.expected}, got ${m.actual}`
           : `${keyBySlot(m.slot).label} ${FIELD_LABELS[m.field]} expected ${fmt(m.field, m.expected)}, got ${fmt(m.field, m.actual)}`).join('; ');
     } else {
       const n = edits.reduce((a, e) => a + Object.keys(e).length - 1, 0) + kb.length + keys.length + (light?.fields.length ?? 0);
       status.className = 'review-status is-ok';
-      status.textContent = `Done. All ${n} setting${n === 1 ? '' : 's'} written and confirmed by reading them back.` +
-        (result.retried ? ` (${result.retried} needed a second try.)` : '');
+      status.textContent = (n ? `Done. ${n === 1 ? 'The setting was' : `All ${n} settings were`} written and confirmed by reading ${n === 1 ? 'it' : 'them'} back.` : 'Done.') +
+        (result.retried ? ` (${result.retried} needed a second try.)` : '') + macroNote(macros);
     }
     state.lastApplied = { undo: [...before].map(([slot, fields]) => ({ slot, ...fields })), undoKb: kb.map(c => ({ ...c, from: c.to, to: c.from })), undoKeys: keys.map(c => ({ ...c, from: c.to, to: c.from })),
+      // A macro slot is restored only if RT75 Studio knows what it held before.
+      undoMacros: macros.filter(w => w.before).map(w => ({ slot: w.slot, entry: w.entry, macro: w.before, before: w.macro })),
       undoLight: light && isOffered(effectById(light.from.effect)) ? { from: light.to, to: normalizeLighting(light.from), fields: light.fields } : null };
     $('btnApply').hidden = true;
     $('btnUndo').hidden = false;
@@ -1372,12 +1798,13 @@ async function undoLast() {
   const undoKeys = allUndoKeys.filter(c => isWritableAction(c.to, c.layer, c.slot));
   const skippedKeys = allUndoKeys.length - undoKeys.length;
   const undoLight = state.lastApplied.undoLight ?? null;
+  const undoMacros = state.lastApplied.undoMacros ?? [];
   state.lastApplied = null;
   $('btnUndo').hidden = true;
   $('reviewBody').innerHTML = `<p>Restoring the previous values:</p>
     <div class="table-wrap"><table class="changes"><thead><tr><th>Key</th><th>Setting</th><th>Now</th><th>Restored</th></tr></thead>
-    <tbody>${changeRows(undo, (slot, f) => state.settings.magnet[f][slot])}${kbRows(undoKb)}${kmRows(undoKeys)}${lightRows(undoLight)}</tbody></table></div>${skippedKeys ? `<p class="hint-warn">${skippedKeys} key(s) had a macro, mouse or mod-tap action that RT75 Studio can’t write back; reassign those in qmk.top.</p>` : ''}`;
-  await applyEdits(undo, { backup: false, kb: undoKb, keys: undoKeys, light: undoLight });
+    <tbody>${changeRows(undo, (slot, f) => state.settings.magnet[f][slot])}${kbRows(undoKb)}${kmRows(undoKeys)}${macroWriteRows(undoMacros)}${lightRows(undoLight)}</tbody></table></div>${skippedKeys ? `<p class="hint-warn">${skippedKeys} key(s) had a macro, mouse or mod-tap action that RT75 Studio can’t write back; reassign those in qmk.top.</p>` : ''}`;
+  await applyEdits(undo, { backup: false, kb: undoKb, keys: undoKeys, light: undoLight, macros: undoMacros });
   $('btnUndo').hidden = true;
 }
 
@@ -1677,11 +2104,9 @@ function refresh() {
 
 function setView(view) {
   if (view !== 'live' && state.live) stopLive();
-  const own = v => v === 'live' || v === 'lighting'; // views with their own inspector panel
-  const inspectorChanges = own(view) || own(state.view);
   state.view = view;
   document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === view)));
-  if (inspectorChanges) refresh(); else renderBoard();
+  refresh(); // the inspector differs per view (key map, macros, lighting, live test)
 }
 
 function load(settings, dev = null) {
@@ -1692,6 +2117,8 @@ function load(settings, dev = null) {
   state.pendingKb = {};
   state.pendingKeys.clear();
   state.pendingLight = null;
+  state.pendingMacroWrites.clear();
+  state.library = loadLibrary(!!settings.demo);
   state.capture = null;
   state.lastApplied = null;
   refresh();
@@ -1754,8 +2181,14 @@ $('btnSample').onclick = async () => {
 };
 $('btnSelectAll').onclick = () => { state.knob = false; state.selected = new Set(MAGNETIC.map(k => k.slot)); refresh(); };
 $('btnClearSel').onclick = () => { state.selected.clear(); refresh(); };
-$('btnDiscard').onclick = () => { state.pending.clear(); state.pendingKb = {}; state.pendingKeys.clear(); state.pendingLight = null; state.capture = null; refresh(); };
+$('btnDiscard').onclick = () => { state.pending.clear(); state.pendingKb = {}; state.pendingKeys.clear(); state.pendingLight = null; state.pendingMacroWrites.clear(); state.capture = null; refresh(); };
 $('btnReview').onclick = openReview;
+$('btnMacroDone').onclick = saveMacroDraft;
+$('btnMacroCancel').onclick = closeMacroEditor;
+// Esc while recording stops the recording (onRecordKey), so it must not also close the editor.
+$('macroDialog').addEventListener('cancel', e => { if (state.recording) e.preventDefault(); else { state.macroDraft = null; afterMacroSave = null; } });
+document.addEventListener('keydown', onRecordKey, true);
+document.addEventListener('keyup', onRecordKey, true);
 $('btnApply').onclick = () => applyEdits(pendingEdits(), { backup: $('chkBackup')?.checked });
 $('btnUndo').onclick = undoLast;
 $('btnCancel').onclick = () => $('reviewDialog').close();

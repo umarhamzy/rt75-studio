@@ -73,8 +73,8 @@ Edits go through the same review → write → read-back → Undo flow. Locked, 
 - the **Fn key** (so the Fn layers can't be lost)
 - **system keys** (functions qmk.top can't name, such as Fn+Tab)
 
-Keys holding a macro, mouse or mod-tap action from qmk.top can be overwritten, with a warning,
-but Undo can't restore those actions.
+Keys holding a mouse or mod-tap action from qmk.top can be overwritten, with a warning, but Undo
+can't restore those actions.
 
 ## Lighting
 
@@ -89,6 +89,35 @@ Lighting is shared by all four profiles.
 The board shows an approximate animated preview. Changes go through the same review → write →
 read-back → Undo flow. Music Sync and Light Shadow run from qmk.top's own sync, so RT75 Studio
 shows them when they're active but doesn't set them.
+
+## Macros
+
+The **Macros** tab is a library of named macros, kept in this browser, like qmk.top's Key Scheme
+Library.
+- **Create and edit** macros in the step editor:
+  - **Record** captures key presses and releases with their timing (Esc stops).
+  - Keys, modifiers and mouse buttons can be added from lists.
+  - Each step's wait can be changed, or set for all steps at once.
+  - Steps can be moved, flipped between press and release, or deleted.
+  - Set the repeat count for Loop count mode here.
+- **Put a macro on a key** in the Key map tab: select the key, then under **Macro** pick it, or
+  **New macro…**, and a play mode:
+  - Loop count
+  - Press to Play
+  - Toggle playback
+  
+  RT75 Studio writes the macro to a slot no key uses on any profile.
+- **Edit a macro that keys use,** and the change is queued for review and written again.
+- **Export** the library to a file for a backup or another browser, and **Import** it back.
+
+The keyboard can't give macro steps back, so this library is the only copy of names and steps.
+Macros made in qmk.top show as "made elsewhere" and can be re-created here. Key assignments are
+confirmed by reading them back; macro steps can't be, so press the key to check.
+
+Limits:
+- up to 256 bytes per macro (about 125 short steps)
+- delays from 1 ms to 65.5 s
+- no mouse movements
 
 ## Live test
 
@@ -133,10 +162,13 @@ be exported to a file and imported again. Demo-mode presets are stored separatel
 - **Lighting writes** are only `[07, effect, speed, brightness, option/colour mode, r, g, b]`
   with qmk.top's byte-8 checksum. The validator allows only the offered effects, values 0–4,
   each effect's own options, and colour mode single colour or rainbow.
+- **Macro writes** are only `[0B, slot 0–49, page, 56, last, …, data]`, and each packet must match one
+  built from a macro that passed the checks: known keys and mouse buttons, delays 1–65535 ms,
+  repeat 1–65535, at most 256 bytes, no mouse moves. Macro slots are never read.
 - **The live test** sends only `0x1B 01` and `0x1B 00`, which turn depth reporting on and off.
   The same toggle is used by qmk.top's Simulation Test. It's turned off when you stop, leave the
   tab, refresh or close the page.
 - qmk.top's all-keys depth read only works inside switch calibration mode, which rewrites
   calibration, so it isn't used.
-- Bulk table writes, side lights, custom lighting patterns, calibration, firmware and reset
+- Macro reads (unreliable on this keyboard), bulk table writes, side lights, custom lighting patterns, calibration, firmware and reset
   commands aren't implemented.

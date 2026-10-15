@@ -27,6 +27,8 @@ touching device code.
 | `src/device.js` | Everything that touches HID: transport (wired and 2.4G dongle relay), reads, validated writes, live depth, keyboard-wide settings |
 | `src/app.js` | UI state and rendering: board, inspector/editor, pending edits, review dialog, Undo, live test, presets, keyboard section |
 | `src/layout.js` | RT75 key positions (from qmk.top) and the factory key matrix; `slot` = key-matrix index |
+| `src/macros.js` | Macro buffer encoding (mirrors qmk.top), checks, modes, step labels |
+| `src/library.js` | Macro library in this browser: storage, export/import, out-of-date check |
 | `src/lighting.js` | Lighting effects table (from qmk.top's RT75 entry), packet encode/decode, diffs |
 | `src/demo.js` | Simulated keyboard (per-profile settings, polling rate, sleep timers, lighting, live reports) |
 | `src/styles.css` | Theme tokens with light and dark modes |
@@ -37,7 +39,7 @@ touching device code.
    Record the evidence in protocol-notes.md.
 2. **Every outgoing packet passes an allowlist validator before anything is sent**:
    `assertAllowedWrite` (per-key magnet), `assertAllowedKeyboardWrite`, the sleep validator,
-   `assertAllowedKeymapWrite`, `assertAllowedLightWrite`, and the
+   `assertAllowedKeymapWrite`, `assertAllowedLightWrite`, `assertAllowedMacroWrite`, and the
    read allowlist `READ_COMMANDS`. New commands get their own validator.
 3. **Writes go through review → write → read back → report mismatches → Undo.** No silent writes.
 4. **Never send:**
@@ -100,4 +102,14 @@ with effect, brightness, speed, colour/rainbow and direction. Format decoded fro
 (protocol-notes.md, "Lighting"); the RT75 has no side light. Verified on the real keyboard: read,
 write, read-back and Undo. Brightness 0 = fully off; lighting is shared by all profiles.
 
-**Possible next steps:** custom lighting patterns (`0x0C`/`0x8C`), macros, mouse and mod-tap actions.
+**Macro library (feature/macro-library):**
+- Named macros are kept in this browser, written to free slots, and assigned to keys.
+- Export and import as JSON.
+- **Macro slots are never read:** the keyboard's `0x8B` read is unreliable (protocol-notes.md, "Macros").
+- Key writes are read back; macro steps can't be.
+- Tested in the simulation and demo; **awaiting the user's check on the real keyboard.**
+
+**Next, in the user's order:** mod-tap, then custom lighting patterns (`0x0C`/`0x8C`).
+
+**Branches:** `feature/macros` holds the abandoned read-back approach and the full investigation
+log (probe pages). Don't merge it.

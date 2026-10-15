@@ -33,7 +33,7 @@ blocked('Fn key locked (base)', [{ layer: 'base', slot: 65, action: [0, 0, 4, 0]
 blocked('Fn key locked (Fn layer)', [{ layer: 'fnWin', slot: 65, action: [0, 0, 4, 0] }]);
 blocked('knob slot refused', [{ layer: 'base', slot: 91, action: [0, 0, 4, 0] }]);
 blocked('unknown action refused', [{ layer: 'base', slot: 14, action: [10, 4, 0, 0] }]);
-blocked('macro action refused', [{ layer: 'base', slot: 14, action: [9, 0, 0, 0] }]);
+blocked('macro action with an unknown mode refused', [{ layer: 'base', slot: 14, action: [9, 5, 0, 0] }]);
 blocked('two non-modifier keys refused', [{ layer: 'base', slot: 14, action: [0, 0, 4, 5] }]);
 blocked('unknown HID code refused', [{ layer: 'base', slot: 14, action: [0, 0, 200, 0] }]);
 blocked('bad profile refused', [{ layer: 'base', slot: 14, action: [0, 0, 4, 0] }], 4);

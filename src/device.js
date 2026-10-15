@@ -7,6 +7,9 @@
 import { KEYS, DEFAULT_MATRIX, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX } from './layout.js';
 import { FUNCTIONS, MODIFIERS, HID_NAMES } from './actions.js';
 import { effectById, isOffered, decodeLighting, lightingBytes, lightingFields, MAX_LEVEL } from './lighting.js';
+import { MAX_MACROS, MACRO_MODES, MACRO_CHUNK, encodeMacro, macroSize, macroRefs } from './macros.js';
+
+const MACRO_MODE_IDS = new Set(Object.keys(MACRO_MODES).map(Number));
 
 const VID = 0x3151;
 // Matrix slots of real magnetic keys (the knob entries are excluded).
@@ -609,6 +612,7 @@ export function isWritableAction(a, layer, slot) {
   if (a.join() === factory.join()) return true;
   if (a.join() === '0,0,0,0') return true;
   if (FUNCTION_BYTES.has(a.join())) return true;
+  if (a[0] === 9) return MACRO_MODE_IDS.has(a[1]) && a[2] < MAX_MACROS && a[3] === 0; // run macro slot
   if (a[0] !== 0) return false;
   const codes = a.slice(1).filter(Boolean);
   if (!codes.length || codes.some(c => !VALID_HID.has(c))) return false;
@@ -728,4 +732,71 @@ export async function writeLighting(dev, settings, light) {
     if (bad.length) { await sleep(500); got = await write(); bad = wrong(got); }
     return { lighting: got, mismatches: bad, retried };
   });
+}
+
+// ---------- Macro writes ----------
+// [0x0B, slot, page, 56, isLast, 0, 0, cs (Bit7), 56 data bytes] per 56-byte chunk of the 256-byte
+// buffer (qmk.top _setMacro), then vendorSleep. qmk.top sends the non-empty chunks; RT75 Studio
+// sends every chunk up to and including the end marker, so a shorter macro never leaves the old
+// macro's tail where the marker should be.
+// There is no read-back: the keyboard's macro read (0x8B) doesn't reliably return a slot's steps
+// (protocol-notes.md, "Macros"), and qmk.top doesn't read macros back either. The key assignment
+// that points at a slot is a key-map write and is read back as usual.
+const SET_MACRO = 0x0b;
+const validMacroKey = c => VALID_HID.has(c);
+
+export function buildMacroPackets(slot, macro) {
+  if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_MACROS) throw new Error(`Blocked macro write (slot ${slot})`);
+  const buf = encodeMacro(macro, validMacroKey);
+  const pages = Math.ceil(macroSize(macro) / MACRO_CHUNK);
+  return Array.from({ length: pages }, (_, p) => {
+    const data = [...buf.slice(p * MACRO_CHUNK, (p + 1) * MACRO_CHUNK)];
+    while (data.length < MACRO_CHUNK) data.push(0);
+    return encode([SET_MACRO, slot, p, MACRO_CHUNK, p === pages - 1 ? 1 : 0, 0, 0, 0, ...data]);
+  });
+}
+
+// Each packet must be one of the packets built (and validated) from the macro.
+function assertAllowedMacroWrite(p, allowed) {
+  const fail = why => { throw new Error(`Blocked macro write (${why}): ${[...p.slice(0, 8)].map(b => b.toString(16).padStart(2, '0')).join(' ')}`); };
+  if (p.length !== 64 || p[0] !== SET_MACRO) fail('not the macro command');
+  if (p[1] >= MAX_MACROS || p[3] !== MACRO_CHUNK || p[4] > 1 || p[5] || p[6]) fail('header');
+  if (p[7] !== 255 - (p.slice(0, 7).reduce((a, b) => a + b, 0) & 0xff)) fail('checksum');
+  if (!allowed.some(q => q.every((b, i) => b === p[i]))) fail('not a validated packet');
+}
+
+// Writes macros to their slots. edits: [{ slot, macro: { repeat, steps } }]. Every packet of every
+// macro is built and validated before the first is sent. Returns { written: [slot] }.
+export async function writeMacros(dev, settings, edits, onProgress = () => {}) {
+  const plan = edits.map(e => ({ ...e, packets: buildMacroPackets(e.slot, e.macro) }));
+  return withDevice(dev, settings, async t => {
+    const written = [];
+    for (const [i, e] of plan.entries()) {
+      onProgress((i + 1) / plan.length, `Writing macro slot ${e.slot + 1}`);
+      for (const p of e.packets) await t.send(p, null, q => assertAllowedMacroWrite(q, e.packets));
+      await sleep(150); // qmk.top waits 100 ms after each macro
+      written.push(e.slot);
+    }
+    return { written };
+  });
+}
+
+// Macro slots the keyboard's keys use: every profile's base layer and the Fn layers (reads only).
+export async function readMacroSlotsInUse(dev, settings, onProgress = () => {}) {
+  return withDevice(dev, settings, async t => {
+    const used = new Set();
+    for (let profile = 0; profile < PROFILE_COUNT; profile++) {
+      onProgress(profile / (PROFILE_COUNT + 1), `Checking profile ${profile + 1}`);
+      macroRefs(await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, 0], 8)).forEach(i => used.add(i));
+    }
+    onProgress(PROFILE_COUNT / (PROFILE_COUNT + 1), 'Checking the Fn layers');
+    macroRefs(await readFnLayer(t, 0), await readFnLayer(t, 1)).forEach(i => used.add(i));
+    return [...used].sort((a, b) => a - b);
+  });
+}
+
+// Lowest slot that no key uses and that isn't in `exclude` (slots the library already holds).
+export function pickFreeSlot(used, exclude = []) {
+  for (let i = 0; i < MAX_MACROS; i++) if (!used.includes(i) && !exclude.includes(i)) return i;
+  throw new Error(`All ${MAX_MACROS} macro slots are in use.`);
 }

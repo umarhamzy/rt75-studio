@@ -54,6 +54,10 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
   // Fn layers per profile: [windows, mac]
   // One Fn layer (index 0) shared by every profile, like the real keyboard: [windows, mac].
   const fnLayers = [[[...(dump.fnWin ?? DEFAULT_FN_MATRIX)], [...(dump.fnMac ?? DEFAULT_FN_MAC_MATRIX)]]];
+  // Like the user's keyboard: Fn+F runs macro slot 0 (made in qmk.top, Toggle playback).
+  fnLayers[0][0].splice(27 * 4, 4, 9, 1, 0, 0);
+  // Macro slots as written (256-byte buffers). The demo, like RT75 Studio, never reads them back.
+  const macros = new Map();
   let last = new Uint8Array(64);
 
   return {
@@ -66,6 +70,7 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
     async close() { this.opened = false; },
 
     demoInput: input,
+    demoMacros: macros, // for tests: what was written to each slot
 
     async sendFeatureReport(_id, buf) {
       last = Uint8Array.from(buf);
@@ -74,6 +79,12 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
       if (last[0] === 0x04) { profile = last[1]; return; }
       if (last[0] === 0x11) { sleepBytes = last.slice(8, 16); return; }
       if (last[0] === 0x07) { ledBytes = last.slice(1, 8); return; }
+      if (last[0] === 0x0b) {
+        const b = macros.get(last[1]) ?? new Uint8Array(256);
+        b.set(last.slice(8, 8 + Math.min(56, 256 - last[2] * 56)), last[2] * 56);
+        macros.set(last[1], b);
+        return;
+      }
       if (last[0] === 0x0a) { keymaps[last[1]].splice(last[2] * 4, 4, ...last.slice(8, 12)); return; }
       if (last[0] === 0x10) { fnLayers[last[2]][last[1]].splice(last[3] * 4, 4, ...last.slice(8, 12)); return; }
       if (last[0] === 0x65 && ignore.some(x => x.slot === last[3] && x.param === last[1])) return;

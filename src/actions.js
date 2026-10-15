@@ -8,6 +8,8 @@
 //   [9, mode, index, 0]            macro
 //   [24, tap, hold, time/10]       mod-tap
 
+import { MACRO_MODES } from './macros.js';
+
 export const HID_NAMES = {
   40: 'Enter', 41: 'Esc', 42: 'Backspace', 43: 'Tab', 44: 'Space', 45: '-', 46: '=', 47: '[', 48: ']', 49: '\\',
   50: '#', 51: ';', 52: "'", 53: '`', 54: ',', 55: '.', 56: '/', 57: 'Caps Lock', 70: 'Print Screen', 71: 'Scroll Lock',
@@ -107,7 +109,7 @@ export function decodeAction(b, { mac = false } = {}) {
     return { kind: codes.length === 1 ? 'key' : 'combo', codes, label: codes.map(name).join(' + '), short: codes.map(cap).join(joiner), editable: true };
   }
   if (b[0] === 1) return { kind: 'mouse', label: MOUSE[b[2]] ?? 'Mouse action', short: MOUSE[b[2]] ?? 'Mouse', editable: false };
-  if (b[0] === 9) return { kind: 'macro', label: `Macro ${b[2] + 1}`, short: `M${b[2] + 1}`, editable: false };
+  if (b[0] === 9) return { kind: 'macro', label: `Macro ${b[2] + 1}${MACRO_MODES[b[1]] ? ` · ${MACRO_MODES[b[1]].name}` : ''}`, short: `M${b[2] + 1}`, editable: false };
   if (b[0] === 24) return { kind: 'modtap', label: `Mod-tap: ${keyName(b[1])} / ${keyName(b[2])}`, short: 'MT', editable: false };
   // qmk.top shows anything it can't identify as a protected "System Key" (系统按键); so do we.
   return { kind: 'unknown', label: 'System key', short: 'System', raw: b.map(x => x.toString(16).padStart(2, '0')).join(' '), editable: false };

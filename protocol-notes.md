@@ -531,4 +531,67 @@ The firmware doesn't bounds-check reads, so `query()` now refuses reads outside 
 - key map: profiles 0–3, pages 0–7
 - Fn layers: layer 0, pages 0–7
 - magnet tables: pages 0–3
-- macros (on feature/macros): slots 0–49, pages 0–3
+- macros: not read at all (see "Macros")
+
+## Macros
+
+Source: RY5088 base `_setMacro`, `setMacro`, `getMacro`, `buffToMacroEvents`; v4 bundle
+`macroEventToByte` and `configToMatrix`.
+
+- **Key action:** `[9, mode, slot, 0]`.
+  - Modes: 0 = Loop count (repeat 1–65535), 2 = "Press to Play", 1 = "Toggle Playback with
+    Assigned Key".
+  - qmk.top allows 50 slots (`maxMacro = 50`), shared by all layers and profiles.
+- **Buffer (256 bytes):** repeat count u16 LE, then one record per step, ended by `00 00 00 00`:
+  - Key (HID 4–239) or mouse button (240 left, 241 right, 242 middle, 243 back, 244 forward):
+    - `[code, flag]` when the delay is 1–127 ms (flag = delay, | 0x80 for a press)
+    - otherwise `[code, 0x80 or 0, delay u16 LE]`
+  - Mouse move: `[0xF9, d, dx, dy]`, with d = delay ≤ 127, or d = 0 followed by a u16 delay.
+  - The delay is the wait after the step.
+- **qmk.top quirks:**
+  - It encodes a short mouse-move delay as `d` but decodes it as `d >> 1`.
+  - A delay of 0 encodes as a short record that decodes as a long one.
+  - RT75 Studio refuses both: no mouse moves, and every delay ≥ 1 ms.
+- **Write:** `[0x0B, slot, page, 56, isLast, 0, 0, cs, 56 data bytes]` (Bit7), one packet per
+  56-byte chunk, then `vendorSleep`. qmk.top writes the key's action first (`setKeyConfigSimple` /
+  `setFnKeyConfigSimple`), then the macro.
+  - RT75 Studio does the same in that order, and sends every chunk up to and including the end
+    marker, so a shorter macro can't leave an old tail where the marker should be.
+  - Each packet must match one built from a macro that passed `macroProblem` exactly
+    (`assertAllowedMacroWrite`).
+
+### Macro read-back is unreliable (investigated on the real keyboard, 2026-10-15)
+
+`[0x8B, slot, page]` (`getMacro`) does **not** reliably return a slot's steps:
+- A macro written to slot 2 (and played correctly by its key) read back at slot 1. Slot 2 stayed
+  `FF`.
+- A test macro written to an unused slot 5 never appeared in slots 0–7. That held whether or not
+  a key pointed at it: Fn · Mac + H was used for the test and cleared again.
+- An "off by one" theory, a "stored in write order" theory and a "packed list of macros keys use"
+  theory each failed a test.
+- **qmk.top doesn't really read macros either:**
+  - In a fresh browser, it shows Fn+F / Fn+W only as mapped, with no name or steps, and an empty
+    Key Scheme Library.
+  - Names and steps live in qmk.top's local storage.
+- **Reads outside slots 0–49 are dangerous:** index 64 returned unrelated memory, and 254/255
+  hung the keyboard until it was power-cycled (see "Read ranges").
+
+So RT75 Studio never reads macro slots (`0x8B` isn't in `READ_COMMANDS`).
+
+### RT75 Studio's macro library (feature/macro-library)
+
+Like qmk.top's Key Scheme Library:
+- **Storage:** named macros live in this browser (`localStorage`, `rt75-studio-macros-2865`),
+  with export/import as JSON. Each entry remembers the slot it was last written to and what was
+  written.
+- **Picking a slot:** putting a macro on a key picks a slot that no key uses on any profile or
+  the Fn layers (read with `0x8A`/`0x90`, in range) and that no other library macro holds.
+  - The key write is read back as usual.
+  - The macro steps are always rewritten on assignment, because the slot may have changed since
+    (qmk.top, factory reset).
+  - The review lists which keys use each slot written, and says the steps can't be confirmed.
+- **Editing** a macro that keys already run queues a rewrite of its slot. Undo rewrites what
+  RT75 Studio last wrote there.
+- **Made elsewhere:** slots keys use that no library macro holds (for example qmk.top's "Spam F"
+  in slot 0) are listed as "made elsewhere". They can be re-created in the library, which writes
+  new steps to that slot.

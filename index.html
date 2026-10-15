@@ -36,6 +36,7 @@
         <button role="tab" data-view="rt" aria-selected="false">Rapid Trigger</button>
         <button role="tab" data-view="snap" aria-selected="false">Snap Tap</button>
         <button role="tab" data-view="keymap" aria-selected="false">Key map</button>
+        <button role="tab" data-view="macros" aria-selected="false">Macros</button>
         <button role="tab" data-view="lighting" aria-selected="false">Lighting</button>
         <button role="tab" data-view="live" aria-selected="false">Live test</button>
       </div>
@@ -85,6 +86,15 @@
     <button class="btn" id="btnCancel" type="button">Cancel</button>
     <button class="btn" id="btnUndo" type="button" hidden>Undo these changes</button>
     <button class="btn btn-primary" id="btnApply" type="button">Write to keyboard</button>
+  </div>
+</dialog>
+
+<dialog class="review macro-dialog" id="macroDialog" aria-labelledby="macroTitle">
+  <h2 id="macroTitle">Macro</h2>
+  <div id="macroBody"></div>
+  <div class="review-actions">
+    <button class="btn" id="btnMacroCancel" type="button">Cancel</button>
+    <button class="btn btn-primary" id="btnMacroDone" type="button">Save</button>
   </div>
 </dialog>
 
