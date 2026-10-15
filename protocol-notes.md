@@ -416,5 +416,6 @@ Two paths exist in qmk.top/v4. RT75 Studio uses only the first.
     writes it. The RT75 Pro reports 0.
 - **Sleep timers (not implemented):** the RT75 Pro entry declares `sleep24` and `sleepBT` ranges:
   sleep 0–18 h, Bluetooth deep sleep 10 s–18 h (`0x11` / `0x91`).
-- These writes were tested against the demo's simulated keyboard (packets, read-back, refusals).
-  They haven't been run on the real keyboard yet.
+- These writes were tested against the demo's simulated keyboard (packets, read-back, refusals),
+  then verified on the real keyboard (2026-10-15): the polling-rate change with read-back and
+  Undo, and switching profile 1 → 2 → 1 all worked as expected.
