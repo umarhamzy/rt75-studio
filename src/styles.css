@@ -628,3 +628,14 @@ button.km-row:hover { background: var(--surface-2); }
 .key.mc-elsewhere { cursor: default; }
 .board.mc-board .key:not(.mc-key), .board.mc-board .knob { cursor: default; }
 .board.mc-board .key:not(.mc-key):hover { transform: none; }
+
+/* Tabs waiting for the key map: disabled, with a small spinner inside the button padding (no width change). */
+.segmented button { position: relative; }
+.segmented button:disabled { cursor: progress; opacity: 0.55; }
+.segmented button.is-loading::after {
+  content: ""; position: absolute; right: 3px; top: 50%; width: 7px; height: 7px; margin-top: -4.5px;
+  border: 1px solid currentColor; border-right-color: transparent; border-radius: 50%;
+  animation: tab-spin 0.8s linear infinite;
+}
+@keyframes tab-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .segmented button.is-loading::after { animation: none; border-right-color: currentColor; opacity: 0.6; } }

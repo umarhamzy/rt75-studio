@@ -1311,6 +1311,7 @@ function liveUnavailableReason() {
   if (!s || s.source !== 'device' || !state.dev) return 'Connect the keyboard to use the live test.';
   if (s.viaDongle) return 'The live test needs the USB cable.';
   if (state.busy) return 'Busy writing…';
+  if (keymapsLoading) return 'Loading the key map… one moment.';
   return null;
 }
 
@@ -2125,6 +2126,7 @@ function refresh() {
   renderKeyboardSettings();
   renderPendingBar();
   renderInspector();
+  renderTabs();
 }
 
 function setView(view) {
@@ -2135,30 +2137,49 @@ function setView(view) {
   if (KEYMAP_VIEWS.has(view)) ensureKeymaps();
 }
 
-// The key map and Fn layers (24 reads, slow over 2.4G) are read the first time a tab needs them.
+// The key map and Fn layers (24 reads, slow over 2.4G) load in the background right after the
+// rest of the settings. Until they're in, the Key map and Macros tabs are disabled with a spinner.
+// Other changes can still be made meanwhile: device operations queue behind each other.
 const KEYMAP_VIEWS = new Set(['keymap', 'macros']);
 let keymapsLoading = null;
+let keymapsFailed = false;
+function keymapsPending() {
+  const s = state.settings;
+  return !!s && s.source === 'device' && !!state.dev && !s.keymap;
+}
 function ensureKeymaps() {
   const s = state.settings;
-  if (!s || s.source !== 'device' || s.keymap || !state.dev) return Promise.resolve();
+  if (!keymapsPending()) return Promise.resolve();
   if (keymapsLoading) return keymapsLoading;
+  keymapsFailed = false;
   keymapsLoading = (async () => {
-    if (state.live) await stopLive();
-    state.busy = true;
-    refresh();
+    renderTabs();
     try {
-      const km = await readKeymaps(state.dev, s, (f, label) => setBusy(f, `Reading ${label}…`));
+      const km = await readKeymaps(state.dev, s);
       if (state.settings === s) Object.assign(s, km); // ignore if the keyboard was re-read meanwhile
     } catch (e) {
-      showError('Couldn’t read the key map: ' + e.message + ' Switch tabs to try again.');
+      if (state.settings === s) {
+        keymapsFailed = true;
+        showError('Couldn’t read the key map: ' + e.message + ' Open the Key map tab to try again.');
+      }
     } finally {
-      state.busy = false;
-      setBusy(null);
       keymapsLoading = null;
       refresh();
     }
   })();
   return keymapsLoading;
+}
+
+// Key map and Macros tabs: disabled with a spinner while the key map loads.
+function renderTabs() {
+  const loading = !!keymapsLoading && keymapsPending();
+  document.querySelectorAll('[data-view]').forEach(b => {
+    if (!KEYMAP_VIEWS.has(b.dataset.view)) return;
+    b.disabled = loading;
+    b.classList.toggle('is-loading', loading);
+    b.setAttribute('aria-busy', String(loading));
+    b.title = loading ? 'Loading the key map…' : '';
+  });
 }
 
 function load(settings, dev = null) {
@@ -2174,7 +2195,7 @@ function load(settings, dev = null) {
   state.capture = null;
   state.lastApplied = null;
   refresh();
-  if (KEYMAP_VIEWS.has(state.view)) setTimeout(ensureKeymaps, 0); // after the caller's own busy state clears
+  setTimeout(ensureKeymaps, 0); // the key map loads in the background, after the caller finishes
 }
 
 function showError(msg) {
