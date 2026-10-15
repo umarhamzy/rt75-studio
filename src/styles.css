@@ -627,3 +627,7 @@ button.km-row:hover { background: var(--surface-2); }
 .lib-read { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
 .lib-raw { font-size: 11.5px; color: var(--muted); margin: 6px 0; }
 .lib-raw code { display: block; margin-top: 4px; font: 11px/1.5 ui-monospace, Consolas, monospace; word-break: break-all; }
+.swatch-mc-elsewhere { background: color-mix(in oklab, var(--muted) 45%, var(--cap)); outline: 1px solid var(--line); }
+.key.mc-elsewhere { cursor: default; }
+.board.mc-board .key:not(.mc-key), .board.mc-board .knob { cursor: default; }
+.board.mc-board .key:not(.mc-key):hover { transform: none; }

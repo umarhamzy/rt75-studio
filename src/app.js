@@ -163,16 +163,19 @@ function renderBoard() {
   const pairs = s ? snapPairs() : new Map();
   const led = s && state.view === 'lighting' ? ledPreview() : null;
   board.classList.toggle('led-board', !!led);
+  // Lighting and Macros don't use key selection: hide it there (it's kept for the other tabs).
+  const selectable = !!s && state.view !== 'lighting' && state.view !== 'macros';
+  board.classList.toggle('mc-board', !!s && state.view === 'macros');
 
   // The three knob entries share one physical knob.
   const knobKeys = KEYS.filter(k => k.knob);
   const kx = Math.min(...knobKeys.map(k => k.x)), kw = Math.max(...knobKeys.map(k => k.x + k.w)) - kx;
   const knob = document.createElement('button');
   knob.type = 'button';
-  knob.className = 'knob' + (state.knob ? ' is-selected' : '');
+  knob.className = 'knob' + (state.knob && selectable ? ' is-selected' : '');
   place(knob, { x: kx, y: 0, w: kw, h: knobKeys[0].h });
   knob.setAttribute('aria-label', 'Volume knob');
-  if (led) knob.tabIndex = -1;
+  if (!selectable) knob.tabIndex = -1;
   else knob.onclick = () => { state.knob = !state.knob; state.selected.clear(); refresh(); };
   board.appendChild(knob);
 
@@ -183,9 +186,9 @@ function renderBoard() {
     el.className = 'key';
     place(el, key);
     el.dataset.slot = key.slot;
-    if (state.selected.has(key.slot)) el.classList.add('is-selected');
+    if (selectable && state.selected.has(key.slot)) el.classList.add('is-selected');
     if (state.picking !== null && key.slot !== state.picking) el.classList.add(snapEligible(key.slot) ? 'pick-target' : 'pick-blocked');
-    el.setAttribute('aria-pressed', String(state.selected.has(key.slot)));
+    if (selectable) el.setAttribute('aria-pressed', String(state.selected.has(key.slot)));
 
     const legend = document.createElement('span');
     legend.className = 'key-legend';
@@ -336,7 +339,7 @@ function renderLegend(lo, hi) {
   } else if (state.view === 'macros') {
     el.innerHTML = `<div class="segmented segmented-sm" role="group" aria-label="Layer">
         ${Object.entries(LAYERS).map(([id, l]) => `<button type="button" data-layer="${id}" aria-pressed="${state.layer === id}">${l.label}</button>`).join('')}
-      </div><span class="swatch swatch-mc"></span><span class="muted">runs a macro · click to edit it</span>`;
+      </div><span class="swatch swatch-mc"></span><span>library macro</span><span class="muted">(click to edit)</span><span class="swatch swatch-mc-elsewhere"></span><span>made elsewhere</span>`;
     el.querySelectorAll('[data-layer]').forEach(b => b.onclick = () => { state.layer = b.dataset.layer; refresh(); });
   } else if (state.view === 'lighting') {
     const l = currentLight();
