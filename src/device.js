@@ -97,10 +97,32 @@ export function travelStep(featurePrecision, usbVersion, rfVersion) {
   return v >= 1280 ? 200 : 10;
 }
 
+// 2.4G dongle timing. qmk.top waits 100 ms before every dongle status check (up to 5 tries), twice
+// per read, so a full load (~60 reads) takes 15–20 s wireless. 'fast' asks right away and then at
+// short, growing intervals with about the same overall timeout. It only changes how often the
+// dongle's status (0xF7, a read) is asked. 'classic' keeps qmk.top's timing (?dongle=classic).
+const DONGLE_WAITS = {
+  fast: [0, 5, 10, 20, 40, 80, 100, 100, 100, 100, 100, 100, 100, 100],
+  classic: Array(10).fill(100),
+};
+let dongleTiming = 'fast';
+export function setDongleTiming(mode) { if (mode in DONGLE_WAITS) dongleTiming = mode; }
+export const getDongleTiming = () => dongleTiming;
+
 class Transport {
   constructor(dev) {
     this.dev = dev;
     this.viaDongle = DONGLE_PIDS.has(dev.productId);
+    this.routed = false; // F6 0A sent during this operation
+    this.reads = 0;
+  }
+
+  // Routes the dongle to the keyboard once per operation. qmk.top also sends F6 only when the
+  // target device changes (___dongleSend24GDeviceByF6).
+  async #route() {
+    if (this.routed) return;
+    await this.#rawSend([0xf6, 0x0a]);
+    this.routed = true;
   }
 
   async #rawSend(bytes) {
@@ -123,8 +145,8 @@ class Transport {
   }
 
   async #waitFor(key) {
-    for (let i = 0; i < 10; i++) {
-      await sleep(100);
+    for (const wait of DONGLE_WAITS[dongleTiming]) {
+      if (wait) await sleep(wait);
       if ((await this.dongleStatus())[key]) return true;
     }
     return false;
@@ -143,12 +165,13 @@ class Transport {
     }
     if (cmd[0] === CMD.GET_MAGNETISM && !(cmd[3] < 4)) throw new Error(`Blocked magnet read beyond page 3 (page ${cmd[3]})`);
     const pkt = encode(cmd);
+    this.reads++;
     if (!this.viaDongle) {
       await sleep(10);
       await this.dev.sendFeatureReport(0, pkt);
       return this.#rawRead();
     }
-    await this.#rawSend([0xf6, 0x0a]); // route to keyboard
+    await this.#route();
     if (!await this.#waitFor('canSend')) throw new Error('Dongle not ready to send');
     await sleep(10);
     await this.dev.sendFeatureReport(0, pkt);
@@ -162,7 +185,7 @@ class Transport {
   async send(pkt, bounds, check = assertAllowedWrite) {
     check(pkt, bounds);
     if (this.viaDongle) {
-      await this.#rawSend([0xf6, 0x0a]);
+      await this.#route();
       if (!await this.#waitFor('canSend')) throw new Error('Dongle not ready to send');
     }
     await sleep(10);
@@ -206,6 +229,7 @@ export async function findGrantedKeyboard() {
 export async function readSettings(dev, onProgress = () => {}) {
   if (!dev.opened) await dev.open();
   const t = new Transport(dev);
+  const started = Date.now();
   const total = 10 + MAGNET_PARAMS.length;
   let done = 0;
   const step = label => onProgress(++done / total, label);
@@ -258,6 +282,7 @@ export async function readSettings(dev, onProgress = () => {}) {
       step(name);
     }
     s.source = 'device';
+    s.loadStats = { ms: Date.now() - started, reads: t.reads, timing: t.viaDongle ? dongleTiming : 'usb' };
     return s;
   } finally {
     try { await dev.close(); } catch { /* already closed */ }

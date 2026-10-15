@@ -11,7 +11,8 @@ touching device code.
 - **App:** `python serve.py` (no-cache static server), then open http://127.0.0.1:5180 in Chrome
   or Edge. Close qmk.top first; only one page can hold the keyboard.
 - **Demo:** `?demo` runs everything against a simulated keyboard (`src/demo.js`), including the
-  live test, profiles and sleep timers. `?demo&ignore=15:7` makes it drop writes to slot 15 /
+  live test, profiles and sleep timers. `?dongle=classic` uses qmk.top's slower 2.4G timing (for
+  comparing load times; the source chip shows the last load time). `?demo&ignore=15:7` makes it drop writes to slot 15 /
   param 7, which reproduces a failed write.
 - **Tests:** `node tests/run.mjs` runs all suites. They drive `src/device.js` against simulated
   keyboards and check exact packets, read-back and the blocked cases.

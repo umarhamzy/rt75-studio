@@ -285,6 +285,32 @@ First probe (2026-10-15) sent `0x8F` straight to the dongle and got
 mouse offline, ready to send. That fits the dongle replying with its status buffer.
 (Inference only; the second probe will confirm it.)
 
+### Timing and load speed (perf/dongle-speed, 2026-10-15)
+
+qmk.top's relay per message (`sendMsg` / `readMsg` / `commonMsg`, `INTERVAL_24G_TIME = 10`):
+- **Route:** `F6 0A`, only when the target device changes (`___dongleSend24GDeviceByF6` caches
+  `current24GUsedDevice`).
+- **Wait to send:** up to 5 × (100 ms, then `F7` status) until `canSend`. Each `F7` is
+  send → 10 ms → get, with 10 ms before it.
+- **Send:** wait 10 ms, then send the packet.
+- **Wait for the reply:** up to 5 × (100 ms, then `F7`) until `canRead`, then `FC`, 10 ms, and get.
+
+So every read costs at least ~0.25 s on 2.4G, and a full RT75 Studio load (60 reads: 28 magnet pages,
+16 Fn pages, 8 base pages, 8 single reads) took roughly 15–20 s.
+
+**RT75 Studio now:**
+- **Routes once per operation** (a load, a write batch), as qmk.top does. Before, it sent `F6`
+  before every read and write.
+- **'fast' timing (default):** status is asked right away, then after 5, 10, 20, 40, 80 ms and then
+  every 100 ms. The overall timeout is about the same as before (~1 s plus transfers). Only the
+  dongle status read (`F7`) is asked more often; packets and writes are unchanged.
+- **'classic' timing** (`?dongle=classic`): qmk.top's 100 ms before every status check, for
+  comparison.
+- **Load stats:** the source chip shows how long the last read took ("Live · 2.4G · 4.8 s"), and its
+  tooltip shows the read count and timing.
+- **Tests:** `tests/dongle.test.mjs` uses a simulated dongle (routing once, no fixed waits in fast
+  mode, slow and dead dongles, writes, classic timing).
+
 ## Device identification
 
 - `0x8F` (GET_USB_VERSION, Bit7) → `resp[1..4]` = device ID, uint32 little-endian.

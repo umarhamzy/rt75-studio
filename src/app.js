@@ -1,7 +1,7 @@
 import { KEYS, DEFAULT_MATRIX, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX, LAYOUT_WIDTH, LAYOUT_HEIGHT, DEVICE_ID } from './layout.js';
 import { decodeAction, encodeKey, splitKey, FUNCTIONS, RISKY, KEY_CHOICES, CODE_TO_HID, MODIFIERS, keyName, DISABLED, HID_NAMES } from './actions.js';
 import {
-  isSupported, requestKeyboard, findGrantedKeyboard, readSettings, settingsFromDump,
+  isSupported, requestKeyboard, findGrantedKeyboard, readSettings, settingsFromDump, setDongleTiming,
   writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, writeSleepTimes,
   writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot,
   LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS,
@@ -391,6 +391,12 @@ function renderDevice() {
   $('chipBattery').hidden = s.battery === undefined;
   if (s.battery !== undefined) $('chipBattery').textContent = `Battery ${s.battery}%`;
   $('chipSource').textContent = s.demo ? 'Demo · simulated keyboard' : s.source === 'device' ? (s.viaDongle ? 'Live · 2.4G' : 'Live · USB') : 'From file';
+  // How long the last full read took, so wireless speed can be compared (?dongle=classic).
+  const ls = s.loadStats;
+  if (ls && !s.demo) {
+    $('chipSource').textContent += ` · ${(ls.ms / 1000).toFixed(1)} s`;
+    $('chipSource').title = `Last read: ${(ls.ms / 1000).toFixed(1)} s, ${ls.reads} reads${ls.timing === 'usb' ? '' : `, ${ls.timing} dongle timing`}`;
+  } else $('chipSource').title = '';
   $('btnConnect').textContent = s.source === 'device' ? 'Refresh' : 'Connect keyboard';
 }
 
@@ -2245,4 +2251,6 @@ async function startDemo() {
 }
 
 refresh();
+// ?dongle=classic uses qmk.top's original 2.4G timing (for comparing load times).
+if (new URLSearchParams(location.search).get('dongle') === 'classic') setDongleTiming('classic');
 if (new URLSearchParams(location.search).has('demo')) startDemo().catch(e => showError('Demo failed: ' + e.message));
