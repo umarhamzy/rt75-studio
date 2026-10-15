@@ -48,7 +48,7 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
       input.dispatchEvent(e);
     }, 16);
   };
-  const keymap = [...dump.keymap['0']];
+  const keymaps = Array.from({ length: 4 }, () => [...dump.keymap['0']]);
   // Fn layers per profile: [windows, mac]
   const fnLayers = Array.from({ length: 4 }, () => [[...(dump.fnWin ?? DEFAULT_FN_MATRIX)], [...(dump.fnMac ?? DEFAULT_FN_MAC_MATRIX)]]);
   let last = new Uint8Array(64);
@@ -70,6 +70,8 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
       if (last[0] === 0x03) { rateCode = last[2]; return; }
       if (last[0] === 0x04) { profile = last[1]; return; }
       if (last[0] === 0x11) { sleepBytes = last.slice(8, 16); return; }
+      if (last[0] === 0x0a) { keymaps[last[1]].splice(last[2] * 4, 4, ...last.slice(8, 12)); return; }
+      if (last[0] === 0x10) { fnLayers[last[2]][last[1]].splice(last[3] * 4, 4, ...last.slice(8, 12)); return; }
       if (last[0] === 0x65 && ignore.some(x => x.slot === last[3] && x.param === last[1])) return;
       if (last[0] === 0x65 && last[2] === 0) {
         const name = PARAMS[last[1]];
@@ -87,7 +89,7 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
         case 0x91: r.set([0x91]); r.set(sleepBytes, 8); break;
         case 0x83: r.set([0x83, 0, rateCode]); break;
         case 0x86: r.set([0x86, 0]); break;
-        case 0x8a: r.set(keymap.slice(last[3] * 64, last[3] * 64 + 64)); break;
+        case 0x8a: r.set(keymaps[last[1]].slice(last[3] * 64, last[3] * 64 + 64)); break;
         case 0x90: r.set(fnLayers[last[2]][last[1]].slice(last[4] * 64, last[4] * 64 + 64)); break;
         case 0xe5: {
           const name = PARAMS[last[1]];

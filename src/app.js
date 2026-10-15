@@ -1,8 +1,9 @@
 import { KEYS, DEFAULT_MATRIX, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX, LAYOUT_WIDTH, LAYOUT_HEIGHT, DEVICE_ID } from './layout.js';
-import { decodeAction } from './actions.js';
+import { decodeAction, encodeKey, splitKey, FUNCTIONS, RISKY, KEY_CHOICES, CODE_TO_HID, MODIFIERS, keyName, DISABLED } from './actions.js';
 import {
   isSupported, requestKeyboard, findGrantedKeyboard, readSettings, settingsFromDump,
   writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, writeSleepTimes,
+  writeKeymap, isWritableAction, LOCKED_SLOTS,
   LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS,
 } from './device.js';
 
@@ -57,6 +58,8 @@ const state = {
   knob: false,               // knob selected instead of keys
   pending: new Map(),        // slot -> { field: raw value } differing from settings
   pendingKb: {},             // keyboard-wide edits, e.g. { reportRateHz: 8000 }
+  pendingKeys: new Map(),    // key map edits: 'layer:slot' -> 4 action bytes
+  capture: null,             // { layer, slot } while waiting for a key press to assign
   picking: null,             // slot waiting for a Snap Tap partner click
   // "Release at the same point" / "Same for press and release" unticked by the user. Kept per
   // selection; without it the boxes re-ticked themselves whenever the values were still equal.
@@ -203,11 +206,15 @@ function renderBoard() {
         if (state.live?.down.has(key.slot)) el.classList.add('live-down');
       } else if (state.view === 'keymap') {
         const a = layerAction(state.layer, key.slot);
-        value.textContent = a.none ? '·' : a.short;
+        // Long combos wrap after "+" in a smaller size instead of being cut off.
+        value.textContent = a.none ? '·' : a.short.replaceAll('+', '+​');
+        if (!a.none && a.short.length > 9) value.classList.add('km-wrap');
         value.title = a.label;
         el.classList.add('km-key');
         if (a.none) el.classList.add('dim');
         if (a.changed) el.classList.add('km-changed');
+        if (state.pendingKeys.has(`${state.layer}:${key.slot}`)) el.classList.add('is-pending');
+        if (state.capture?.slot === key.slot) el.classList.add('is-capturing');
       }
       el.appendChild(value);
 
@@ -324,13 +331,14 @@ function renderDevice() {
 // ---------- Pending bar ----------
 function renderPendingBar() {
   const edits = pendingEdits();
-  const n = edits.length, kb = kbChanges().length;
+  const n = edits.length, kb = kbChanges().length, km = keymapChanges().length;
   const settingsCount = edits.reduce((a, e) => a + Object.keys(e).length - 1, 0);
-  $('pendingBar').hidden = n === 0 && kb === 0;
+  $('pendingBar').hidden = n === 0 && kb === 0 && km === 0;
   const parts = [];
   if (n) parts.push(`${settingsCount} unsaved change${settingsCount === 1 ? '' : 's'} on ${n} key${n === 1 ? '' : 's'}`);
   if (kb) parts.push(n ? `${kb} keyboard setting${kb === 1 ? '' : 's'}` : `${kb} unsaved keyboard setting${kb === 1 ? '' : 's'}`);
-  $('pendingText').textContent = parts.join(' + ');
+  if (km) parts.push(`${km} key mapping${km === 1 ? '' : 's'}`);
+  $('pendingText').textContent = parts.length === 1 && km && !n && !kb ? `${km} unsaved key mapping${km === 1 ? '' : 's'}` : parts.join(' + ');
   $('btnReview').disabled = !editable();
   $('btnDiscard').disabled = state.busy;
 }
@@ -617,10 +625,33 @@ const LAYERS = {
   fnMac: { label: 'Fn · Mac', field: 'fnMac', defaults: DEFAULT_FN_MAC_MATRIX, fn: true },
 };
 
-function layerBytes(layer, slot) {
+// What the keyboard has now (ignores unsaved edits).
+function deviceBytes(layer, slot) {
   const arr = state.settings?.[LAYERS[layer].field];
   return arr ? arr.slice(slot * 4, slot * 4 + 4) : undefined;
 }
+
+// With any unsaved edit applied.
+function layerBytes(layer, slot) {
+  return state.pendingKeys.get(`${layer}:${slot}`) ?? deviceBytes(layer, slot);
+}
+
+function setKeyPending(layer, slot, bytes) {
+  const id = `${layer}:${slot}`;
+  if (bytes.join() === deviceBytes(layer, slot)?.join()) state.pendingKeys.delete(id);
+  else state.pendingKeys.set(id, [...bytes]);
+}
+
+// Key map edits that differ from the keyboard: [{ layer, slot, from, to }].
+function keymapChanges() {
+  return [...state.pendingKeys].map(([id, to]) => {
+    const [layer, slot] = [id.split(':')[0], Number(id.split(':')[1])];
+    return { layer, slot, from: deviceBytes(layer, slot), to };
+  }).filter(c => c.from && c.to.join() !== c.from.join());
+}
+
+const actionLabel = (layer, bytes) => (LAYERS[layer].fn && bytes.every(b => b === 0) ? 'No Fn action' : decodeAction(bytes, { mac: layer === 'fnMac' }).label);
+const kmRows = changes => changes.map(c => `<tr><td>${keyBySlot(c.slot).label}</td><td>${LAYERS[c.layer].label}</td><td>${actionLabel(c.layer, c.from)}</td><td><strong>${actionLabel(c.layer, c.to)}</strong></td></tr>`).join('');
 
 function layerAction(layer, slot) {
   const b = layerBytes(layer, slot);
@@ -640,27 +671,162 @@ function factoryLabel(layer, slot) {
 function renderKeymapPanel() {
   const el = $('inspector');
   const keys = [...state.selected].map(keyBySlot);
+  const layer = state.layer, L = LAYERS[layer];
+  const canEdit = editable() && !!deviceBytes(layer, keys[0]?.slot);
+
   if (keys.length !== 1) {
+    const editableKeys = keys.filter(k => keyEditBlock(layer, k.slot) === null);
     el.innerHTML = `<h2>${keys.length} keys</h2><p class="sub">${keys.map(k => k.label).join(', ')}</p>
-      <p class="note">Select a single key to see what it sends on each layer.</p>`;
+      ${canEdit ? `<h3>${L.label} layer</h3>
+        <div class="btn-row">
+          <button class="btn btn-small" id="kmMultiDisable" type="button">${L.fn ? 'Remove Fn actions' : 'Disable all'}</button>
+          <button class="btn btn-small" id="kmMultiFactory" type="button">Restore factory</button>
+        </div>
+        <p class="note">Applies to ${editableKeys.length} of ${keys.length} selected keys${editableKeys.length < keys.length ? ' (locked keys are skipped)' : ''}. Select a single key to assign something else.</p>`
+        : '<p class="note">Select a single key to see what it sends on each layer.</p>'}`;
+    $('kmMultiDisable')?.addEventListener('click', () => { editableKeys.forEach(k => setKeyPending(layer, k.slot, DISABLED)); refresh(); });
+    $('kmMultiFactory')?.addEventListener('click', () => { editableKeys.forEach(k => setKeyPending(layer, k.slot, factoryBytes(layer, k.slot))); refresh(); });
     return;
   }
+
   const key = keys[0];
   const rows = Object.entries(LAYERS).map(([id, l]) => {
     const a = layerAction(id, key.slot);
-    return `<div class="km-row${id === state.layer ? ' is-current' : ''}">
+    const pending = state.pendingKeys.has(`${id}:${key.slot}`);
+    return `<button type="button" class="km-row${id === layer ? ' is-current' : ''}${pending ? ' is-pending' : ''}" data-layer-row="${id}">
       <span class="km-layer">${l.label}</span>
-      <span class="km-now">${a.label}${a.changed ? ' <span class="km-badge">changed</span>' : ''}</span>
+      <span class="km-now">${a.label}${a.changed ? ' <span class="km-badge">changed</span>' : ''}${pending ? ' <span class="km-badge km-badge-pending">unsaved</span>' : ''}</span>
       ${a.note ? `<span class="km-factory muted">${a.note}</span>` : ''}
       ${a.kind === 'unknown' ? `<span class="km-factory muted">A built-in keyboard function qmk.top doesn’t name either (bytes ${a.raw}); left untouched.</span>` : ''}
       <span class="km-factory muted">Factory: ${factoryLabel(id, key.slot)}</span>
-    </div>`;
+    </button>`;
   }).join('');
+
+  const block = keyEditBlock(layer, key.slot);
+  let editor = '';
+  if (canEdit && block) editor = `<p class="note">${block}</p>`;
+  else if (canEdit) editor = keyEditorHtml(layer, key.slot);
+
   el.innerHTML = `
-    <div class="insp-head"><h2>${key.label}</h2></div>
-    <p class="sub">What this key sends on profile ${(state.settings.profile ?? 0) + 1}. Fn layers apply while Fn is held.</p>
+    <div class="insp-head"><h2>${key.label}</h2>${revertChipHtml(key.slot)}</div>
+    <p class="sub">What this key sends on profile ${(state.settings.profile ?? 0) + 1}. Fn layers apply while Fn is held. Click a layer to edit it.</p>
     <div class="km-rows">${rows}</div>
-    <p class="note">Read-only for now; remapping comes next.</p>`;
+    ${editor}
+    ${canEdit ? '' : `<p class="note">${state.settings.source === 'device' ? (state.live ? 'Stop the live test to edit.' : '') : 'Viewing a file. Connect the keyboard to edit.'}</p>`}`;
+
+  el.querySelectorAll('[data-layer-row]').forEach(b => b.onclick = () => { state.layer = b.dataset.layerRow; state.capture = null; refresh(); });
+  $('kmRevert')?.addEventListener('click', () => { Object.keys(LAYERS).forEach(l => state.pendingKeys.delete(`${l}:${key.slot}`)); refresh(); });
+  if (canEdit && !block) wireKeyEditor(layer, key.slot);
+}
+
+const factoryBytes = (layer, slot) => LAYERS[layer].defaults.slice(slot * 4, slot * 4 + 4);
+
+// Why a key can't be edited on a layer, or null if it can.
+function keyEditBlock(layer, slot) {
+  if (LOCKED_SLOTS.has(slot)) return 'The Fn key is locked, so you can’t lose access to the Fn layers.';
+  if (decodeAction(deviceBytes(layer, slot) ?? DISABLED).kind === 'unknown') return 'This is a built-in system key, so it’s left untouched (qmk.top locks it too).';
+  return null;
+}
+
+function revertChipHtml(slot) {
+  const has = Object.keys(LAYERS).some(l => state.pendingKeys.has(`${l}:${slot}`));
+  return has ? '<button class="revert-chip" id="kmRevert" type="button">Unsaved · Revert</button>' : '';
+}
+
+function keyEditorHtml(layer, slot) {
+  const L = LAYERS[layer], mac = layer === 'fnMac';
+  const cur = layerBytes(layer, slot);
+  const a = decodeAction(cur, { mac });
+  const isKey = a.kind === 'key' || a.kind === 'combo';
+  const { main, mods } = isKey ? splitKey(cur) : { main: undefined, mods: [] };
+  const capturing = state.capture?.slot === slot && state.capture.layer === layer;
+  const modNames = mac ? { 224: 'Ctrl', 225: 'Shift', 226: 'Opt', 227: 'Cmd' } : { 224: 'Ctrl', 225: 'Shift', 226: 'Alt', 227: 'Win' };
+  const groups = [...new Set(FUNCTIONS.map(f => f[0]))];
+  const fnValue = a.kind === 'function' ? cur.join(',') : '';
+  const overwriting = ['macro', 'mouse', 'modtap'].includes(decodeAction(deviceBytes(layer, slot), { mac }).kind);
+  return `
+    <h3>Change ${L.label}</h3>
+    ${overwriting ? '<p class="hint-warn">This key currently runs a macro, mouse or mod-tap action set in qmk.top. Replacing it here can’t be undone from RT75 Studio; reassign it in qmk.top if you change your mind.</p>' : ''}
+    <div class="km-edit">
+      <span class="km-edit-label">Key</span>
+      <div class="km-key-row">
+        <button class="btn btn-small${capturing ? ' is-capturing' : ''}" id="kmCapture" type="button">${capturing ? 'Press a key… (Esc cancels)' : 'Press a key to assign'}</button>
+        <select id="kmKeySelect" aria-label="Choose a key">
+          <option value="">${isKey ? keyName(main) : 'Choose a key…'}</option>
+          ${KEY_CHOICES.map(c => `<option value="${c}">${keyName(c)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="km-mods" role="group" aria-label="Modifiers">
+        ${[224, 225, 226, 227].map(m => `<label class="check"><input type="checkbox" data-mod="${m}" ${mods.includes(m) ? 'checked' : ''} ${!isKey || (mods.length >= 2 && !mods.includes(m)) ? 'disabled' : ''}> ${modNames[m]}</label>`).join('')}
+        <span class="muted km-mods-hint">up to 2</span>
+      </div>
+      <span class="km-edit-label">Function</span>
+      <select id="kmFnSelect" aria-label="Choose a function">
+        <option value="">${a.kind === 'function' ? a.label : 'Choose a function…'}</option>
+        ${groups.map(g => `<optgroup label="${g}">${FUNCTIONS.filter(f => f[0] === g).map(f => `<option value="${f[2].join(',')}" ${f[2].join(',') === fnValue ? 'selected' : ''}>${f[1]}${RISKY.has(f[1]) ? ' ⚠' : ''}</option>`).join('')}</optgroup>`).join('')}
+      </select>
+      <div class="btn-row km-actions">
+        <button class="btn btn-small" id="kmDisable" type="button">${L.fn ? 'No Fn action' : 'Disable key'}</button>
+        <button class="btn btn-small" id="kmFactory" type="button" ${cur.join() === factoryBytes(layer, slot).join() ? 'disabled' : ''}>Restore factory</button>
+      </div>
+    </div>`;
+}
+
+function wireKeyEditor(layer, slot) {
+  const set = bytes => {
+    if (!isWritableAction(bytes, layer, slot)) { showError('That assignment isn’t supported.'); return; }
+    showError(null);
+    setKeyPending(layer, slot, bytes);
+    state.capture = null;
+    refresh();
+  };
+  const cur = () => layerBytes(layer, slot);
+  $('kmCapture').onclick = () => { state.capture = state.capture ? null : { layer, slot }; refresh(); };
+  $('kmKeySelect').onchange = e => { if (e.target.value) set(encodeKey(Number(e.target.value), currentMods())); };
+  document.querySelectorAll('[data-mod]').forEach(cb => cb.onchange = () => {
+    const { main } = splitKey(cur());
+    if (main !== undefined) set(encodeKey(main, currentMods()));
+  });
+  $('kmFnSelect').onchange = e => {
+    if (!e.target.value) return;
+    const f = FUNCTIONS.find(x => x[2].join(',') === e.target.value);
+    if (RISKY.has(f[1]) && !confirm(`"${f[1]}" can be disruptive if pressed by accident. Assign it anyway?`)) { refresh(); return; }
+    set(f[2]);
+  };
+  $('kmDisable').onclick = () => set(DISABLED);
+  $('kmFactory').onclick = () => set(factoryBytes(layer, slot));
+}
+
+const currentMods = () => [...document.querySelectorAll('[data-mod]:checked')].map(cb => Number(cb.dataset.mod));
+
+// "Press a key" capture. A non-modifier key is assigned with any held modifiers; a modifier
+// pressed and released on its own is assigned by itself.
+let captureMod = null;
+function onCaptureKey(e) {
+  const c = state.capture;
+  if (!c) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (e.type === 'keydown' && e.key === 'Escape') { state.capture = null; captureMod = null; refresh(); return; }
+  const hid = CODE_TO_HID[e.code];
+  if (hid === undefined) return;
+  if (MODIFIERS.includes(hid)) {
+    if (e.type === 'keydown') captureMod = hid;
+    else if (captureMod === hid) { captureMod = null; finishCapture(c, hid, []); }
+    return;
+  }
+  if (e.type !== 'keydown') return;
+  captureMod = null;
+  const mods = [e.ctrlKey && 224, e.shiftKey && 225, e.altKey && 226, e.metaKey && 227].filter(Boolean);
+  finishCapture(c, hid, mods);
+}
+
+function finishCapture(c, main, mods) {
+  const bytes = encodeKey(main, mods);
+  if (!isWritableAction(bytes, c.layer, c.slot)) { showError(`${keyName(main)} can’t be assigned.`); return; }
+  setKeyPending(c.layer, c.slot, bytes);
+  state.capture = null;
+  refresh();
 }
 
 // ---------- Live test ----------
@@ -792,7 +958,7 @@ function renderLivePanel() {
   drawLive();
 }
 
-function hasAnyPending() { return pendingEdits().length > 0 || kbChanges().length > 0; }
+function hasAnyPending() { return pendingEdits().length > 0 || kbChanges().length > 0 || keymapChanges().length > 0; }
 
 // Keyboard-wide edits that differ from the keyboard: [{ field, label, from, to }].
 function kbChanges() {
@@ -1065,7 +1231,7 @@ function openReview() {
   $('reviewBody').innerHTML = `
     <p>These settings will be written to the keyboard (profile ${(state.settings.profile ?? 0) + 1}). Nothing else changes.</p>
     <div class="table-wrap"><table class="changes"><thead><tr><th>Key</th><th>Setting</th><th>Now</th><th>New</th></tr></thead>
-    <tbody>${changeRows(edits, (slot, f) => state.settings.magnet[f][slot])}${kbRows(kbChanges())}</tbody></table></div>
+    <tbody>${changeRows(edits, (slot, f) => state.settings.magnet[f][slot])}${kbRows(kbChanges())}${kmRows(keymapChanges())}</tbody></table></div>
     <label class="check"><input type="checkbox" id="chkBackup" checked> Download a backup of the current settings first</label>`;
   $('reviewStatus').textContent = '';
   $('reviewStatus').className = 'review-status';
@@ -1076,7 +1242,7 @@ function openReview() {
   $('reviewDialog').showModal();
 }
 
-async function applyEdits(edits, { backup, kb = kbChanges() }) {
+async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChanges() }) {
   const before = new Map(edits.map(e => [e.slot, Object.fromEntries(Object.keys(e).filter(f => f !== 'slot').map(f => [f, state.settings.magnet[f][e.slot]]))]));
   if (backup) downloadBackup();
   state.busy = true;
@@ -1110,18 +1276,26 @@ async function applyEdits(edits, { backup, kb = kbChanges() }) {
         if (got?.[c.field] !== c.to) result.mismatches.push({ kb: true, label: c.label, expected: fmtSecs(c.to), actual: fmtSecs(got?.[c.field]) });
       }
     }
+    if (keys.length) {
+      const km = await writeKeymap(state.dev, state.settings, keys.map(c => ({ layer: c.layer, slot: c.slot, action: c.to })),
+        (f, label) => { status.textContent = `${label}… ${Math.round(f * 100)}%`; });
+      for (const [layer, arr] of Object.entries(km.layers)) state.settings[LAYERS[layer].field] = arr; // trust the read-back
+      for (const c of keys) state.pendingKeys.delete(`${c.layer}:${c.slot}`);
+      result.retried += km.retried;
+      for (const m of km.mismatches) result.mismatches.push({ kb: true, label: `${keyBySlot(m.slot).label} (${LAYERS[m.layer].label})`, expected: actionLabel(m.layer, m.expected), actual: actionLabel(m.layer, m.actual) });
+    }
     if (result.mismatches.length) {
       status.className = 'review-status is-error';
       status.textContent = `Written and retried once, but ${result.mismatches.length} value(s) still read back differently: ` +
         result.mismatches.map(m => m.kb ? `${m.label} expected ${m.expected}, got ${m.actual}`
           : `${keyBySlot(m.slot).label} ${FIELD_LABELS[m.field]} expected ${fmt(m.field, m.expected)}, got ${fmt(m.field, m.actual)}`).join('; ');
     } else {
-      const n = edits.reduce((a, e) => a + Object.keys(e).length - 1, 0) + kb.length;
+      const n = edits.reduce((a, e) => a + Object.keys(e).length - 1, 0) + kb.length + keys.length;
       status.className = 'review-status is-ok';
       status.textContent = `Done. All ${n} setting${n === 1 ? '' : 's'} written and confirmed by reading them back.` +
         (result.retried ? ` (${result.retried} needed a second try.)` : '');
     }
-    state.lastApplied = { undo: [...before].map(([slot, fields]) => ({ slot, ...fields })), undoKb: kb.map(c => ({ ...c, from: c.to, to: c.from })) };
+    state.lastApplied = { undo: [...before].map(([slot, fields]) => ({ slot, ...fields })), undoKb: kb.map(c => ({ ...c, from: c.to, to: c.from })), undoKeys: keys.map(c => ({ ...c, from: c.to, to: c.from })) };
     $('btnApply').hidden = true;
     $('btnUndo').hidden = false;
     $('btnCancel').textContent = 'Close';
@@ -1145,12 +1319,15 @@ async function undoLast() {
     .map(e => sendable(e, s => e.mode ?? state.settings.magnet.mode[s]))
     .filter(e => Object.keys(e).length > 1);
   const undoKb = state.lastApplied.undoKb ?? [];
+  const allUndoKeys = state.lastApplied.undoKeys ?? [];
+  const undoKeys = allUndoKeys.filter(c => isWritableAction(c.to, c.layer, c.slot));
+  const skippedKeys = allUndoKeys.length - undoKeys.length;
   state.lastApplied = null;
   $('btnUndo').hidden = true;
   $('reviewBody').innerHTML = `<p>Restoring the previous values:</p>
     <div class="table-wrap"><table class="changes"><thead><tr><th>Key</th><th>Setting</th><th>Now</th><th>Restored</th></tr></thead>
-    <tbody>${changeRows(undo, (slot, f) => state.settings.magnet[f][slot])}${kbRows(undoKb)}</tbody></table></div>`;
-  await applyEdits(undo, { backup: false, kb: undoKb });
+    <tbody>${changeRows(undo, (slot, f) => state.settings.magnet[f][slot])}${kbRows(undoKb)}${kmRows(undoKeys)}</tbody></table></div>${skippedKeys ? `<p class="hint-warn">${skippedKeys} key(s) had a macro, mouse or mod-tap action that RT75 Studio can’t write back; reassign those in qmk.top.</p>` : ''}`;
+  await applyEdits(undo, { backup: false, kb: undoKb, keys: undoKeys });
   $('btnUndo').hidden = true;
 }
 
@@ -1293,6 +1470,8 @@ function load(settings, dev = null) {
   state.dev = dev;
   state.pending.clear();
   state.pendingKb = {};
+  state.pendingKeys.clear();
+  state.capture = null;
   state.lastApplied = null;
   refresh();
 }
@@ -1354,7 +1533,7 @@ $('btnSample').onclick = async () => {
 };
 $('btnSelectAll').onclick = () => { state.knob = false; state.selected = new Set(MAGNETIC.map(k => k.slot)); refresh(); };
 $('btnClearSel').onclick = () => { state.selected.clear(); refresh(); };
-$('btnDiscard').onclick = () => { state.pending.clear(); state.pendingKb = {}; refresh(); };
+$('btnDiscard').onclick = () => { state.pending.clear(); state.pendingKb = {}; state.pendingKeys.clear(); state.capture = null; refresh(); };
 $('btnReview').onclick = openReview;
 $('btnApply').onclick = () => applyEdits(pendingEdits(), { backup: $('chkBackup')?.checked });
 $('btnUndo').onclick = undoLast;
@@ -1374,6 +1553,8 @@ $('btnPresetClose').onclick = () => $('presetDialog').close();
 $('presetSaveForm').onsubmit = e => { e.preventDefault(); const n = $('presetName').value.trim(); if (n) { savePreset(n); $('presetName').value = ''; } };
 $('btnPresetImport').onclick = () => $('presetFile').click();
 $('presetFile').onchange = e => { if (e.target.files[0]) importPreset(e.target.files[0]); e.target.value = ''; };
+document.addEventListener('keydown', onCaptureKey, true);
+document.addEventListener('keyup', onCaptureKey, true);
 document.addEventListener('keydown', onLiveKey);
 document.addEventListener('keyup', onLiveKey);
 

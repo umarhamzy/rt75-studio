@@ -4,7 +4,8 @@
 // sensitivity and the RT bit of the key mode; send() rejects anything else, and every
 // packet in a batch is validated before the first one is sent.
 
-import { KEYS } from './layout.js';
+import { KEYS, DEFAULT_MATRIX, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX } from './layout.js';
+import { FUNCTIONS, MODIFIERS, HID_NAMES } from './actions.js';
 
 const VID = 0x3151;
 // Matrix slots of real magnetic keys (the knob entries are excluded).
@@ -562,4 +563,101 @@ async function readFnLayer(t, os, profile) {
   const out = [];
   for (let page = 0; page < 8; page++) out.push(...await t.query([CMD.GET_FN, os, profile, 0xff, page]));
   return out;
+}
+
+// ---------- Key map writes ----------
+// Base key  [0x0A, profile, slot, 0, 0, save, sub=0, cs, a0..a3]   (setKeyConfigSimple)
+// Fn key    [0x10, os, profile, slot, 0, 0, 0, cs, a0..a3]         (setFnKeyConfigSimple)
+// The base save flag goes only on the batch's final base packet, as with magnet writes.
+const SET_KEYMATRIX = 0x0a;
+const SET_FN = 0x10;
+export const KEYMAP_LAYERS = {
+  base: { factory: DEFAULT_MATRIX },
+  fnWin: { os: 0, factory: DEFAULT_FN_MATRIX },
+  fnMac: { os: 1, factory: DEFAULT_FN_MAC_MATRIX },
+};
+// The Fn key itself is locked on every layer so the Fn layer can't be lost (qmk.top locks it too).
+export const LOCKED_SLOTS = new Set(KEYS.filter(k => k.code === 'Fn').map(k => k.slot));
+const FUNCTION_BYTES = new Set(FUNCTIONS.map(f => f[2].join(',')));
+const VALID_HID = new Set(Object.keys(HID_NAMES).map(Number));
+
+// Actions this app may write: disabled, a key with up to two modifiers, or a named function.
+// Restoring a slot's exact factory value is also allowed (some factory values aren't in the lists).
+export function isWritableAction(a, layer, slot) {
+  if (a.length !== 4 || a.some(b => !Number.isInteger(b) || b < 0 || b > 255)) return false;
+  const factory = KEYMAP_LAYERS[layer].factory.slice(slot * 4, slot * 4 + 4);
+  if (a.join() === factory.join()) return true;
+  if (a.join() === '0,0,0,0') return true;
+  if (FUNCTION_BYTES.has(a.join())) return true;
+  if (a[0] !== 0) return false;
+  const codes = a.slice(1).filter(Boolean);
+  if (!codes.length || codes.some(c => !VALID_HID.has(c))) return false;
+  return codes.filter(c => !MODIFIERS.includes(c)).length <= 1 && codes.length <= 3;
+}
+
+function assertAllowedKeymapWrite(p, ctx) {
+  const fail = why => { throw new Error(`Blocked key-map write (${why}): ${[...p.slice(0, 12)].map(b => b.toString(16).padStart(2, '0')).join(' ')}`); };
+  if (p.length !== 64) fail('length');
+  if (p[7] !== 255 - (p.slice(0, 7).reduce((a, b) => a + b, 0) & 0xff)) fail('checksum');
+  if (p.slice(12).some(b => b !== 0)) fail('trailing bytes');
+  let layer, slot;
+  if (p[0] === SET_KEYMATRIX) {
+    if (p[1] !== ctx.profile || p[3] !== 0 || p[4] !== 0 || (p[5] !== 0 && p[5] !== 1) || p[6] !== 0) fail('header');
+    layer = 'base'; slot = p[2];
+  } else if (p[0] === SET_FN) {
+    if ((p[1] !== 0 && p[1] !== 1) || p[2] !== ctx.profile || p[4] !== 0 || p[5] !== 0 || p[6] !== 0) fail('header');
+    layer = p[1] === 0 ? 'fnWin' : 'fnMac'; slot = p[3];
+  } else {
+    fail('not a key-map command');
+  }
+  if (!KEY_SLOTS.has(slot)) fail(`slot ${slot} is not a key`);
+  if (LOCKED_SLOTS.has(slot)) fail('the Fn key is locked');
+  if (!isWritableAction([...p.slice(8, 12)], layer, slot)) fail('action not allowed');
+}
+
+// edits: [{ layer: 'base'|'fnWin'|'fnMac', slot, action: [4 bytes] }]
+export function buildKeymapPackets(edits, profile) {
+  if (!(profile >= 0 && profile < PROFILE_COUNT)) throw new Error('Unknown profile');
+  const lastBase = edits.map(e => e.layer).lastIndexOf('base');
+  return edits.map((e, i) => {
+    const pkt = e.layer === 'base'
+      ? encode([SET_KEYMATRIX, profile, e.slot, 0, 0, i === lastBase ? 1 : 0, 0, 0, ...e.action])
+      : encode([SET_FN, KEYMAP_LAYERS[e.layer].os, profile, e.slot, 0, 0, 0, 0, ...e.action]);
+    assertAllowedKeymapWrite(pkt, { profile });
+    return { ...e, pkt };
+  });
+}
+
+// Writes key-map edits, reads the touched layers back, re-sends anything that differs once.
+// Returns { layers: { base?, fnWin?, fnMac? } (fresh 512-byte arrays), mismatches, retried }.
+export async function writeKeymap(dev, settings, edits, onProgress = () => {}) {
+  const packets = buildKeymapPackets(edits, settings.profile);
+  if (!packets.length) return { layers: {}, mismatches: [], retried: 0 };
+  const check = p => assertAllowedKeymapWrite(p, { profile: settings.profile });
+  return withDevice(dev, settings, async t => {
+    const readLayer = layer => layer === 'base'
+      ? t.readPages([CMD.GET_KEYMATRIX, settings.profile, 0xff, 0, 0], 8)
+      : readFnLayer(t, KEYMAP_LAYERS[layer].os, settings.profile);
+    const sendAll = async (pkts, label) => {
+      for (const [i, p] of pkts.entries()) { await t.send(p.pkt, null, check); onProgress((i + 1) / pkts.length, label); }
+      await sleep(500);
+    };
+    const layers = {};
+    const readBack = async names => { for (const l of names) layers[l] = await readLayer(l); };
+    const wrong = () => packets.filter(p => layers[p.layer].slice(p.slot * 4, p.slot * 4 + 4).join() !== p.action.join());
+
+    await sendAll(packets, 'Writing keys');
+    const touched = [...new Set(packets.map(p => p.layer))];
+    await readBack(touched);
+    let bad = wrong();
+    const retried = bad.length;
+    if (bad.length) {
+      await sleep(800);
+      await sendAll(buildKeymapPackets(bad.map(({ layer, slot, action }) => ({ layer, slot, action })), settings.profile), 'Retrying');
+      await readBack([...new Set(bad.map(p => p.layer))]);
+      bad = wrong();
+    }
+    const mismatches = bad.map(p => ({ layer: p.layer, slot: p.slot, expected: p.action, actual: layers[p.layer].slice(p.slot * 4, p.slot * 4 + 4) }));
+    return { layers, mismatches, retried };
+  });
 }

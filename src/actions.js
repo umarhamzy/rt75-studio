@@ -131,3 +131,29 @@ export function splitKey(b) {
 }
 
 export const DISABLED = [0, 0, 0, 0];
+
+// Browser KeyboardEvent.code → HID usage, for "press a key" capture.
+export const CODE_TO_HID = {
+  Enter: 40, Escape: 41, Backspace: 42, Tab: 43, Space: 44, Minus: 45, Equal: 46, BracketLeft: 47, BracketRight: 48,
+  Backslash: 49, Semicolon: 51, Quote: 52, Backquote: 53, Comma: 54, Period: 55, Slash: 56, CapsLock: 57,
+  PrintScreen: 70, ScrollLock: 71, Pause: 72, Insert: 73, Home: 74, PageUp: 75, Delete: 76, End: 77, PageDown: 78,
+  ArrowRight: 79, ArrowLeft: 80, ArrowDown: 81, ArrowUp: 82, NumLock: 83, NumpadDivide: 84, NumpadMultiply: 85,
+  NumpadSubtract: 86, NumpadAdd: 87, NumpadEnter: 88, Numpad0: 98, NumpadDecimal: 99, IntlBackslash: 100, ContextMenu: 101,
+  ControlLeft: 224, ShiftLeft: 225, AltLeft: 226, MetaLeft: 227, ControlRight: 228, ShiftRight: 229, AltRight: 230, MetaRight: 231,
+};
+for (let i = 0; i < 26; i++) CODE_TO_HID['Key' + String.fromCharCode(65 + i)] = 4 + i;
+for (let i = 1; i <= 9; i++) CODE_TO_HID['Digit' + i] = 29 + i;
+CODE_TO_HID.Digit0 = 39;
+for (let i = 1; i <= 12; i++) CODE_TO_HID['F' + i] = 57 + i;
+for (let i = 13; i <= 24; i++) CODE_TO_HID['F' + i] = 91 + i;
+for (let i = 1; i <= 9; i++) CODE_TO_HID['Numpad' + i] = 88 + i;
+
+// Keys offered in the "choose a key" list, in a sensible order.
+export const KEY_CHOICES = [
+  ...Array.from({ length: 26 }, (_, i) => 4 + i), ...Array.from({ length: 10 }, (_, i) => 30 + i),
+  40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 51, 52, 53, 54, 55, 56, 57,
+  ...Array.from({ length: 24 }, (_, i) => (i < 12 ? 58 + i : 92 + i)),
+  70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82,
+  83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101,
+  224, 225, 226, 227, 228, 229, 230, 231,
+];

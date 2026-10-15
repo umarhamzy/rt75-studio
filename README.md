@@ -53,6 +53,29 @@ Below the keyboard:
 - **Debounce** is shown read-only: qmk.top doesn't offer it for this keyboard, and magnetic
   switches don't bounce like mechanical contacts.
 
+## Key map
+
+The **Key map** tab shows what every key sends on the active profile, for the base layer and the
+Fn layers (Windows and Mac). Keys that differ from the factory setting are outlined.
+
+To change a key:
+1. Select it and click the layer row you want to edit.
+2. Choose one of:
+   - **press a key to assign** (held modifiers are included), or pick from the key list (which
+     includes keys the RT75 lacks, such as F13–F24)
+   - up to two **modifiers**
+   - a **function** (media, apps, connection, profile, lighting…)
+   - **Disable** (base) or **No Fn action** (Fn layers)
+   - **Restore factory**
+3. With several keys selected, Disable and Restore factory apply to all of them.
+
+Edits go through the same review → write → read-back → Undo flow. Locked, as in qmk.top:
+- the **Fn key** (so the Fn layers can't be lost)
+- **system keys** (functions qmk.top can't name, such as Fn+Tab)
+
+Keys holding a macro, mouse or mod-tap action from qmk.top can be overwritten, with a warning,
+but Undo can't restore those actions.
+
 ## Live test
 
 The **Live test** tab shows how deep the key you're pressing goes, live, against that key's
@@ -85,6 +108,14 @@ be exported to a file and imported again. Demo-mode presets are stored separatel
   `[04, index]` (0–3) and sleep timers (`0x11`, four 16-bit values in seconds, range-checked as
   above, with 2.4G deep sleep always written back unchanged). Each has its own validator and is
   read back afterwards.
+- **Key-map writes** are only `[0A, profile, key, 0, 0, save, 0, …, action]` (base) and
+  `[10, os, profile, key, …, action]` (Fn layers). Their validator allows only:
+  - disabled
+  - one key with up to two modifiers
+  - functions from the list
+  - the slot's exact factory value
+
+  It refuses the Fn key, the knob, macros, mouse, mod-tap and unknown actions.
 - **The live test** sends only `0x1B 01` and `0x1B 00`, which turn depth reporting on and off.
   The same toggle is used by qmk.top's Simulation Test. It's turned off when you stop, leave the
   tab, refresh or close the page.
