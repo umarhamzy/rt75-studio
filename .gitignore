@@ -7,3 +7,6 @@ rt75-preset-*.json
 __pycache__/
 *.log
 .claude/settings.local.json
+
+# Downloaded qmk.top code for reference (node tools/fetch-qmk.mjs)
+reference/
