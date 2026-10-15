@@ -103,7 +103,7 @@ Library.
 - **Put a macro on a key** in the Key map tab: select the key, then under **Macro** pick it, or
   **New macro…**, and a play mode:
   - Loop count
-  - Press to Play
+  - Hold to play (plays while the key is held; qmk.top calls it "Press to Play")
   - Toggle playback
   
   RT75 Studio writes the macro to a slot no key uses on any profile.

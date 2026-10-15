@@ -539,7 +539,7 @@ Source: RY5088 base `_setMacro`, `setMacro`, `getMacro`, `buffToMacroEvents`; v4
 `macroEventToByte` and `configToMatrix`.
 
 - **Key action:** `[9, mode, slot, 0]`.
-  - Modes: 0 = Loop count (repeat 1–65535), 2 = "Press to Play", 1 = "Toggle Playback with
+  - Modes: 0 = Loop count (repeat 1–65535), 2 = "Press to Play" (it plays while the key is held, so RT75 Studio calls it "Hold to play"; user, 2026-10-15), 1 = "Toggle Playback with
     Assigned Key".
   - qmk.top allows 50 slots (`maxMacro = 50`), shared by all layers and profiles.
 - **Buffer (256 bytes):** repeat count u16 LE, then one record per step, ended by `00 00 00 00`:
@@ -622,3 +622,10 @@ Like qmk.top's Key Scheme Library:
 - **Made elsewhere:** slots keys use that no library macro holds (for example qmk.top's "Spam F"
   in slot 0) are listed as "made elsewhere". They can be re-created in the library, which writes
   new steps to that slot.
+- **Verified on the real keyboard (2026-10-15, feature/macro-library):** the user
+  - created a macro in the library
+  - put it on a key (the key write was confirmed by read-back)
+  - wrote it, and pressed the key: it played
+  
+  "Remove from keys" also worked. Mode 2 plays while the key is held, so it's now labelled
+  "Hold to play".

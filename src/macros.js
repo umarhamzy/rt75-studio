@@ -15,7 +15,7 @@
 export const MAX_MACROS = 50;
 export const MACRO_MODES = {
   0: { name: 'Loop count', hint: 'Plays the set number of times' },
-  2: { name: 'Press to Play', hint: 'qmk.top’s “Press to Play”' },
+  2: { name: 'Hold to play', hint: 'Plays while the key is held (qmk.top calls it “Press to Play”)' },
   1: { name: 'Toggle playback', hint: 'Press the key to start, press again to stop' },
 };
 export const MOUSE_BUTTONS = { 240: 'Left mouse button', 241: 'Right mouse button', 242: 'Middle mouse button', 243: 'Mouse Back', 244: 'Mouse Forward' };

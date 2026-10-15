@@ -108,7 +108,7 @@ write, read-back and Undo. Brightness 0 = fully off; lighting is shared by all p
 - **Macro reads are unreliable** (`0x8B`, protocol-notes.md, "Macros"). Nothing is verified by reading a
   macro. The only read is a user-triggered, clearly labelled preview on "made elsewhere" slots.
 - Key writes are read back; macro steps can't be.
-- Tested in the simulation and demo; **awaiting the user's check on the real keyboard.**
+- Verified on the real keyboard: create, assign, write, play, and Remove from keys.
 
 **Next, in the user's order:** mod-tap, then custom lighting patterns (`0x0C`/`0x8C`).
 
