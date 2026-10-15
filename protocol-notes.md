@@ -531,7 +531,7 @@ The firmware doesn't bounds-check reads, so `query()` now refuses reads outside 
 - key map: profiles 0–3, pages 0–7
 - Fn layers: layer 0, pages 0–7
 - magnet tables: pages 0–3
-- macros: not read at all (see "Macros")
+- macros: slots 0–49, pages 0–3, only for the user-triggered preview (see "Macros")
 
 ## Macros
 
@@ -576,7 +576,15 @@ Source: RY5088 base `_setMacro`, `setMacro`, `getMacro`, `buffToMacroEvents`; v4
 - **Reads outside slots 0–49 are dangerous:** index 64 returned unrelated memory, and 254/255
   hung the keyboard until it was power-cycled (see "Read ranges").
 
-So RT75 Studio never reads macro slots (`0x8B` isn't in `READ_COMMANDS`).
+So RT75 Studio doesn't rely on macro reads.
+- Nothing is ever checked by reading a macro slot.
+- The only macro read is an optional, user-triggered **"Read steps (unreliable)"** preview on "made
+  elsewhere" slots (`readMacroSlot`, slots 0–49 / pages 0–3, enforced in `query()`).
+- The preview is clearly labelled, and "Use these steps…" opens Re-create with a warning to check
+  the steps against qmk.top first.
+- **Planned check (user, 2026-10-15):** create macros in qmk.top in several slots and compare
+  them with this preview. That tells us whether the read is wrong for every macro, or only for
+  ones RT75 Studio wrote.
 
 ### RT75 Studio's macro library (feature/macro-library)
 

@@ -7,7 +7,7 @@
 import { KEYS, DEFAULT_MATRIX, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX } from './layout.js';
 import { FUNCTIONS, MODIFIERS, HID_NAMES } from './actions.js';
 import { effectById, isOffered, decodeLighting, lightingBytes, lightingFields, MAX_LEVEL } from './lighting.js';
-import { MAX_MACROS, MACRO_MODES, MACRO_CHUNK, encodeMacro, macroSize, macroRefs } from './macros.js';
+import { MAX_MACROS, MACRO_MODES, MACRO_CHUNK, encodeMacro, macroSize, macroRefs, decodeMacro } from './macros.js';
 
 const MACRO_MODE_IDS = new Set(Object.keys(MACRO_MODES).map(Number));
 
@@ -29,6 +29,7 @@ const CMD = {
   GET_MAGNETISM: 0xe5,
   GET_FEATURE_LIST: 0xe6,
   GET_LEDPARAM: 0x87,
+  GET_MACRO: 0x8b, // unreliable; only readMacroSlot uses it, for an "unreliable" preview
 };
 const READ_COMMANDS = new Set(Object.values(CMD));
 const SET_MAGNETISM = 0x65;
@@ -142,6 +143,10 @@ class Transport {
       throw new Error(`Blocked Fn-layer read outside layer 0 (os ${cmd[1]}, layer ${cmd[2]}, page ${cmd[4]})`);
     }
     if (cmd[0] === CMD.GET_MAGNETISM && !(cmd[3] < 4)) throw new Error(`Blocked magnet read beyond page 3 (page ${cmd[3]})`);
+    // Macro reads beyond the 50 slots returned unrelated memory, and index 254/255 hung the keyboard.
+    if (cmd[0] === CMD.GET_MACRO && !(cmd.length === 3 && cmd[1] < MAX_MACROS && cmd[2] < 4)) {
+      throw new Error(`Blocked macro read outside slots 0–${MAX_MACROS - 1} / pages 0–3 (${cmd[1]}, ${cmd[2]})`);
+    }
     const pkt = encode(cmd);
     if (!this.viaDongle) {
       await sleep(10);
@@ -796,6 +801,24 @@ export async function readMacroSlotsInUse(dev, settings, onProgress = () => {}) 
 }
 
 // Lowest slot that no key uses and that isn't in `exclude` (slots the library already holds).
+// What the keyboard returns for a macro slot: [0x8B, slot, page] (qmk.top getMacro), up to 4 pages
+// of 64 bytes, stopping after a page with the end marker or an erased (all 0xFF) page.
+// UNRELIABLE on this keyboard: it has returned another slot's macro, or nothing, for macros written
+// by RT75 Studio (protocol-notes.md, "Macros"). Only used for a preview the user checks.
+export async function readMacroSlot(dev, settings, slot) {
+  if (!(Number.isInteger(slot) && slot >= 0 && slot < MAX_MACROS)) throw new Error(`Blocked macro read (slot ${slot})`);
+  return withDevice(dev, settings, async t => {
+    const bytes = [];
+    for (let page = 0; page < 4; page++) {
+      const r = [...await t.query([CMD.GET_MACRO, slot, page])];
+      bytes.push(...r);
+      const hasEnd = r.some((_, i) => i <= r.length - 4 && !r[i] && !r[i + 1] && !r[i + 2] && !r[i + 3]);
+      if (hasEnd || r.every(v => v === 0xff)) break;
+    }
+    return { bytes, ...decodeMacro(bytes) };
+  });
+}
+
 export function pickFreeSlot(used, exclude = []) {
   for (let i = 0; i < MAX_MACROS; i++) if (!used.includes(i) && !exclude.includes(i)) return i;
   throw new Error(`All ${MAX_MACROS} macro slots are in use.`);

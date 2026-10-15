@@ -57,6 +57,16 @@ await writeMacros(dev, s, [{ slot: 7, macro: { repeat: 1, steps: [key(4, true, 5
 check('a shorter macro replaces a longer one cleanly', decodeMacro(dev.demoMacros.get(7)).steps.length === 2);
 check('no macro read (0x8B) is ever sent', !sent.includes(0x8b));
 
+// The optional, unreliable read: only slots 0–49, pages 0–3.
+const { readMacroSlot } = await import(new URL('../src/device.js', import.meta.url).href);
+const spam = await readMacroSlot(dev, s, 0);
+check('reading a slot returns its steps (demo)', steps(spam) === 'key:9:d:50 key:9:u:70' && spam.repeat === 1, steps(spam));
+check('a never-written slot reads as erased', (await readMacroSlot(dev, s, 9)).erased === true);
+let readBeyond = false;
+dev.sendFeatureReport = async (id, b) => { if (b[0] === 0x8b && (b[1] >= 50 || b[2] >= 4)) readBeyond = true; return orig(id, b); };
+for (const bad of [50, 64, 255, -1, 1.5]) { try { await readMacroSlot(dev, s, bad); } catch { /* refused */ } }
+check('reads outside slots 0–49 are refused before sending', !readBeyond);
+
 // Free slots: keys on every profile and the Fn layers count; the library's slots are skipped too.
 const used = await readMacroSlotsInUse(dev, s);
 check('slots in use include the Fn+F macro (slot 0)', used.join() === '0', used.join());
