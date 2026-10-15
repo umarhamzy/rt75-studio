@@ -257,6 +257,7 @@ export function settingsFromDump(d) {
     profile: d.profile,
     reportRateHz: d.reportRateHz,
     debounce: d.debounce,
+    sleep: d.sleep,
     keymap: d.keymap['0'],
     magnet: d.magnet,
     source: 'file',

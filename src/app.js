@@ -1,7 +1,8 @@
 import { KEYS, DEFAULT_MATRIX, LAYOUT_WIDTH, LAYOUT_HEIGHT, DEVICE_ID } from './layout.js';
 import {
   isSupported, requestKeyboard, findGrantedKeyboard, readSettings, settingsFromDump,
-  writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, LIMITS, RATE_OPTIONS, PROFILE_COUNT,
+  writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, writeSleepTimes,
+  LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS,
 } from './device.js';
 
 // ---------- Key naming ----------
@@ -314,7 +315,7 @@ function renderPendingBar() {
   $('pendingBar').hidden = n === 0 && kb === 0;
   const parts = [];
   if (n) parts.push(`${settingsCount} unsaved change${settingsCount === 1 ? '' : 's'} on ${n} key${n === 1 ? '' : 's'}`);
-  if (kb) parts.push(n ? 'polling rate' : 'Unsaved polling rate change');
+  if (kb) parts.push(n ? `${kb} keyboard setting${kb === 1 ? '' : 's'}` : `${kb} unsaved keyboard setting${kb === 1 ? '' : 's'}`);
   $('pendingText').textContent = parts.join(' + ');
   $('btnReview').disabled = !editable();
   $('btnDiscard').disabled = state.busy;
@@ -727,11 +728,28 @@ function hasAnyPending() { return pendingEdits().length > 0 || kbChanges().lengt
 function kbChanges() {
   const s = state.settings, k = state.pendingKb;
   if (!s) return [];
-  return k.reportRateHz !== undefined && k.reportRateHz !== s.reportRateHz
-    ? [{ field: 'reportRateHz', label: 'Polling rate', from: s.reportRateHz, to: k.reportRateHz }] : [];
+  return Object.entries(KB_FIELDS)
+    .filter(([field, def]) => k[field] !== undefined && k[field] !== def.current(s))
+    .map(([field, def]) => ({ field, label: def.label, from: def.current(s), to: k[field] }));
 }
 const fmtHz = hz => (hz === undefined ? '?' : hz >= 1000 ? `${hz / 1000} kHz` : `${hz} Hz`);
-const kbRows = changes => changes.map(c => `<tr><td>Keyboard</td><td>${c.label}</td><td>${fmtHz(c.from)}</td><td><strong>${fmtHz(c.to)}</strong></td></tr>`).join('');
+// Sleep timers are stored in seconds; 0 means never.
+function fmtSecs(sec) {
+  if (sec === undefined) return '?';
+  if (sec === 0) return 'Never';
+  if (sec < 60) return `${sec} s`;
+  const min = sec / 60;
+  if (min < 60) return `${+min.toFixed(2)} min`;
+  const h = Math.floor(min / 60), rest = +(min - h * 60).toFixed(2);
+  return rest ? `${h} h ${rest} min` : `${h} h`;
+}
+const KB_FIELDS = {
+  reportRateHz: { label: 'Polling rate', fmt: fmtHz, current: s => s.reportRateHz },
+  time_bt: { label: 'Bluetooth backlight off', fmt: fmtSecs, current: s => s.sleep?.time_bt, sleep: true },
+  deepTime_bt: { label: 'Bluetooth deep sleep', fmt: fmtSecs, current: s => s.sleep?.deepTime_bt, sleep: true },
+  time_24: { label: '2.4G backlight off', fmt: fmtSecs, current: s => s.sleep?.time_24, sleep: true },
+};
+const kbRows = changes => changes.map(c => `<tr><td>Keyboard</td><td>${c.label}</td><td>${KB_FIELDS[c.field].fmt(c.from)}</td><td><strong>${KB_FIELDS[c.field].fmt(c.to)}</strong></td></tr>`).join('');
 
 function drawLive() {
   const live = state.live;
@@ -1004,12 +1022,23 @@ async function applyEdits(edits, { backup, kb = kbChanges() }) {
       : { magnet: {}, mismatches: [], retried: 0 };
     Object.assign(state.settings.magnet, result.magnet);       // trust what the keyboard reports
     for (const e of edits) state.pending.delete(e.slot);
-    for (const c of kb) {
-      status.textContent = `Writing ${c.label.toLowerCase()}…`;
-      const got = await writeReportRate(state.dev, state.settings, c.to);
+    const rate = kb.find(c => c.field === 'reportRateHz');
+    if (rate) {
+      status.textContent = 'Writing polling rate…';
+      const got = await writeReportRate(state.dev, state.settings, rate.to);
       state.settings.reportRateHz = got;
-      delete state.pendingKb[c.field];
-      if (got !== c.to) result.mismatches.push({ kb: true, label: c.label, expected: fmtHz(c.to), actual: fmtHz(got) });
+      delete state.pendingKb.reportRateHz;
+      if (got !== rate.to) result.mismatches.push({ kb: true, label: rate.label, expected: fmtHz(rate.to), actual: fmtHz(got) });
+    }
+    const sleeps = kb.filter(c => KB_FIELDS[c.field].sleep);
+    if (sleeps.length) {
+      status.textContent = 'Writing sleep timers…';
+      const got = await writeSleepTimes(state.dev, state.settings, Object.fromEntries(sleeps.map(c => [c.field, c.to])));
+      if (got) state.settings.sleep = got;
+      for (const c of sleeps) {
+        delete state.pendingKb[c.field];
+        if (got?.[c.field] !== c.to) result.mismatches.push({ kb: true, label: c.label, expected: fmtSecs(c.to), actual: fmtSecs(got?.[c.field]) });
+      }
     }
     if (result.mismatches.length) {
       status.className = 'review-status is-error';
@@ -1063,7 +1092,7 @@ function downloadBackup() {
     device: { productName: s.productName, viaDongle: s.viaDongle },
     raw: { id: id.map(b => b.toString(16).padStart(2, '0')).join(' ') },
     deviceId: s.deviceId, rfVersion: s.rfVersion, battery: s.battery,
-    featureListSupported: false, profile: s.profile, reportRateHz: s.reportRateHz, debounce: s.debounce,
+    featureListSupported: false, profile: s.profile, reportRateHz: s.reportRateHz, debounce: s.debounce, sleep: s.sleep,
     keymap: { 0: s.keymap }, magnet: s.magnet, savedAt: new Date().toISOString(),
   };
   const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
@@ -1100,13 +1129,35 @@ function renderKeyboardSettings() {
       <span class="stat-label">Debounce</span>
       <span class="stat-value" title="qmk.top doesn't offer debounce for this keyboard; magnetic (Hall-effect) switches don't bounce like mechanical contacts.">${s.debounce ?? '?'} · not adjustable here</span>
     </div>
+    ${s.sleep ? `<div class="kb-item kb-sleep">
+      <span class="stat-label">Wireless power saving <span class="muted">(minutes, 0 = never)</span></span>
+      ${sleepInput('time_bt', 'Bluetooth backlight off', can)}
+      ${sleepInput('deepTime_bt', 'Bluetooth deep sleep', can)}
+      ${sleepInput('time_24', '2.4G backlight off', can)}
+    </div>` : ''}
     ${s.source !== 'device' ? '<p class="note kb-note">Connect the keyboard to change these.</p>' : ''}`;
+  el.querySelectorAll('[data-sleep]').forEach(inp => inp.onchange = () => {
+    const field = inp.dataset.sleep, [lo, hi] = SLEEP_LIMITS[field];
+    if (inp.value === '') return;
+    const sec = Math.min(hi, Math.max(lo, Math.round(Number(inp.value) * 60)));
+    if (sec === s.sleep[field]) delete state.pendingKb[field]; else state.pendingKb[field] = sec;
+    refresh();
+  });
   el.querySelectorAll('[data-profile]').forEach(b => b.onclick = () => changeProfile(Number(b.dataset.profile)));
   $('rateSelect').onchange = e => {
     const hz = Number(e.target.value);
     if (hz === s.reportRateHz) delete state.pendingKb.reportRateHz; else state.pendingKb.reportRateHz = hz;
     refresh();
   };
+}
+
+function sleepInput(field, label, can) {
+  const s = state.settings, sec = state.pendingKb[field] ?? s.sleep[field];
+  const [lo, hi] = SLEEP_LIMITS[field];
+  const pending = state.pendingKb[field] !== undefined && state.pendingKb[field] !== s.sleep[field];
+  return `<label class="sleep-field${pending ? ' is-pending' : ''}"><span>${label}</span>
+    <input type="number" data-sleep="${field}" min="${+(lo / 60).toFixed(2)}" max="${hi / 60}" step="1" value="${+(sec / 60).toFixed(2)}" ${can ? '' : 'disabled'}>
+    <span class="muted">${fmtSecs(sec)}</span></label>`;
 }
 
 // Profiles hold their own key settings, so switching re-reads everything.

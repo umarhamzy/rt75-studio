@@ -47,6 +47,9 @@ Below the keyboard:
 - **Profile (1–4)** switches the active profile straight away, then re-reads everything,
   because each profile stores its own key settings.
 - **Polling rate** (125Hz–8kHz) is queued like any other edit and written through the review.
+- **Wireless power saving** sets, in minutes: Bluetooth backlight off (0 = never), Bluetooth deep
+  sleep (at least 10 seconds) and 2.4G backlight off (0 = never). Each goes up to 18 hours,
+  and changes go through the review.
 - **Debounce** is shown read-only: qmk.top doesn't offer it for this keyboard, and magnetic
   switches don't bounce like mechanical contacts.
 
