@@ -592,6 +592,9 @@ Like qmk.top's Key Scheme Library:
   - The review lists which keys use each slot written, and says the steps can't be confirmed.
 - **Editing** a macro that keys already run queues a rewrite of its slot. Undo rewrites what
   RT75 Studio last wrote there.
+- **Deleting:** the keyboard has no delete command, and qmk.top's delete only removes a macro from its
+  own list. RT75 Studio's **Remove from keys** sets the keys that run a slot back to their factory
+  action, as normal reviewed key-map writes. **Delete** removes a macro from the library only.
 - **Made elsewhere:** slots keys use that no library macro holds (for example qmk.top's "Spam F"
   in slot 0) are listed as "made elsewhere". They can be re-created in the library, which writes
   new steps to that slot.

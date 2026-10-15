@@ -108,6 +108,9 @@ Library.
   
   RT75 Studio writes the macro to a slot no key uses on any profile.
 - **Edit a macro that keys use,** and the change is queued for review and written again.
+- **Remove from keys** puts the keys that run a macro back to their factory action (reviewed like any
+  change). The keyboard has no command to delete a macro, so its slot is simply left unused.
+  **Delete** removes a macro from the library.
 - **Export** the library to a file for a backup or another browser, and **Import** it back.
 
 The keyboard can't give macro steps back, so this library is the only copy of names and steps.

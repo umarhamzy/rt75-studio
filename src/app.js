@@ -869,6 +869,20 @@ async function assignLibraryMacro(layer, slot, entry, mode) {
   refresh();
 }
 
+// Puts every key that runs a slot (on this profile's base layer and the Fn layers) back to its
+// factory action, as reviewed key-map changes. The slot itself is just left unused: the keyboard
+// has no command to delete a macro, and qmk.top's “delete” only removes it from its own list.
+function removeSlotFromKeys(slot) {
+  for (const u of slotUsers(slot)) {
+    const bytes = factoryBytes(u.layer, u.key.slot);
+    if (isWritableAction(bytes, u.layer, u.key.slot)) setKeyPending(u.layer, u.key.slot, bytes);
+  }
+  if (state.pendingMacroWrites.get(slot) && !slotUsers(slot).length) state.pendingMacroWrites.delete(slot);
+  libraryStatus = 'Queued: those keys go back to their factory action when you write your changes.';
+  refresh();
+  setTimeout(() => { libraryStatus = ''; }, 0);
+}
+
 // Macros view: the library.
 let libraryStatus = '';
 function renderLibraryPanel() {
@@ -889,6 +903,7 @@ function renderLibraryPanel() {
       <div class="lib-buttons">
         <button class="btn btn-small" type="button" data-lib-edit="${e.id}">Edit…</button>
         ${cls === ' is-outdated' && can ? `<button class="btn btn-small btn-primary" type="button" data-lib-write="${e.id}">Write to keyboard</button>` : ''}
+        ${users.length && can ? `<button class="btn btn-small" type="button" data-remove-slot="${e.slot}">Remove from keys</button>` : ''}
         <button class="btn btn-small" type="button" data-lib-dup="${e.id}">Duplicate</button>
         <button class="btn btn-small" type="button" data-lib-del="${e.id}">Delete</button>
       </div></li>`;
@@ -907,7 +922,7 @@ function renderLibraryPanel() {
     ${elsewhere.length ? `<div class="lib-elsewhere"><h3>Made elsewhere</h3><ul class="lib-list">${elsewhere.map(([slot, users]) => `<li class="lib-item">
         <div class="lib-top"><span class="lib-name">Macro slot ${slot + 1}</span><span class="lib-meta">steps unknown</span></div>
         <p class="lib-status">On ${users.map(userLabel).join(', ')}. Made outside RT75 Studio, for example in qmk.top.</p>
-        <div class="lib-buttons"><button class="btn btn-small" type="button" data-lib-recreate="${slot}">Re-create here…</button></div></li>`).join('')}</ul></div>` : ''}
+        <div class="lib-buttons"><button class="btn btn-small" type="button" data-lib-recreate="${slot}">Re-create here…</button>${can ? `<button class="btn btn-small" type="button" data-remove-slot="${slot}">Remove from keys</button>` : ''}</div></li>`).join('')}</ul></div>` : ''}
     <p class="note">The keyboard can’t give macro steps back, so this library is the only copy of their names and steps. Export it to keep a backup or move it to another browser.</p>`;
 
   const byId = b => libById(b.dataset[Object.keys(b.dataset)[0]]);
@@ -923,7 +938,7 @@ function renderLibraryPanel() {
     const e = byId(b);
     const users = e.slot !== undefined ? slotUsers(e.slot) : [];
     const msg = users.length
-      ? `Delete “${e.name}” from the library? ${users.map(userLabel).join(', ')} will keep running it from the keyboard, but RT75 Studio won’t know its name or steps any more.`
+      ? `Delete “${e.name}” from the library? ${users.map(userLabel).join(', ')} will keep running it from the keyboard, but RT75 Studio won’t know its name or steps any more. (Use “Remove from keys” first to take it off them.)`
       : `Delete “${e.name}” from the library?`;
     if (!confirm(msg)) return;
     state.library = state.library.filter(x => x.id !== e.id);
@@ -931,6 +946,7 @@ function renderLibraryPanel() {
     persistLibrary();
     refresh();
   });
+  el.querySelectorAll('[data-remove-slot]').forEach(b => b.onclick = () => removeSlotFromKeys(Number(b.dataset.removeSlot)));
   el.querySelectorAll('[data-lib-recreate]').forEach(b => b.onclick = () => openMacroEditor(null, { slot: Number(b.dataset.libRecreate) }));
   $('libNew').onclick = () => openMacroEditor(null);
   $('libExport').onclick = () => {
