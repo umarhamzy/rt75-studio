@@ -317,7 +317,7 @@ function renderLegend(lo, hi) {
     const e = l && effectById(l.effect);
     el.innerHTML = l
       ? `<span class="swatch led-swatch" style="--sw:${l.rainbow || !e?.color ? 'conic-gradient(from 90deg, #f55, #fc4, #5e7, #4cf, #a6f, #f55)' : hex(l.color)}"></span>
-         <span>${e?.name ?? `Effect ${l.effect}`} · brightness ${l.brightness}/${MAX_LEVEL}</span><span class="muted">preview is approximate</span>`
+         <span>${e?.name ?? `Effect ${l.effect}`} · ${l.brightness ? `brightness ${l.brightness}/${MAX_LEVEL}` : 'lights off'}</span><span class="muted">preview is approximate</span>`
       : '<span class="muted">Lighting wasn’t read from this source.</span>';
   } else {
     el.innerHTML = '<span class="swatch swatch-snap"></span><span>Snap Tap pairs: the last key pressed wins</span>';
@@ -1423,6 +1423,7 @@ function fmtLight(f, l) {
   if (f === 'option') return e?.options?.[l.option] ?? String(l.option);
   if (f === 'rainbow') return l.rainbow ? 'Rainbow' : 'Single colour';
   if (f === 'color') return SWATCHES.find(([c]) => c === l.color)?.[1] ?? hex(l.color).toUpperCase();
+  if (f === 'brightness' && l.brightness === 0) return 'Off';
   return `${l[f]} of ${MAX_LEVEL}`;
 }
 
@@ -1518,8 +1519,9 @@ function renderLightingPanel() {
   const dis = can ? '' : 'disabled';
   const changed = f => (change?.fields.includes(f) ? ' is-changed' : '');
   const revert = can && change ? '<button class="revert-chip" id="btnRevertLight" type="button" title="Discard the unsaved lighting change">Unsaved · Revert</button>' : '';
+  // Brightness 0 turns the backlight fully off (verified on the keyboard), so it's labelled Off.
   const levels = (attr, value, on) => `<div class="segmented segmented-sm level-picker" role="group">
-      ${Array.from({ length: MAX_LEVEL + 1 }, (_, i) => `<button type="button" data-${attr}="${i}" aria-pressed="${on && value === i}" ${can && on ? '' : 'disabled'}>${i}</button>`).join('')}
+      ${Array.from({ length: MAX_LEVEL + 1 }, (_, i) => `<button type="button" data-${attr}="${i}" aria-pressed="${on && value === i}" ${can && on ? '' : 'disabled'}>${attr === 'bright' && i === 0 ? 'Off' : i}</button>`).join('')}
     </div>`;
   const offered = EFFECTS.filter(isOffered);
   const effects = (isOffered(e) ? offered : [e ?? { id: l.effect, name: `Effect ${l.effect}`, motion: 'none' }, ...offered])
@@ -1538,7 +1540,7 @@ function renderLightingPanel() {
   if (!can) notes.push(s.source === 'device' ? (state.busy ? 'Writing…' : 'Editing is off while the live test runs.') : 'Viewing a file. Connect the keyboard to change the lighting.');
 
   el.innerHTML = `<div class="insp-head"><h2>Lighting</h2>${revert}</div>
-    <p class="sub">Backlight effect for the whole keyboard</p>
+    <p class="sub">Backlight for the whole keyboard, shared by all profiles</p>
     <h3 class="lt-head${changed('effect')}">Effect</h3>
     <div class="fx-grid" role="group" aria-label="Effect">${effects}</div>
     <div class="lt-row">

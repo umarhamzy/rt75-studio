@@ -92,7 +92,7 @@ system keys locked. Verified on the real keyboard: reads, a base remap, an Fn-la
 
 **Lighting (feature/lighting):** main backlight read (`0x87`) and write (`0x07`, Bit8 checksum),
 with effect, brightness, speed, colour/rainbow and direction. Format decoded from qmk.top
-(protocol-notes.md, "Lighting"); the RT75 has no side light. Tested in the simulation and demo;
-**awaiting the user's check on the real keyboard.**
+(protocol-notes.md, "Lighting"); the RT75 has no side light. Verified on the real keyboard: read,
+write, read-back and Undo. Brightness 0 = fully off; lighting is shared by all profiles.
 
 **Possible next steps:** custom lighting patterns (`0x0C`/`0x8C`), macros, mouse and mod-tap actions.

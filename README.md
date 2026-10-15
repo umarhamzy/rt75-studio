@@ -80,7 +80,9 @@ but Undo can't restore those actions.
 
 The **Lighting** tab sets the backlight for the whole keyboard:
 - **effect:** the 19 effects qmk.top offers for the RT75 Pro, by the same names
-- **brightness** and **speed** (0–4)
+- **brightness** and **speed** (0–4; brightness 0 turns the lights off)
+
+Lighting is shared by all four profiles.
 - **colour:** rainbow, a preset or any custom colour
 - **direction** or pattern, for effects that have one
 

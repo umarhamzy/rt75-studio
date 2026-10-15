@@ -492,6 +492,12 @@ apply to this keyboard).
   (`assertAllowedLightWrite`) checks the effect, ranges, option count, colour mode, the Custom
   bytes, the Bit8 checksum and that bytes 9–63 are zero. Each write is read back and re-sent once
   if it differs.
-- **Unknowns:** whether lighting is stored per profile (RT75 Studio re-reads it on profile switch
-  either way) and what brightness 0 looks like on the keyboard. Editing Custom patterns
-  (`0x0C`/`0x8C` user picture) is not implemented.
+- **Brightness 0 turns the backlight fully off** (checked on the keyboard), which is how qmk.top
+  turns the RT75's lights off, since its list has no "Off" effect. RT75 Studio labels it "Off".
+- **Lighting is keyboard-wide, not per profile.** The user set different lighting in two profiles
+  and switching profiles didn't change it.
+- **Verified on the real keyboard (2026-10-15):**
+  - the read matched qmk.top's lighting page
+  - a written change (effect, colour, brightness) took effect and was confirmed by read-back
+  - Undo restored the original
+- Editing Custom patterns (`0x0C`/`0x8C` user picture) is not implemented.
