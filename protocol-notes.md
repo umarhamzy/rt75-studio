@@ -429,3 +429,28 @@ Two paths exist in qmk.top/v4. RT75 Studio uses only the first.
 - These writes were tested against the demo's simulated keyboard (packets, read-back, refusals),
   then verified on the real keyboard (2026-10-15): the polling-rate change with read-back and
   Undo, and switching profile 1 → 2 → 1 all worked as expected.
+
+## Key map and Fn layers
+
+- **Base layer:** `[0x8A, profile, 0xFF, page 0–7, sub]`, 4 bytes per slot (sub = 0).
+- **Fn layers:** `[0x90, os, profile, 0xFF, page]`, where os is 0 = Windows and 1 = Mac. The page
+  is in **byte 4** here, unlike the base read, which has it in byte 3.
+  - The RT75 Pro has Windows and Mac Fn layers (`fnSysLayer {win:1, mac:1}`).
+  - An all-zero Fn slot means "no Fn action".
+- **Write formats** (RY5088 base, not yet used):
+  - Base key: `[0x0A, profile, slot, 0, 0, save, sub, cs, a0..a3]` (`setKeyConfigSimple`). qmk.top
+    passes sub = 0 and save = true per call.
+  - Fn key: `[0x10, os, profile, slot, 0, 0, 0, cs, a0..a3]` (`setFnKeyConfigSimple`, no save byte).
+- **Action encodings** are in `src/actions.js`.
+- **qmk.top keeps two function-name tables (K0 and h5/uc) whose byte values overlap with different
+  meanings.** For the RT75 Pro its UI uses h5. Example: `10,15,0,0` is "Caps Swap" in K0, but
+  "音量<->键盘亮度" (knob: volume ↔ keyboard brightness) in h5, and that is what the RT75's
+  Fn+R-Alt does. The knob's extra slots 94–97 (`13,2,1/2,0` and `13,3,1/2,0`) are the knob's
+  brightness/speed mode.
+- **Unidentified actions:** qmk.top shows anything it can't identify (`ConfigUnknown`) as a red,
+  non-selectable "System Key" (系统按键). It also applies that label to keys it locks
+  (`needDisableKeys`). The RT75's Fn+Tab `10,4,0,0` is one of these; RT75 Studio labels it
+  "System key" and never edits it.
+- **Verified on the real keyboard (2026-10-15):** RT75 Studio's Key map (base and Windows Fn layer)
+  matched qmk.top's Custom Keys and Fn Layer pages. The user's Fn layer has a qmk.top macro on
+  Fn+F (`9,0,0,0` → Macro 1).

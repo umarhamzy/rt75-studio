@@ -45,7 +45,7 @@ export const FUNCTIONS = [
   ['Keyboard', 'Fn', [10, 1, 0, 0]], ['Keyboard', 'Win key lock', [10, 3, 0, 0]], ['Keyboard', 'Switch to Windows', [10, 5, 0, 0]],
   ['Keyboard', 'Switch to Mac', [10, 5, 1, 0]], ['Keyboard', 'Switch OS (cycle)', [10, 5, 3, 0]], ['Keyboard', 'Keyboard lock', [10, 7, 0, 0]],
   ['Keyboard', 'Check battery', [10, 8, 0, 0]], ['Keyboard', 'WASD ↔ arrows', [10, 10, 0, 0]], ['Keyboard', 'Power saving', [10, 12, 0, 0]],
-  ['Keyboard', 'Fn lock', [10, 13, 0, 0]], ['Keyboard', 'Caps swap', [10, 15, 0, 0]], ['Keyboard', 'Alt+Tab', [10, 20, 0, 0]],
+  ['Keyboard', 'Fn lock', [10, 13, 0, 0]], ['Keyboard', 'Knob: volume ↔ brightness', [10, 15, 0, 0]], ['Keyboard', 'Alt+Tab', [10, 20, 0, 0]],
   ['Keyboard', 'Reset to factory', [10, 2, 0, 0]],
   ['Profile', 'Next profile', [8, 0, 1, 0]], ['Profile', 'Previous profile', [8, 0, 2, 0]], ['Profile', 'Cycle profiles', [8, 0, 3, 0]],
   ['Profile', 'Profile 1', [8, 0, 4, 0]], ['Profile', 'Profile 2', [8, 0, 4, 1]], ['Profile', 'Profile 3', [8, 0, 4, 2]],
@@ -65,7 +65,7 @@ const FN_SHORT = {
   'Web forward': 'Fwd', 'Web refresh': 'Reload', 'Web favourites': 'Fav', 'Launchpad (Mac)': 'Launch', 'Task view': 'Tasks',
   'Siri (Mac)': 'Siri', 'System sleep': 'Sleep', 'System wake': 'Wake', 'System power': 'Power', Fn: 'Fn', 'Win key lock': 'Win lock',
   'Switch to Windows': 'Win OS', 'Switch to Mac': 'Mac OS', 'Switch OS (cycle)': 'OS', 'Keyboard lock': 'KB lock',
-  'Check battery': 'Battery', 'WASD ↔ arrows': 'WASD', 'Power saving': 'Eco', 'Fn lock': 'Fn lock', 'Caps swap': 'Caps ⇄',
+  'Check battery': 'Battery', 'WASD ↔ arrows': 'WASD', 'Power saving': 'Eco', 'Fn lock': 'Fn lock', 'Knob: volume ↔ brightness': 'Knob ⇄',
   'Alt+Tab': 'Alt+Tab', 'Reset to factory': 'Reset', 'Next profile': 'Prof +', 'Previous profile': 'Prof −',
   'Cycle profiles': 'Prof', 'Profile 1': 'P1', 'Profile 2': 'P2', 'Profile 3': 'P3', 'Profile 4': 'P4', 'Bluetooth 1': 'BT 1',
   'Bluetooth 2': 'BT 2', 'Bluetooth 3': 'BT 3', '2.4G': '2.4G', Wired: 'USB', 'Cycle connection': 'Conn', 'Lighting on/off': 'Light',
@@ -104,7 +104,8 @@ export function decodeAction(b, { mac = false } = {}) {
   if (b[0] === 1) return { kind: 'mouse', label: MOUSE[b[2]] ?? 'Mouse action', short: MOUSE[b[2]] ?? 'Mouse', editable: false };
   if (b[0] === 9) return { kind: 'macro', label: `Macro ${b[2] + 1}`, short: `M${b[2] + 1}`, editable: false };
   if (b[0] === 24) return { kind: 'modtap', label: `Mod-tap: ${keyName(b[1])} / ${keyName(b[2])}`, short: 'MT', editable: false };
-  return { kind: 'unknown', label: `Special (${b.map(x => x.toString(16).padStart(2, '0')).join(' ')})`, short: '?', editable: false };
+  // qmk.top shows anything it can't identify as a protected "System Key" (系统按键); so do we.
+  return { kind: 'unknown', label: 'System key', short: 'System', raw: b.map(x => x.toString(16).padStart(2, '0')).join(' '), editable: false };
 }
 
 // One main key plus up to two modifiers, in qmk.top's combo layout:
