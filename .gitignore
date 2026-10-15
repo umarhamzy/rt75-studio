@@ -1,0 +1,9 @@
+# Files the app downloads (personal keyboard backups and dumps)
+rt75-backup-*.json
+rt75-dump-*.json
+rt75-preset-*.json
+
+# Local tooling
+__pycache__/
+*.log
+.claude/settings.local.json

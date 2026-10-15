@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RT75 Pro Settings Dump</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --text:#e6e8ee; --muted:#8a90a0; --accent:#6ea8ff; --ok:#5fd38d; --warn:#f2c46d; --err:#ff7a7a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui, sans-serif; }
+  main { max-width:1100px; margin:0 auto; padding:24px 16px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  h2 { font-size:16px; margin:24px 0 8px; }
+  p { color:var(--muted); margin:0 0 16px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
+  button { background:var(--accent); color:#0b0d12; border:0; border-radius:8px; padding:10px 16px; font-weight:600; cursor:pointer; }
+  button.secondary { background:var(--panel); color:var(--text); border:1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:default; }
+  label { color:var(--muted); font-size:14px; }
+  pre { background:var(--panel); border-radius:8px; padding:14px; overflow-x:auto; font:12px/1.5 ui-monospace, Consolas, monospace; white-space:pre-wrap; margin:0; }
+  .tablewrap { overflow-x:auto; border:1px solid var(--line); border-radius:8px; }
+  table { border-collapse:collapse; width:100%; font:12px/1.4 ui-monospace, Consolas, monospace; }
+  th, td { padding:4px 8px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
+  th { position:sticky; top:0; background:var(--panel); color:var(--muted); font-weight:600; }
+  .changed { color:var(--warn); }
+  .ok { color:var(--ok); } .err { color:var(--err); } .muted { color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>RT75 Pro settings dump (read-only)</h1>
+  <p>Close qmk.top first. This page sends only read commands (GET 0x8F, 0xE6, 0x84, 0x83, 0x86, 0x8A, 0xE5,
+     plus dongle status polls). It never writes to the keyboard. A USB cable is fastest; over 2.4G it takes a few minutes.</p>
+  <div class="row">
+    <button id="go">Connect and read settings</button>
+    <label><input type="checkbox" id="allLayers"> Read all 4 key layers (slower)</label>
+    <button id="copy" class="secondary" disabled>Copy summary</button>
+    <button id="save" class="secondary" disabled>Download JSON</button>
+  </div>
+  <pre id="log">Waiting.</pre>
+  <h2>Per-key settings</h2>
+  <div class="tablewrap"><table id="keys"><thead></thead><tbody></tbody></table></div>
+</main>
+<script>
+// ---------- Device constants (from qmk.top/v4: ry5088_zmd_k982d_3m_8k_1k, ID 2865) ----------
+const DEFAULT_MATRIX = [0,0,41,0,0,0,53,0,0,0,43,0,0,0,57,0,0,0,225,0,0,0,224,0,0,0,0,0,0,0,30,0,0,0,20,0,0,0,4,0,0,0,0,0,0,0,227,0,0,0,58,0,0,0,31,0,0,0,26,0,0,0,22,0,0,0,29,0,0,0,226,0,0,0,59,0,0,0,32,0,0,0,8,0,0,0,7,0,0,0,27,0,0,0,0,0,0,0,60,0,0,0,33,0,0,0,21,0,0,0,9,0,0,0,6,0,0,0,0,0,0,0,61,0,0,0,34,0,0,0,23,0,0,0,10,0,0,0,25,0,0,0,0,0,0,0,62,0,0,0,35,0,0,0,28,0,0,0,11,0,0,0,5,0,0,0,44,0,0,0,63,0,0,0,36,0,0,0,24,0,0,0,13,0,0,0,17,0,0,0,0,0,0,0,64,0,0,0,37,0,0,0,12,0,0,0,14,0,0,0,16,0,0,0,0,0,0,0,65,0,0,0,38,0,0,0,18,0,0,0,15,0,0,0,54,0,0,0,230,0,0,0,66,0,0,0,39,0,0,0,19,0,0,0,51,0,0,0,55,0,10,1,0,0,0,0,67,0,0,0,45,0,0,0,47,0,0,0,52,0,0,0,56,0,0,0,228,0,0,0,68,0,0,0,46,0,0,0,48,0,0,0,0,0,0,0,229,0,0,0,80,0,0,0,69,0,0,0,42,0,0,0,49,0,0,0,40,0,0,0,82,0,0,0,81,0,0,0,0,0,0,0,76,0,0,0,77,0,0,0,75,0,0,0,78,0,0,0,79,0,0,0,0,0,3,0,226,0,3,0,234,0,3,0,233,0,13,2,1,0,13,2,2,0,13,3,1,0,13,3,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+const SLOTS = DEFAULT_MATRIX.length / 4;   // 128
+const DONGLE_PIDS = new Set(['12625:20535', '12625:20536', '12625:20541']);
+
+const HID = { 40:'Enter', 41:'Esc', 42:'Backspace', 43:'Tab', 44:'Space', 45:'-', 46:'=', 47:'[', 48:']', 49:'\\', 51:';', 52:"'", 53:'`',
+  54:',', 55:'.', 56:'/', 57:'Caps', 70:'PrtSc', 71:'ScrLk', 72:'Pause', 73:'Ins', 74:'Home', 75:'PgUp', 76:'Del', 77:'End', 78:'PgDn',
+  79:'Right', 80:'Left', 81:'Down', 82:'Up', 224:'LCtrl', 225:'LShift', 226:'LAlt', 227:'LWin', 228:'RCtrl', 229:'RShift', 230:'RAlt', 231:'RWin' };
+for (let i = 0; i < 26; i++) HID[4 + i] = String.fromCharCode(65 + i);
+for (let i = 0; i < 9; i++) HID[30 + i] = String(i + 1);
+HID[39] = '0';
+for (let i = 0; i < 12; i++) HID[58 + i] = 'F' + (i + 1);
+const CONSUMER = { 226:'Mute', 233:'Vol+', 234:'Vol-' };
+
+function keyName(q) {
+  if (q[0] === 0 && q[1] === 0 && q[3] === 0) return q[2] === 0 ? '(none)' : (HID[q[2]] ?? `HID ${q[2]}`);
+  if (q[0] === 3) return CONSUMER[q[2] | (q[3] << 8)] ?? `Media 0x${(q[2] | (q[3] << 8)).toString(16)}`;
+  if (q[0] === 10 && q[1] === 1) return 'Fn';
+  if (q[0] === 13) return `Knob ${q[1] === 2 ? 'turn' : 'press-turn'} ${q[2] === 1 ? 'left' : 'right'}`;
+  return 'raw ' + hex(q);
+}
+const MODES = { 0:'normal', 2:'DKS', 3:'MT', 4:'TGL hold', 5:'TGL dots', 7:'Snap/SOCD' };
+
+// ---------- Transport ----------
+const logEl = document.getElementById('log');
+const log = (s, cls) => { const d = document.createElement('div'); if (cls) d.className = cls; d.textContent = s; logEl.appendChild(d); logEl.scrollTop = logEl.scrollHeight; };
+const hex = a => [...a].map(b => b.toString(16).padStart(2, '0')).join(' ');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Command framing with checksum mode Bit7: buf[7] = 255 - (sum(buf[0..6]) & 0xFF).
+function encode(cmd) {
+  const buf = new Uint8Array(64); buf.set(cmd);
+  buf[7] = 255 - (buf.slice(0, 7).reduce((a, b) => a + b, 0) & 0xff);
+  return buf;
+}
+async function rawSend(dev, bytes) { const b = new Uint8Array(64); b.set(bytes); await sleep(10); await dev.sendFeatureReport(0, b); }
+async function rawRead(dev) { await sleep(10); return new Uint8Array((await dev.receiveFeatureReport(0)).buffer); }
+
+// Only these command bytes may ever be sent from this page.
+const READ_ONLY = new Set([0x8f, 0x80, 0xe6, 0x84, 0x83, 0x86, 0x8a, 0xe5]);
+
+// Travel units per raw value, mirroring qmk.top/v4 get磁轴行程步进倍数 / getLegacy磁轴行程步进倍数.
+// The RT75 Pro has no feature list and no travelSetting, so the legacy branch applies.
+function travelStep(featurePrecision, usb, rf) {
+  if (featurePrecision) return { '0.01mm': 100, '0.005mm': 200, '0.001mm': 1000 }[featurePrecision] ?? 100;
+  const v = rf || usb;
+  if (v === undefined) return 10;
+  if (v >= 768 && v < 1280) return 100;
+  return v >= 1280 ? 200 : 10;
+}
+
+function makeTransport(dev) {
+  const viaDongle = DONGLE_PIDS.has(`${dev.vendorId}:${dev.productId}`);
+  async function status() {
+    await rawSend(dev, [0xf7]); const r = await rawRead(dev);
+    return { canRead: r[0] === 1, battery: r[1], kbOnline: r[3] === 0, canSend: r[5] === 1 };
+  }
+  async function waitFor(key) { for (let i = 0; i < 10; i++) { await sleep(100); if ((await status())[key]) return true; } return false; }
+  return {
+    viaDongle, status,
+    async query(cmd) {
+      if (!READ_ONLY.has(cmd[0])) throw new Error(`blocked non-read command 0x${cmd[0].toString(16)}`);
+      const pkt = encode(cmd);
+      if (!viaDongle) { await sleep(10); await dev.sendFeatureReport(0, pkt); return rawRead(dev); }
+      await rawSend(dev, [0xf6, 0x0a]);
+      if (!await waitFor('canSend')) throw new Error('dongle not ready to send');
+      await sleep(10); await dev.sendFeatureReport(0, pkt);
+      if (!await waitFor('canRead')) throw new Error('dongle has no reply ready');
+      await rawSend(dev, [0xfc]);
+      return rawRead(dev);
+    },
+  };
+}
+
+// ---------- Reads (formats from qmk.top/v4 RY5088 base class) ----------
+async function readPages(t, header, pages) {
+  const out = [];
+  for (let p = 0; p < pages; p++) { const cmd = [...header]; cmd[3] = p; out.push(...await t.query(cmd)); }
+  return out;
+}
+const u16 = bytes => { const v = []; for (let i = 0; i < bytes.length; i += 2) v.push(bytes[i] | (bytes[i + 1] << 8)); return v; };
+
+let result = null;
+
+document.getElementById('go').onclick = async () => {
+  logEl.textContent = '';
+  document.querySelector('#keys thead').innerHTML = '';
+  document.querySelector('#keys tbody').innerHTML = '';
+  if (!('hid' in navigator)) { log('WebHID is not available. Use Chrome or Edge.', 'err'); return; }
+  let devs;
+  try { devs = await navigator.hid.requestDevice({ filters: [{ vendorId: 0x3151, usagePage: 0xffff }] }); }
+  catch (e) { log('Picker failed: ' + e.message, 'err'); return; }
+  const dev = devs.find(d => d.collections.some(c => c.featureReports.length));
+  if (!dev) { log('No configuration interface selected (needs the usagePage 0xFFFF / usage 0x02 entry).', 'err'); return; }
+  const go = document.getElementById('go'); go.disabled = true;
+  try {
+    if (!dev.opened) await dev.open();
+    const t = makeTransport(dev);
+    log(`Connected: ${dev.productName}  PID 0x${dev.productId.toString(16)}  ${t.viaDongle ? '(via 2.4G dongle)' : '(wired)'}`);
+    const r = { device: { productName: dev.productName, vid: dev.vendorId, pid: dev.productId, viaDongle: t.viaDongle }, raw: {} };
+
+    if (t.viaDongle) { const s = await t.status(); r.battery = s.battery; log(`Battery: ${s.battery}%`); if (!s.kbOnline) throw new Error('keyboard offline; press a key and retry'); }
+
+    const id = await t.query([0x8f]); r.raw.id = hex(id.slice(0, 16));
+    if (id[0] !== 0x8f) throw new Error('unexpected 0x8F reply: ' + hex(id.slice(0, 16)));
+    r.deviceId = new DataView(id.buffer).getUint32(1, true);
+    r.usbVersion = (id[8] << 8 | id[7]) || undefined;
+    log(`Device ID ${r.deviceId}${r.deviceId === 2865 ? ' (RT75PRO)' : ' (not 2865, so decoding below may not match)'}; USB firmware 0x${(r.usbVersion ?? 0).toString(16)}`, r.deviceId === 2865 ? 'ok' : 'err');
+
+    const rf = await t.query([0x80]); r.raw.rfVersion = hex(rf.slice(0, 8));
+    r.rfVersion = rf[0] === 0x80 ? ((rf[2] << 8 | rf[1]) || undefined) : undefined;
+    log(`RF firmware: ${r.rfVersion === undefined ? 'none reported' : '0x' + r.rfVersion.toString(16)}`);
+
+    const fl = await t.query([0xe6]); r.raw.featureList = hex(fl);
+    r.featureListSupported = fl[1] === 0xaa;
+    r.precision = r.featureListSupported ? ({ 0: '0.01mm', 1: '0.005mm', 2: '0.001mm' }[fl[2]] ?? `unknown (${fl[2]})`) : undefined;
+    const step = travelStep(r.precision, r.usbVersion, r.rfVersion);
+    r.travelStep = step;
+    log(`Feature list: ${r.featureListSupported ? 'supported, precision ' + r.precision : 'not supported, using legacy version rule'}; raw / ${step} = mm`);
+
+    const prof = await t.query([0x84]); r.raw.profile = hex(prof.slice(0, 8)); r.profile = prof[1];
+    const rate = await t.query([0x83]); r.raw.reportRate = hex(rate.slice(0, 8));
+    r.reportRateHz = { 0: 8000, 1: 4000, 2: 2000, 3: 1000, 4: 500, 5: 250, 6: 125 }[rate[2]];
+    const deb = await t.query([0x86]); r.raw.debounce = hex(deb.slice(0, 8)); r.debounce = deb[1];
+    log(`Profile ${r.profile}; polling rate ${r.reportRateHz ?? '?'} Hz; debounce ${r.debounce}`);
+
+    const layers = document.getElementById('allLayers').checked ? [0, 1, 2, 3] : [0];
+    r.keymap = {};
+    for (const layer of layers) {
+      log(`Reading key matrix, layer ${layer}…`);
+      r.keymap[layer] = await readPages(t, [0x8a, r.profile, 0xff, 0, layer], 8);
+    }
+
+    const mag = {};
+    const params = [[7, 'mode', 2, false], [0, 'actuation', 4, true], [1, 'release', 4, true], [6, 'bottomDeadZone', 4, true],
+                    [2, 'rtPress', 4, true], [3, 'rtRelease', 4, true], [4, 'dksStart', 4, true], [5, 'mtTime', 2, false],
+                    [9, 'snapPartner', 2, false], [252, 'switchType', 2, false], [251, 'topDeadZone', 2, false]];
+    for (const [p, name, pages, wide] of params) {
+      log(`Reading magnet parameter ${p} (${name})…`);
+      const bytes = await readPages(t, [0xe5, p, 1, 0], pages);
+      r.raw['magnet_' + p] = hex(bytes);
+      mag[name] = wide ? u16(bytes) : bytes;
+    }
+    r.magnet = mag;
+
+    // Per-key table, decoded with the slot order of the default matrix.
+    r.keys = [];
+    for (let s = 0; s < SLOTS; s++) {
+      const def = DEFAULT_MATRIX.slice(s * 4, s * 4 + 4);
+      if (!def.some(Boolean)) continue;
+      const cur = r.keymap[0].slice(s * 4, s * 4 + 4);
+      const modeByte = mag.mode[s];
+      r.keys.push({
+        slot: s, key: keyName(def), layer0: keyName(cur), layer0Raw: hex(cur), remapped: hex(cur) !== hex(def),
+        mode: MODES[modeByte & 0x7f] ?? `?${modeByte & 0x7f}`, rapidTrigger: (modeByte & 0x80) !== 0, modeRaw: modeByte,
+        actuation: mag.actuation[s] / step, release: mag.release[s] / step, bottomDeadZone: mag.bottomDeadZone[s] / step,
+        rtPress: mag.rtPress[s] / step, rtRelease: mag.rtRelease[s] / step, topDeadZoneRaw: mag.topDeadZone[s], switchType: mag.switchType[s],
+      });
+    }
+    renderTable(r.keys);
+    result = r;
+    document.getElementById('copy').disabled = false;
+    document.getElementById('save').disabled = false;
+    log('Done. Nothing was written to the keyboard.', 'ok');
+  } catch (e) { log('Error: ' + e.message, 'err'); }
+  finally { go.disabled = false; try { await dev.close(); } catch {} }
+};
+
+function renderTable(keys) {
+  const cols = ['slot', 'key', 'layer0', 'mode', 'rapidTrigger', 'actuation', 'release', 'rtPress', 'rtRelease', 'bottomDeadZone', 'topDeadZoneRaw', 'switchType', 'modeRaw'];
+  document.querySelector('#keys thead').innerHTML = '<tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr>';
+  const tb = document.querySelector('#keys tbody');
+  for (const k of keys) {
+    const tr = document.createElement('tr');
+    for (const c of cols) {
+      const td = document.createElement('td');
+      let v = k[c];
+      if (typeof v === 'number' && !Number.isInteger(v)) v = v.toFixed(3);
+      td.textContent = c === 'rapidTrigger' ? (v ? 'on' : 'off') : v;
+      if (c === 'layer0' && k.remapped) td.className = 'changed';
+      tr.appendChild(td);
+    }
+    tb.appendChild(tr);
+  }
+}
+
+// A short text summary small enough to paste back into chat.
+function summary(r) {
+  const lines = [
+    `device ${r.deviceId} pid 0x${r.device.pid.toString(16)} ${r.device.viaDongle ? 'dongle' : 'wired'} usb 0x${(r.usbVersion ?? 0).toString(16)} rf ${r.rfVersion === undefined ? 'none' : '0x' + r.rfVersion.toString(16)} step ${r.travelStep}`,
+    `featureList ${r.featureListSupported} precision ${r.precision} profile ${r.profile} rate ${r.reportRateHz} debounce ${r.debounce}`,
+    `raw id: ${r.raw.id}`, `raw rf: ${r.raw.rfVersion}`, `raw featureList: ${r.raw.featureList}`,
+    `raw profile/rate/debounce: ${r.raw.profile} | ${r.raw.reportRate} | ${r.raw.debounce}`,
+    'slot key layer0 mode rt act rel rtP rtR bdz tdzRaw sw',
+    ...r.keys.map(k => [k.slot, k.key, k.remapped ? k.layer0 + '*' : '=', k.mode, k.rapidTrigger ? 'RT' : '-', k.actuation, k.release, k.rtPress, k.rtRelease, k.bottomDeadZone, k.topDeadZoneRaw, k.switchType].join(' ')),
+  ];
+  return lines.join('\n');
+}
+document.getElementById('copy').onclick = async () => {
+  try { await navigator.clipboard.writeText(summary(result)); log('Summary copied to clipboard.', 'ok'); }
+  catch (e) { log('Copy failed: ' + e.message, 'err'); }
+};
+document.getElementById('save').onclick = () => {
+  const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `rt75-dump-${Date.now()}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+</script>
+</body>
+</html>

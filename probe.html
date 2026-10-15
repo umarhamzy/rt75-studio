@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keyboard Probe</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --text:#e6e8ee; --muted:#8a90a0; --accent:#6ea8ff; --ok:#5fd38d; --err:#ff7a7a; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui, sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:24px 16px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p { color:var(--muted); margin:0 0 16px; }
+  button { background:var(--accent); color:#0b0d12; border:0; border-radius:8px; padding:10px 16px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  pre { background:var(--panel); border-radius:8px; padding:14px; overflow-x:auto; font:13px/1.5 ui-monospace, Consolas, monospace; white-space:pre-wrap; }
+  .ok { color:var(--ok); } .err { color:var(--err); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Keyboard probe (read-only)</h1>
+  <p>Close qmk.top first, because only one page can talk to the keyboard at a time. This page sends a single
+     read command (<code>0x8F</code>, device ID) and changes nothing on the keyboard.</p>
+  <button id="go">Connect and read device ID</button>
+  <pre id="out">Waiting.</pre>
+</main>
+<script>
+const out = document.getElementById('out');
+const log = (s, cls) => { const line = document.createElement('div'); if (cls) line.className = cls; line.textContent = s; out.appendChild(line); };
+const hex = a => [...a].map(b => b.toString(16).padStart(2, '0')).join(' ');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Same framing as GearHub's ___encodeCmd with checksum mode Bit7, padded to 64 bytes.
+function encode(cmd) {
+  const buf = new Uint8Array(64);
+  buf.set(cmd);
+  const sum = buf.slice(0, 7).reduce((a, b) => a + b, 0);
+  buf[7] = 255 - (sum & 0xff);
+  return buf;
+}
+
+// Rongyuan 2.4G dongles (VID 0x3151). 20536 = 0x5038 is the RT75 Pro's dongle.
+const DONGLE_PIDS = new Set(['12625:20535', '12625:20536', '12625:20541']);
+
+async function raw(dev, bytes) {
+  const buf = new Uint8Array(64); buf.set(bytes);
+  await sleep(10);
+  await dev.sendFeatureReport(0, buf);
+}
+async function rawRead(dev) {
+  await sleep(10);
+  return new Uint8Array((await dev.receiveFeatureReport(0)).buffer);
+}
+
+// Dongle status 0xF7: [canRead, kbBattery, mouseBattery, kbOffline, mouseOffline, canSend]
+async function status(dev) {
+  await raw(dev, [0xf7]);
+  const r = await rawRead(dev);
+  return { canRead: r[0] === 1, kbBattery: r[1], kbOnline: r[3] === 0, mouseOnline: r[4] === 0, canSend: r[5] === 1, bytes: r };
+}
+async function waitFor(dev, key) {
+  for (let i = 0; i < 5; i++) { await sleep(100); if ((await status(dev))[key]) return true; }
+  return false;
+}
+
+// Mirrors GearHub's dongle class YP: select keyboard (0xF6 0x0A), wait canSend, send the
+// framed command, wait canRead, notify (0xFC), read. Only read commands are sent.
+async function probeDongle(dev) {
+  log('  2.4G dongle detected, using the dongle relay sequence.');
+  await raw(dev, [0xf1]);
+  const d = await rawRead(dev);
+  if (d[0] === 0xf1) log(`  dongle ID: ${new DataView(d.buffer).getUint16(1, true)}`, 'ok');
+  else log('  dongle ID reply: ' + hex(d.slice(0, 8)));
+
+  const s = await status(dev);
+  log(`  status: keyboard ${s.kbOnline ? 'online' : 'offline'}, battery ${s.kbBattery}%, mouse ${s.mouseOnline ? 'online' : 'offline'}  (${hex(s.bytes.slice(0, 6))})`);
+  if (!s.kbOnline) { log('  Keyboard is not online through the dongle. Wake it with a key press and retry.', 'err'); return; }
+
+  await raw(dev, [0xf6, 0x0a]);
+  if (!await waitFor(dev, 'canSend')) { log('  Dongle never reported ready to send.', 'err'); return; }
+  await raw(dev, encode([0x8f]));
+  if (!await waitFor(dev, 'canRead')) { log('  Dongle never reported a reply ready.', 'err'); return; }
+  await raw(dev, [0xfc]);
+  const r = await rawRead(dev);
+  log('  keyboard reply: ' + hex(r));
+  reportId(r);
+}
+
+async function probeWired(dev) {
+  await sleep(10);
+  await dev.sendFeatureReport(0, encode([0x8f]));
+  const r = await rawRead(dev);
+  log('  response: ' + hex(r));
+  reportId(r);
+}
+
+function reportId(r) {
+  if (r[0] !== 0x8f) { log('  Reply does not start with 0x8F, so no device ID was decoded.', 'err'); return; }
+  const id = new DataView(r.buffer).getUint32(1, true);
+  log(`  device ID: ${id === 0xffffffff ? 'unknown (-1)' : id}  (0x${id.toString(16)})`, 'ok');
+}
+
+document.getElementById('go').onclick = async () => {
+  out.textContent = '';
+  if (!('hid' in navigator)) { log('WebHID is not available. Open this page in Chrome or Edge.', 'err'); return; }
+  let devices;
+  try { devices = await navigator.hid.requestDevice({ filters: [] }); }
+  catch (e) { log('Device picker failed: ' + e.message, 'err'); return; }
+  if (!devices.length) { log('No device selected.'); return; }
+
+  for (const dev of devices) {
+    log(`Device: ${dev.productName}  VID 0x${dev.vendorId.toString(16)} (${dev.vendorId})  PID 0x${dev.productId.toString(16)} (${dev.productId})`);
+    for (const c of dev.collections) {
+      log(`  collection usagePage 0x${c.usagePage.toString(16)} usage 0x${c.usage.toString(16)}  feature reports: ${c.featureReports.length}`);
+    }
+    if (!dev.collections.some(c => c.featureReports.length)) { log('  No feature reports on this interface, skipping.'); continue; }
+    try {
+      if (!dev.opened) await dev.open();
+      if (DONGLE_PIDS.has(`${dev.vendorId}:${dev.productId}`)) await probeDongle(dev);
+      else await probeWired(dev);
+      await dev.close();
+    } catch (e) { log('  error: ' + e.message, 'err'); }
+  }
+};
+</script>
+</body>
+</html>
