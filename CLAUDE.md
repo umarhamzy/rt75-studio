@@ -46,6 +46,11 @@ touching device code.
    - flash erase, bootloader or firmware commands; reset (`0x01`)
    - bulk magnet table writes (`[0x65, param, 1, …]`, which overwrite keys absent from the batch)
    - debounce (`0x06`; qmk.top doesn't offer it for this keyboard)
+   - **reads with indexes outside qmk.top's ranges**, even "read-only" probes. A macro read at index
+     254/255 hung the keyboard until it was power-cycled (2026-10-15). `query()` enforces the
+     ranges (protocol-notes.md, "Read ranges").
+   - **any Fn layer other than 0.** The RT75 has one Fn layer shared by all profiles; byte 2 of
+     `0x90`/`0x10` is the Fn layer, not the profile.
 5. **Set the per-key magnet "save" flag (byte 4) only on a batch's final packet.** Setting it per
    key made the keyboard drop the next key's first packet.
 6. Sensitivity edits on keys with RT off, and Snap partners on keys that aren't Snap, are never

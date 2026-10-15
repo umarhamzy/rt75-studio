@@ -129,6 +129,16 @@ class Transport {
 
   async query(cmd) {
     if (!READ_COMMANDS.has(cmd[0])) throw new Error(`Blocked non-read command 0x${cmd[0].toString(16)}`);
+    // Reads stay inside the ranges qmk.top uses: firmware doesn't bounds-check them (a macro read at
+    // index 254/255 hung the keyboard until it was power-cycled, 2026-10-15).
+    if (cmd[0] === CMD.GET_KEYMATRIX && !(cmd[1] < PROFILE_COUNT && cmd[3] < 8)) {
+      throw new Error(`Blocked key-map read outside profiles 1–${PROFILE_COUNT} (profile ${cmd[1]}, page ${cmd[3]})`);
+    }
+    // Only Fn layer 0 exists on this keyboard (see FN_LAYER); OS 0/1, pages 0–7.
+    if (cmd[0] === CMD.GET_FN && !(cmd[1] <= 1 && cmd[2] === 0 && cmd[4] < 8)) {
+      throw new Error(`Blocked Fn-layer read outside layer 0 (os ${cmd[1]}, layer ${cmd[2]}, page ${cmd[4]})`);
+    }
+    if (cmd[0] === CMD.GET_MAGNETISM && !(cmd[3] < 4)) throw new Error(`Blocked magnet read beyond page 3 (page ${cmd[3]})`);
     const pkt = encode(cmd);
     if (!this.viaDongle) {
       await sleep(10);
@@ -233,8 +243,8 @@ export async function readSettings(dev, onProgress = () => {}) {
 
     s.keymap = await t.readPages([CMD.GET_KEYMATRIX, s.profile, 0xff, 0, 0], 8);
     // Fn layers: [0x90, os (0 = Windows, 1 = Mac), profile, 0xFF, page]; the page is in byte 4 here.
-    s.fnWin = await readFnLayer(t, 0, s.profile);
-    s.fnMac = await readFnLayer(t, 1, s.profile);
+    s.fnWin = await readFnLayer(t, 0);
+    s.fnMac = await readFnLayer(t, 1);
     step("Fn layers");
     step('Key map');
 
@@ -564,9 +574,14 @@ export async function writeSleepTimes(dev, settings, sleep) {
 }
 const sleep_ = ms => new Promise(r => setTimeout(r, ms));
 
-async function readFnLayer(t, os, profile) {
+// The Fn layer index ("Fn profile" in qmk.top) is separate from profiles 1–4. The RT75 Pro declares
+// fnSysLayer { win: 1, mac: 1 }: one Fn layer per OS, index 0, shared by all profiles. qmk.top reads
+// Fn layers 0 … fnSysLayer[os] - 1 only, so RT75 Studio never uses any other index.
+const FN_LAYER = 0;
+
+async function readFnLayer(t, os) {
   const out = [];
-  for (let page = 0; page < 8; page++) out.push(...await t.query([CMD.GET_FN, os, profile, 0xff, page]));
+  for (let page = 0; page < 8; page++) out.push(...await t.query([CMD.GET_FN, os, FN_LAYER, 0xff, page]));
   return out;
 }
 
@@ -610,7 +625,7 @@ function assertAllowedKeymapWrite(p, ctx) {
     if (p[1] !== ctx.profile || p[3] !== 0 || p[4] !== 0 || (p[5] !== 0 && p[5] !== 1) || p[6] !== 0) fail('header');
     layer = 'base'; slot = p[2];
   } else if (p[0] === SET_FN) {
-    if ((p[1] !== 0 && p[1] !== 1) || p[2] !== ctx.profile || p[4] !== 0 || p[5] !== 0 || p[6] !== 0) fail('header');
+    if ((p[1] !== 0 && p[1] !== 1) || p[2] !== FN_LAYER || p[4] !== 0 || p[5] !== 0 || p[6] !== 0) fail('header');
     layer = p[1] === 0 ? 'fnWin' : 'fnMac'; slot = p[3];
   } else {
     fail('not a key-map command');
@@ -627,7 +642,7 @@ export function buildKeymapPackets(edits, profile) {
   return edits.map((e, i) => {
     const pkt = e.layer === 'base'
       ? encode([SET_KEYMATRIX, profile, e.slot, 0, 0, i === lastBase ? 1 : 0, 0, 0, ...e.action])
-      : encode([SET_FN, KEYMAP_LAYERS[e.layer].os, profile, e.slot, 0, 0, 0, 0, ...e.action]);
+      : encode([SET_FN, KEYMAP_LAYERS[e.layer].os, FN_LAYER, e.slot, 0, 0, 0, 0, ...e.action]);
     assertAllowedKeymapWrite(pkt, { profile });
     return { ...e, pkt };
   });
@@ -642,7 +657,7 @@ export async function writeKeymap(dev, settings, edits, onProgress = () => {}) {
   return withDevice(dev, settings, async t => {
     const readLayer = layer => layer === 'base'
       ? t.readPages([CMD.GET_KEYMATRIX, settings.profile, 0xff, 0, 0], 8)
-      : readFnLayer(t, KEYMAP_LAYERS[layer].os, settings.profile);
+      : readFnLayer(t, KEYMAP_LAYERS[layer].os);
     const sendAll = async (pkts, label) => {
       for (const [i, p] of pkts.entries()) { await t.send(p.pkt, null, check); onProgress((i + 1) / pkts.length, label); }
       await sleep(500);

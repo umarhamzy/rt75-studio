@@ -52,7 +52,8 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
   };
   const keymaps = Array.from({ length: 4 }, () => [...dump.keymap['0']]);
   // Fn layers per profile: [windows, mac]
-  const fnLayers = Array.from({ length: 4 }, () => [[...(dump.fnWin ?? DEFAULT_FN_MATRIX)], [...(dump.fnMac ?? DEFAULT_FN_MAC_MATRIX)]]);
+  // One Fn layer (index 0) shared by every profile, like the real keyboard: [windows, mac].
+  const fnLayers = [[[...(dump.fnWin ?? DEFAULT_FN_MATRIX)], [...(dump.fnMac ?? DEFAULT_FN_MAC_MATRIX)]]];
   let last = new Uint8Array(64);
 
   return {

@@ -22,6 +22,11 @@ check('Fn Windows packet layout', hex(pk[1].pkt) === '10 00 00 0c 00 00 00 e3 03
 check('Fn Mac uses os 1', pk[2].pkt[0] === 0x10 && pk[2].pkt[1] === 1);
 check('save flag only on the final base packet', pk.filter(p => p.pkt[0] === 0x0a).map(p => p.pkt[5]).join('') === '01');
 
+// The RT75 has one Fn layer (index 0), shared by all profiles: Fn writes never carry the profile.
+const pk2 = buildKeymapPackets([{ layer: 'fnWin', slot: 12, action: [3, 0, 205, 0] }, { layer: 'base', slot: 14, action: [0, 0, 26, 0] }], 2);
+check('Fn write on profile 3 still targets Fn layer 0', hex(pk2[0].pkt).startsWith('10 00 00 0c'), hex(pk2[0].pkt));
+check('base write on profile 3 targets profile 3', pk2[1].pkt[1] === 2);
+
 // Blocked writes
 const blocked = (name, edits, profile = 0) => { try { buildKeymapPackets(edits, profile); check(name, false, 'not blocked'); } catch (e) { check(name, true, e.message.split(':')[0]); } };
 blocked('Fn key locked (base)', [{ layer: 'base', slot: 65, action: [0, 0, 4, 0] }]);
@@ -57,6 +62,18 @@ dev2.sendFeatureReport = async (id, b) => { if (!dropped && b[0] === 0x0a && b[2
 const s3 = await readSettings(dev2);
 const res3 = await writeKeymap(dev2, s3, [{ layer: 'base', slot: 14, action: [0, 0, 22, 0] }, { layer: 'base', slot: 15, action: [0, 0, 26, 0] }]);
 check('retry recovers a dropped key write', res3.mismatches.length === 0 && res3.retried === 1 && at(res3.layers.base, 15) === '0,0,26,0');
+
+// Reading on another profile asks only for Fn layer 0, and sees the same Fn layer.
+const { switchProfile } = await import(new URL('../src/device.js', import.meta.url).href);
+const dev5 = createDemoDevice(dump);
+const fnReads = [];
+const orig5 = dev5.sendFeatureReport.bind(dev5);
+dev5.sendFeatureReport = async (id, b) => { if (b[0] === 0x90) fnReads.push(b[2]); if (b[0] === 0x04) fnReads.length = 0; return orig5(id, b); };
+const s5 = await readSettings(dev5);
+await switchProfile(dev5, s5, 2);
+const s6 = await readSettings(dev5);
+check('profile 3 reads Fn layer 0 only', s6.profile === 2 && fnReads.length === 16 && fnReads.every(v => v === 0), fnReads.join());
+check('Fn layer is the same on every profile', s6.fnWin.join() === s5.fnWin.join());
 
 console.log(failures ? `\n${failures} FAILED` : '\nall passed');
 process.exitCode = failures ? 1 : 0;

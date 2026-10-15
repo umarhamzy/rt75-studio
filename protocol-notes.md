@@ -433,16 +433,30 @@ Two paths exist in qmk.top/v4. RT75 Studio uses only the first.
 ## Key map and Fn layers
 
 - **Base layer:** `[0x8A, profile, 0xFF, page 0–7, sub]`, 4 bytes per slot (sub = 0).
-- **Fn layers:** `[0x90, os, profile, 0xFF, page]`, where os is 0 = Windows and 1 = Mac. The page
+- **Fn layers:** `[0x90, os, fnLayer, 0xFF, page]`, where os is 0 = Windows and 1 = Mac. The page
   is in **byte 4** here, unlike the base read, which has it in byte 3.
-  - The RT75 Pro has Windows and Mac Fn layers (`fnSysLayer {win:1, mac:1}`).
+  - **Byte 2 is the Fn layer ("Fn profile" in qmk.top), not the profile.** Fn layers are separate
+    from profiles 1–4.
+    - The RT75 Pro declares `fnSysLayer {win:1, mac:1}`: one Windows and one Mac Fn layer, index 0,
+      shared by every profile.
+    - qmk.top reads Fn layers `0 … fnSysLayer[os] - 1` only; its "Fn Profile" dropdown lists just
+      "Fn Profile 1" (user screenshot, 2026-10-15).
+    - The active index comes from the KB option read (`getKBOption` → `fnIndex`).
+  - **RT75 Studio bug, fixed 2026-10-15 (fix/fn-layer):** until then it put the profile number in
+    byte 2, so on profiles 2–4 it read (and would have written) Fn layers 1–3, which the keyboard
+    doesn't use.
+    - Those layers do return data.
+    - The user confirmed Fn+F works the same on profile 2, so the keyboard uses Fn layer 0 there too.
+    - The user doesn't recall editing Fn keys on profiles 2–4 in RT75 Studio.
+    - Fn reads and writes now always use layer 0, and `query()` and the key-map validator refuse
+      any other.
   - An all-zero Fn slot means "no Fn action".
 - **Key-map writes verified on the real keyboard (2026-10-15):** a base remap, an Fn · Windows remap,
   a captured combo and a restore all wrote, read back and matched qmk.top.
 - **Write formats** (RY5088 base, used by RT75 Studio):
   - Base key: `[0x0A, profile, slot, 0, 0, save, sub, cs, a0..a3]` (`setKeyConfigSimple`). qmk.top
     passes sub = 0 and save = true per call.
-  - Fn key: `[0x10, os, profile, slot, 0, 0, 0, cs, a0..a3]` (`setFnKeyConfigSimple`, no save byte).
+  - Fn key: `[0x10, os, fnLayer = 0, slot, 0, 0, 0, cs, a0..a3]` (`setFnKeyConfigSimple`, no save byte).
 - **Action encodings** are in `src/actions.js`.
 - **qmk.top keeps two function-name tables (K0 and h5/uc) whose byte values overlap with different
   meanings.** For the RT75 Pro its UI uses h5.
@@ -501,3 +515,18 @@ apply to this keyboard).
   - a written change (effect, colour, brightness) took effect and was confirmed by read-back
   - Undo restored the original
 - Editing Custom patterns (`0x0C`/`0x8C` user picture) is not implemented.
+
+## Read ranges (incident, 2026-10-15)
+
+A read-only diagnostic on feature/macros asked for macro slots (`0x8B`) beyond the 50 that qmk.top
+uses.
+- Index 64 returned unrelated memory.
+- Index 254/255 got no reply, and the keyboard then stopped answering HID until it was unplugged
+  and replugged.
+- Nothing saved was affected.
+
+The firmware doesn't bounds-check reads, so `query()` now refuses reads outside qmk.top's ranges:
+- key map: profiles 0–3, pages 0–7
+- Fn layers: layer 0, pages 0–7
+- magnet tables: pages 0–3
+- macros (on feature/macros): slots 0–49, pages 0–3

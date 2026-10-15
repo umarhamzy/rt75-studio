@@ -749,7 +749,7 @@ function renderKeymapPanel() {
 
   el.innerHTML = `
     <div class="insp-head"><h2>${key.label}</h2>${revertChipHtml(key.slot)}</div>
-    <p class="sub">What this key sends on profile ${(state.settings.profile ?? 0) + 1}. Fn layers apply while Fn is held. Click a layer to edit it.</p>
+    <p class="sub">What this key sends. Base is for profile ${(state.settings.profile ?? 0) + 1}; the Fn layers apply while Fn is held and are shared by all profiles. Click a layer to edit it.</p>
     <div class="km-rows">${rows}</div>
     ${editor}
     ${canEdit ? '' : `<p class="note">${state.settings.source === 'device' ? (state.live ? 'Stop the live test to edit.' : '') : 'Viewing a file. Connect the keyboard to edit.'}</p>`}`;
