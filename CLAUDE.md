@@ -86,8 +86,7 @@ touching device code.
 Dead-zone writes and presets have been tested in the simulation and demo only.
 
 **Key map editing (feature/key-remap):** base and Fn layers, read and written, with the Fn key and
-system keys locked. Tested on the simulated keyboard and in the demo; the base and Fn reads are
-verified on the real keyboard, and the writes are awaiting a real-keyboard check.
+system keys locked. Verified on the real keyboard: reads, a base remap, an Fn-layer remap, a combo and a restore.
 
 **Was next: key remapping and Fn layers.** What's known so far (details in protocol-notes.md):
 - Key matrix read: `[0x8A, profile, 0xFF, page 0–7, sub]`, 4 bytes per slot. Plain key

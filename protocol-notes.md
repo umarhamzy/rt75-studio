@@ -437,6 +437,8 @@ Two paths exist in qmk.top/v4. RT75 Studio uses only the first.
   is in **byte 4** here, unlike the base read, which has it in byte 3.
   - The RT75 Pro has Windows and Mac Fn layers (`fnSysLayer {win:1, mac:1}`).
   - An all-zero Fn slot means "no Fn action".
+- **Key-map writes verified on the real keyboard (2026-10-15):** a base remap, an Fn · Windows remap,
+  a captured combo and a restore all wrote, read back and matched qmk.top.
 - **Write formats** (RY5088 base, used by RT75 Studio):
   - Base key: `[0x0A, profile, slot, 0, 0, save, sub, cs, a0..a3]` (`setKeyConfigSimple`). qmk.top
     passes sub = 0 and save = true per call.

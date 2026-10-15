@@ -452,9 +452,13 @@ button { font: inherit; color: inherit; }
 
 /* ---------- Key map ---------- */
 .key.km-key .key-value { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-.key.km-changed { box-shadow: inset 0 -3px 0 var(--cap-edge), 0 0 0 2px var(--accent); }
-.key.km-changed.is-selected { box-shadow: inset 0 -3px 0 var(--cap-edge), 0 0 0 2px var(--accent), 0 0 0 5px color-mix(in oklab, var(--accent) 30%, transparent); }
-.swatch-km { background: transparent; border: 2px solid var(--accent); width: 12px; height: 12px; }
+/* "Changed from factory": a corner tab and green action text. The ring is reserved for selection. */
+.key.km-changed::before {
+  content: ""; position: absolute; right: 0; bottom: 3px; width: 0; height: 0;
+  border-bottom: 11px solid var(--accent); border-left: 11px solid transparent;
+}
+.key.km-changed .key-value { color: var(--accent); opacity: 1; font-weight: 600; }
+.swatch-km { width: 12px; height: 12px; border-radius: 2px; background: linear-gradient(315deg, var(--accent) 50%, var(--surface-2) 50%); }
 .km-rows { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
 .km-row { display: grid; grid-template-columns: 1fr; gap: 2px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
 .km-row.is-current { border-color: var(--accent); }
