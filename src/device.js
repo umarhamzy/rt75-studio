@@ -19,6 +19,7 @@ const CMD = {
   GET_DEBOUNCE: 0x86,
   GET_SLEEPTIME: 0x91,
   GET_KEYMATRIX: 0x8a,
+  GET_FN: 0x90,
   GET_USB_VERSION: 0x8f,
   GET_MAGNETISM: 0xe5,
   GET_FEATURE_LIST: 0xe6,
@@ -189,7 +190,7 @@ export async function findGrantedKeyboard() {
 export async function readSettings(dev, onProgress = () => {}) {
   if (!dev.opened) await dev.open();
   const t = new Transport(dev);
-  const total = 8 + MAGNET_PARAMS.length;
+  const total = 9 + MAGNET_PARAMS.length;
   let done = 0;
   const step = label => onProgress(++done / total, label);
 
@@ -226,6 +227,10 @@ export async function readSettings(dev, onProgress = () => {}) {
     step('Debounce');
 
     s.keymap = await t.readPages([CMD.GET_KEYMATRIX, s.profile, 0xff, 0, 0], 8);
+    // Fn layers: [0x90, os (0 = Windows, 1 = Mac), profile, 0xFF, page]; the page is in byte 4 here.
+    s.fnWin = await readFnLayer(t, 0, s.profile);
+    s.fnMac = await readFnLayer(t, 1, s.profile);
+    step("Fn layers");
     step('Key map');
 
     s.magnet = {};
@@ -259,6 +264,8 @@ export function settingsFromDump(d) {
     debounce: d.debounce,
     sleep: d.sleep,
     keymap: d.keymap['0'],
+    fnWin: d.fnWin,
+    fnMac: d.fnMac,
     magnet: d.magnet,
     source: 'file',
   };
@@ -550,3 +557,9 @@ export async function writeSleepTimes(dev, settings, sleep) {
   });
 }
 const sleep_ = ms => new Promise(r => setTimeout(r, ms));
+
+async function readFnLayer(t, os, profile) {
+  const out = [];
+  for (let page = 0; page < 8; page++) out.push(...await t.query([CMD.GET_FN, os, profile, 0xff, page]));
+  return out;
+}

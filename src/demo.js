@@ -1,3 +1,5 @@
+import { DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX } from './layout.js';
+
 // In-memory stand-in for the RT75 Pro, used by ?demo. It answers the same HID reports as
 // the real keyboard (IDs, settings reads, single-key magnet writes) from a saved dump,
 // so the whole read / edit / write / verify flow can be tried without hardware.
@@ -47,6 +49,8 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
     }, 16);
   };
   const keymap = [...dump.keymap['0']];
+  // Fn layers per profile: [windows, mac]
+  const fnLayers = Array.from({ length: 4 }, () => [[...(dump.fnWin ?? DEFAULT_FN_MATRIX)], [...(dump.fnMac ?? DEFAULT_FN_MAC_MATRIX)]]);
   let last = new Uint8Array(64);
 
   return {
@@ -84,6 +88,7 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
         case 0x83: r.set([0x83, 0, rateCode]); break;
         case 0x86: r.set([0x86, 0]); break;
         case 0x8a: r.set(keymap.slice(last[3] * 64, last[3] * 64 + 64)); break;
+        case 0x90: r.set(fnLayers[last[2]][last[1]].slice(last[4] * 64, last[4] * 64 + 64)); break;
         case 0xe5: {
           const name = PARAMS[last[1]];
           const bytes = WIDE.has(last[1]) ? store()[name].flatMap(v => [v & 255, v >> 8]) : store()[name];

@@ -1,4 +1,5 @@
-import { KEYS, DEFAULT_MATRIX, LAYOUT_WIDTH, LAYOUT_HEIGHT, DEVICE_ID } from './layout.js';
+import { KEYS, DEFAULT_MATRIX, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX, LAYOUT_WIDTH, LAYOUT_HEIGHT, DEVICE_ID } from './layout.js';
+import { decodeAction } from './actions.js';
 import {
   isSupported, requestKeyboard, findGrantedKeyboard, readSettings, settingsFromDump,
   writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, writeSleepTimes,
@@ -51,6 +52,7 @@ const state = {
   settings: null,
   dev: null,                 // HIDDevice from the last live read, used for writes
   view: 'actuation',
+  layer: 'base',             // key map view: 'base' | 'fnWin' | 'fnMac'
   selected: new Set(),       // matrix slots
   knob: false,               // knob selected instead of keys
   pending: new Map(),        // slot -> { field: raw value } differing from settings
@@ -199,6 +201,13 @@ function renderBoard() {
         el.classList.add('live-key');
         if (state.live?.focus === key.slot) el.classList.add('live-focus');
         if (state.live?.down.has(key.slot)) el.classList.add('live-down');
+      } else if (state.view === 'keymap') {
+        const a = layerAction(state.layer, key.slot);
+        value.textContent = a.none ? '·' : a.short;
+        value.title = a.label;
+        el.classList.add('km-key');
+        if (a.none) el.classList.add('dim');
+        if (a.changed) el.classList.add('km-changed');
       }
       el.appendChild(value);
 
@@ -261,6 +270,11 @@ function renderLegend(lo, hi) {
       ? '<button class="btn btn-small btn-stop" id="btnLive" type="button">Stop live test</button><span class="live-dot"></span><span>Live: press keys to see their depth</span>'
       : `<button class="btn btn-small btn-primary" id="btnLive" type="button" ${why ? 'disabled' : ''}>Start live test</button><span class="muted">${why ?? 'Shows how deep the key you press goes, against its trigger points.'}</span>`;
     $('btnLive').onclick = () => (state.live ? stopLive() : startLive());
+  } else if (state.view === 'keymap') {
+    el.innerHTML = `<div class="segmented segmented-sm" role="group" aria-label="Layer">
+        ${Object.entries(LAYERS).map(([id, l]) => `<button type="button" data-layer="${id}" aria-pressed="${state.layer === id}">${l.label}</button>`).join('')}
+      </div><span class="swatch swatch-km"></span><span class="muted">changed from factory</span>`;
+    el.querySelectorAll('[data-layer]').forEach(b => b.onclick = () => { state.layer = b.dataset.layer; refresh(); });
   } else {
     el.innerHTML = '<span class="swatch swatch-snap"></span><span>Snap Tap pairs: the last key pressed wins</span>';
   }
@@ -335,6 +349,7 @@ function common(datas, f) {
 function renderInspector() {
   const el = $('inspector');
   if (state.view === 'live' && state.settings) { renderLivePanel(); return; }
+  if (state.view === 'keymap' && state.settings && !state.knob && state.selected.size) { renderKeymapPanel(); return; }
   if (!state.settings || (!state.knob && !state.selected.size)) {
     el.innerHTML = '<p class="inspector-hint">Select a key to see its settings. Ctrl- or Shift-click to select several.</p>';
     return;
@@ -591,6 +606,59 @@ function travelDiagram(d) {
       <line class="mk mk-${cls}" x1="38" x2="70" y1="${y(v)}" y2="${y(v)}"/>
       <text class="lbl" x="78" y="${y(v) + 4}">${same && cls === 'act' ? 'Actuation / release' : label} ${mm(v)}</text>`).join('')}
   </svg>`;
+}
+
+// ---------- Key map ----------
+// Base layer = the profile's key matrix; Fn layers are separate per OS. On an Fn layer an all-zero
+// slot has no Fn action.
+const LAYERS = {
+  base: { label: 'Base', field: 'keymap', defaults: DEFAULT_MATRIX, fn: false },
+  fnWin: { label: 'Fn · Windows', field: 'fnWin', defaults: DEFAULT_FN_MATRIX, fn: true },
+  fnMac: { label: 'Fn · Mac', field: 'fnMac', defaults: DEFAULT_FN_MAC_MATRIX, fn: true },
+};
+
+function layerBytes(layer, slot) {
+  const arr = state.settings?.[LAYERS[layer].field];
+  return arr ? arr.slice(slot * 4, slot * 4 + 4) : undefined;
+}
+
+function layerAction(layer, slot) {
+  const b = layerBytes(layer, slot);
+  if (!b) return { none: true, short: '?', label: 'Not read (this dump has no Fn layers)' };
+  const factory = LAYERS[layer].defaults.slice(slot * 4, slot * 4 + 4);
+  const changed = b.join() !== factory.join();
+  if (LAYERS[layer].fn && b.every(x => x === 0)) return { none: true, changed, short: '·', label: 'No Fn action', bytes: b, factory };
+  return { ...decodeAction(b, { mac: layer === 'fnMac' }), changed, bytes: b, factory };
+}
+
+function factoryLabel(layer, slot) {
+  const f = LAYERS[layer].defaults.slice(slot * 4, slot * 4 + 4);
+  if (LAYERS[layer].fn && f.every(x => x === 0)) return 'No Fn action';
+  return decodeAction(f, { mac: layer === 'fnMac' }).label;
+}
+
+function renderKeymapPanel() {
+  const el = $('inspector');
+  const keys = [...state.selected].map(keyBySlot);
+  if (keys.length !== 1) {
+    el.innerHTML = `<h2>${keys.length} keys</h2><p class="sub">${keys.map(k => k.label).join(', ')}</p>
+      <p class="note">Select a single key to see what it sends on each layer.</p>`;
+    return;
+  }
+  const key = keys[0];
+  const rows = Object.entries(LAYERS).map(([id, l]) => {
+    const a = layerAction(id, key.slot);
+    return `<div class="km-row${id === state.layer ? ' is-current' : ''}">
+      <span class="km-layer">${l.label}</span>
+      <span class="km-now">${a.label}${a.changed ? ' <span class="km-badge">changed</span>' : ''}</span>
+      <span class="km-factory muted">Factory: ${factoryLabel(id, key.slot)}</span>
+    </div>`;
+  }).join('');
+  el.innerHTML = `
+    <div class="insp-head"><h2>${key.label}</h2></div>
+    <p class="sub">What this key sends on profile ${(state.settings.profile ?? 0) + 1}. Fn layers apply while Fn is held.</p>
+    <div class="km-rows">${rows}</div>
+    <p class="note">Read-only for now; remapping comes next.</p>`;
 }
 
 // ---------- Live test ----------
@@ -1093,7 +1161,7 @@ function downloadBackup() {
     raw: { id: id.map(b => b.toString(16).padStart(2, '0')).join(' ') },
     deviceId: s.deviceId, rfVersion: s.rfVersion, battery: s.battery,
     featureListSupported: false, profile: s.profile, reportRateHz: s.reportRateHz, debounce: s.debounce, sleep: s.sleep,
-    keymap: { 0: s.keymap }, magnet: s.magnet, savedAt: new Date().toISOString(),
+    keymap: { 0: s.keymap }, fnWin: s.fnWin, fnMac: s.fnMac, magnet: s.magnet, savedAt: new Date().toISOString(),
   };
   const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
