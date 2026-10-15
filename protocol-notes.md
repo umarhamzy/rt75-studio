@@ -582,9 +582,15 @@ So RT75 Studio doesn't rely on macro reads.
   elsewhere" slots (`readMacroSlot`, slots 0–49 / pages 0–3, enforced in `query()`).
 - The preview is clearly labelled, and "Use these steps…" opens Re-create with a warning to check
   the steps against qmk.top first.
-- **Planned check (user, 2026-10-15):** create macros in qmk.top in several slots and compare
-  them with this preview. That tells us whether the read is wrong for every macro, or only for
-  ones RT75 Studio wrote.
+- **qmk.top-written macros don't read back either (user, 2026-10-15).**
+  - The user created macros in qmk.top on Fn+J (slot 4, index 3) and Fn+K (slot 5, index 4).
+  - "Read steps" returned all `FF` for both.
+  - So it isn't RT75 Studio's write path: newly written macros don't read back at their slot,
+    whoever wrote them. Spam F (index 0, written long ago) does.
+- **Next hypothesis (zero-risk test):** new macros are kept in memory and saved to flash later
+  (for example at power-down), and `0x8B` reads flash.
+  - Test: unplug and replug, then read slots 4 and 5 again.
+  - `macro-probe.html` (read-only, slots 0–49) is on this branch to see slots 1–8 in full.
 
 ### RT75 Studio's macro library (feature/macro-library)
 
