@@ -105,8 +105,8 @@ write, read-back and Undo. Brightness 0 = fully off; lighting is shared by all p
 **Macro library (feature/macro-library):**
 - Named macros are kept in this browser, written to free slots, and assigned to keys.
 - Export and import as JSON.
-- **Macro reads are unreliable** (`0x8B`, protocol-notes.md, "Macros"). Nothing is verified by reading a
-  macro. The only read is a user-triggered, clearly labelled preview on "made elsewhere" slots.
+- **Macro slots are never read:** `0x8B` is unreliable on this keyboard (protocol-notes.md, "Macros"),
+  so it isn't in `READ_COMMANDS`.
 - Key writes are read back; macro steps can't be.
 - Verified on the real keyboard: create, assign, write, play, and Remove from keys.
 

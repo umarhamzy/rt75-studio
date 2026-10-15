@@ -3,7 +3,7 @@ import { decodeAction, encodeKey, splitKey, FUNCTIONS, RISKY, KEY_CHOICES, CODE_
 import {
   isSupported, requestKeyboard, findGrantedKeyboard, readSettings, settingsFromDump,
   writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, writeSleepTimes,
-  writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot, readMacroSlot,
+  writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot,
   LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS,
 } from './device.js';
 import { EFFECTS, effectById, isOffered, normalizeLighting, lightingDiff, lightingFields, hex, MAX_LEVEL } from './lighting.js';
@@ -888,41 +888,6 @@ function removeSlotFromKeys(slot) {
 
 // Macros view: the library.
 let libraryStatus = '';
-// What the keyboard returned for made-elsewhere slots: slot -> { repeat, steps, bytes, erased } | { error }.
-const slotReads = new Map();
-
-const hex2 = bytes => bytes.map(b => b.toString(16).padStart(2, '0')).join(' ');
-function slotReadHtml(slot) {
-  const r = slotReads.get(slot);
-  if (!r) return '';
-  if (r.error) return `<p class="lib-status is-warn">Couldn’t read: ${escapeHtml(r.error)}</p>`;
-  const usable = r.steps.length && r.steps.every(st => st.kind === 'key' || st.kind === 'mouse') && !macroProblem({ repeat: Math.max(1, r.repeat), steps: r.steps }, validMacroKey);
-  return `<div class="lib-read">
-      <p class="lib-status is-warn">Read from the keyboard. This read is unreliable: it has returned another slot’s macro, or nothing, before. Compare with qmk.top.</p>
-      ${r.erased || !r.steps.length ? '<p class="muted macro-empty">Read back as empty.</p>' : `<ol class="macro-steps">${r.steps.map(st => `<li class="${st.down ? 'is-down' : 'is-up'}">
-        <span class="macro-arrow" aria-hidden="true">${st.kind === 'move' ? '↗' : st.down ? '↓' : '↑'}</span>
-        <span class="macro-what">${escapeHtml(stepLabel(st, keyName))}</span>
-        <span class="macro-delay muted">${fmtMs(st.delay)}</span></li>`).join('')}</ol>`}
-      <details class="lib-raw"><summary>Raw bytes</summary><code>${hex2(r.bytes.slice(0, 32))}${r.bytes.length > 32 ? ' …' : ''}</code></details>
-      ${usable ? `<div class="lib-buttons"><button class="btn btn-small" type="button" data-use-read="${slot}">Use these steps…</button></div>` : ''}
-    </div>`;
-}
-
-async function readSlotPreview(slot) {
-  showError(null);
-  state.busy = true;
-  refresh();
-  try {
-    setBusy(0.5, `Reading macro slot ${slot + 1}…`);
-    slotReads.set(slot, await readMacroSlot(state.dev, state.settings, slot));
-  } catch (e) {
-    slotReads.set(slot, { error: e.message });
-  } finally {
-    state.busy = false;
-    setBusy(null);
-    refresh();
-  }
-}
 function renderLibraryPanel() {
   const el = $('inspector');
   const can = editable();
@@ -960,7 +925,7 @@ function renderLibraryPanel() {
     ${elsewhere.length ? `<div class="lib-elsewhere"><h3>Made elsewhere</h3><ul class="lib-list">${elsewhere.map(([slot, users]) => `<li class="lib-item">
         <div class="lib-top"><span class="lib-name">Macro slot ${slot + 1}</span><span class="lib-meta">steps unknown</span></div>
         <p class="lib-status">On ${users.map(userLabel).join(', ')}. Made outside RT75 Studio, for example in qmk.top.</p>
-        <div class="lib-buttons"><button class="btn btn-small" type="button" data-lib-recreate="${slot}">Re-create here…</button>${can ? `<button class="btn btn-small" type="button" data-remove-slot="${slot}">Remove from keys</button><button class="btn btn-small" type="button" data-read-slot="${slot}">Read steps (unreliable)</button>` : ''}</div>${slotReadHtml(slot)}</li>`).join('')}</ul></div>` : ''}
+        <div class="lib-buttons"><button class="btn btn-small" type="button" data-lib-recreate="${slot}">Re-create here…</button>${can ? `<button class="btn btn-small" type="button" data-remove-slot="${slot}">Remove from keys</button>` : ''}</div></li>`).join('')}</ul></div>` : ''}
     <p class="note">The keyboard can’t give macro steps back, so this library is the only copy of their names and steps. Export it to keep a backup or move it to another browser.</p>`;
 
   const byId = b => libById(b.dataset[Object.keys(b.dataset)[0]]);
@@ -985,11 +950,6 @@ function renderLibraryPanel() {
     refresh();
   });
   el.querySelectorAll('[data-remove-slot]').forEach(b => b.onclick = () => removeSlotFromKeys(Number(b.dataset.removeSlot)));
-  el.querySelectorAll('[data-read-slot]').forEach(b => b.onclick = () => readSlotPreview(Number(b.dataset.readSlot)));
-  el.querySelectorAll('[data-use-read]').forEach(b => b.onclick = () => {
-    const slot = Number(b.dataset.useRead), r = slotReads.get(slot);
-    openMacroEditor(null, { slot, repeat: Math.max(1, r.repeat), steps: r.steps, fromKeyboard: true });
-  });
   el.querySelectorAll('[data-lib-recreate]').forEach(b => b.onclick = () => openMacroEditor(null, { slot: Number(b.dataset.libRecreate) }));
   $('libNew').onclick = () => openMacroEditor(null);
   $('libExport').onclick = () => {
@@ -1029,8 +989,7 @@ function openMacroEditor(entry, opts = {}) {
   afterMacroSave = opts.then ?? null;
   state.macroDraft = entry
     ? { id: entry.id, name: entry.name, repeat: entry.repeat, steps: entry.steps.map(s => ({ ...s })) }
-    : { id: null, name: uniqueName(state.library, opts.slot !== undefined ? `Macro slot ${opts.slot + 1}` : 'New macro'), repeat: opts.repeat ?? 1,
-        steps: (opts.steps ?? []).map(({ kind, code, down, delay }) => ({ kind, code, down, delay })), slot: opts.slot, fromKeyboard: !!opts.fromKeyboard };
+    : { id: null, name: uniqueName(state.library, opts.slot !== undefined ? `Macro slot ${opts.slot + 1}` : 'New macro'), repeat: 1, steps: [], slot: opts.slot };
   renderMacroDialog();
   $('macroDialog').showModal();
   if (!entry) $('mcName').select();
@@ -1066,7 +1025,6 @@ function renderMacroDialog() {
   const rec = !!state.recording;
   const dis = rec ? 'disabled' : '';
   $('macroBody').innerHTML = `
-    ${d.fromKeyboard ? '<p class="hint-warn">These steps were read from the keyboard, which isn’t reliable for macros. Check them against qmk.top before saving.</p>' : ''}
     <label class="mc-name">Name <input type="text" id="mcName" maxlength="40" value="${escapeHtml(d.name)}" ${dis}></label>
     <div class="mc-toolbar">
       <button class="btn btn-small${rec ? ' btn-stop' : ''}" id="mcRecord" type="button">${rec ? '■ Stop' : '● Record'}</button>

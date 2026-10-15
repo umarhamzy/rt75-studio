@@ -56,11 +56,8 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
   const fnLayers = [[[...(dump.fnWin ?? DEFAULT_FN_MATRIX)], [...(dump.fnMac ?? DEFAULT_FN_MAC_MATRIX)]]];
   // Like the user's keyboard: Fn+F runs macro slot 0 (made in qmk.top, Toggle playback).
   fnLayers[0][0].splice(27 * 4, 4, 9, 1, 0, 0);
-  // Macro slots as written (256-byte buffers). Slot 0 holds the user's qmk.top "Spam F"
-  // (Toggle playback: press F 50 ms, release F 70 ms); never-written slots read as erased (0xFF).
-  // The demo answers macro reads faithfully, unlike the real keyboard (protocol-notes.md, "Macros").
+  // Macro slots as written (256-byte buffers). The demo, like RT75 Studio, never reads them back.
   const macros = new Map();
-  macros.set(0, (() => { const b = new Uint8Array(256); b.set([1, 0, 0x09, 0x80 | 50, 0x09, 70]); return b; })());
   let last = new Uint8Array(64);
 
   return {
@@ -106,7 +103,6 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
         case 0x84: r.set([0x84, profile]); break;
         case 0x91: r.set([0x91]); r.set(sleepBytes, 8); break;
         case 0x87: r.set([0x87, ...ledBytes]); break;
-        case 0x8b: r.set((macros.get(last[1]) ?? new Uint8Array(256).fill(0xff)).slice(last[2] * 64, last[2] * 64 + 64)); break;
         case 0x83: r.set([0x83, 0, rateCode]); break;
         case 0x86: r.set([0x86, 0]); break;
         case 0x8a: r.set(keymaps[last[1]].slice(last[3] * 64, last[3] * 64 + 64)); break;

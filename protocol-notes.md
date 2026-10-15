@@ -531,7 +531,7 @@ The firmware doesn't bounds-check reads, so `query()` now refuses reads outside 
 - key map: profiles 0–3, pages 0–7
 - Fn layers: layer 0, pages 0–7
 - magnet tables: pages 0–3
-- macros: slots 0–49, pages 0–3, only for the user-triggered preview (see "Macros")
+- macros: never read (`0x8B` isn't in `READ_COMMANDS`; see "Macros")
 
 ## Macros
 
@@ -576,12 +576,9 @@ Source: RY5088 base `_setMacro`, `setMacro`, `getMacro`, `buffToMacroEvents`; v4
 - **Reads outside slots 0–49 are dangerous:** index 64 returned unrelated memory, and 254/255
   hung the keyboard until it was power-cycled (see "Read ranges").
 
-So RT75 Studio doesn't rely on macro reads.
-- Nothing is ever checked by reading a macro slot.
-- The only macro read is an optional, user-triggered **"Read steps (unreliable)"** preview on "made
-  elsewhere" slots (`readMacroSlot`, slots 0–49 / pages 0–3, enforced in `query()`).
-- The preview is clearly labelled, and "Use these steps…" opens Re-create with a warning to check
-  the steps against qmk.top first.
+So RT75 Studio never reads macro slots (`0x8B` isn't in `READ_COMMANDS`).
+
+The notes below come from a short-lived "Read steps (unreliable)" preview on feature/macro-library:
 - **qmk.top-written macros don't read back either (user, 2026-10-15).**
   - The user created macros in qmk.top on Fn+J (slot 4, index 3) and Fn+K (slot 5, index 4).
   - "Read steps" returned all `FF` for both.
@@ -598,9 +595,12 @@ So RT75 Studio doesn't rely on macro reads.
   - RT75 Studio's write format (qmk.top's own macros fail the same way)
   - "saved to flash at power-down"
   
-  The read works for some older macros (Spam F, index 0) but not for newly written ones. RT75
-  Studio's library design doesn't depend on it, and the read is only offered as a labelled preview.
-  `macro-probe.html` (read-only, slots 0–49) stays on this branch for any future look.
+  The read works for some older macros (Spam F, index 0) but not for newly written ones.
+- **Inconsistent results (user, 2026-10-15):** the preview sometimes showed the right steps,
+  sometimes steps from a macro removed earlier (the keyboard has no delete, so old data stays), and
+  sometimes nothing for a macro just saved. Because it could mislead, the preview was removed
+  before merging. RT75 Studio no longer sends `0x8B`.
+  `macro-probe.html` and the full investigation log stay on `feature/macros`.
 
 ### RT75 Studio's macro library (feature/macro-library)
 

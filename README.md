@@ -114,11 +114,9 @@ Library.
 - **Export** the library to a file for a backup or another browser, and **Import** it back.
 
 The keyboard can't give macro steps back, so this library is the only copy of names and steps.
-Macros made in qmk.top show as "made elsewhere" and can be re-created here. **Read steps
-(unreliable)** shows what the keyboard returns for such a slot, and **Use these steps…** starts the
-re-creation from them. Check them against qmk.top first: the keyboard has returned another slot's
-macro, or nothing, before. Key assignments are
-confirmed by reading them back; macro steps can't be, so press the key to check.
+Macros made in qmk.top show as "made elsewhere" and can be re-created here by recording them
+again. Key assignments are confirmed by reading them back; macro steps can't be (the keyboard's
+macro read isn't reliable), so press the key to check.
 
 Limits:
 - up to 256 bytes per macro (about 125 short steps)
@@ -170,7 +168,7 @@ be exported to a file and imported again. Demo-mode presets are stored separatel
   each effect's own options, and colour mode single colour or rainbow.
 - **Macro writes** are only `[0B, slot 0–49, page, 56, last, …, data]`, and each packet must match one
   built from a macro that passed the checks: known keys and mouse buttons, delays 1–65535 ms,
-  repeat 1–65535, at most 256 bytes, no mouse moves. Macro slots are only read for the optional preview (slots 0–49).
+  repeat 1–65535, at most 256 bytes, no mouse moves. Macro slots are never read.
 - **The live test** sends only `0x1B 01` and `0x1B 00`, which turn depth reporting on and off.
   The same toggle is used by qmk.top's Simulation Test. It's turned off when you stop, leave the
   tab, refresh or close the page.
