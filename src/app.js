@@ -191,7 +191,14 @@ function renderBoard() {
         el.style.setProperty('--heat', `${Math.round(15 + t * 70)}%`);
         el.classList.add('heat');
       } else if (state.view === 'rt') {
-        if (d.rt) { value.textContent = `${mm(d.rtPress)} / ${mm(d.rtRelease)}`; el.classList.add('hl-rt'); }
+        if (d.rt) {
+          // One value when press and release sensitivity match (the usual case); otherwise
+          // ↓press ↑release on two short lines so nothing clips.
+          const same = Math.abs(d.rtPress - d.rtRelease) < 0.0005;
+          value.textContent = same ? mm(d.rtPress) : `↓${mm(d.rtPress)} ↑${mm(d.rtRelease)}`;
+          if (!same) value.classList.add('rt-split');
+          el.classList.add('hl-rt');
+        }
         else el.classList.add('dim');
       } else if (state.view === 'snap') {
         if (d.partner) {
@@ -208,7 +215,6 @@ function renderBoard() {
         const a = layerAction(state.layer, key.slot);
         // Long combos wrap after "+" in a smaller size instead of being cut off.
         value.textContent = a.none ? '·' : a.short.replaceAll('+', '+​');
-        if (!a.none && a.short.length > 9) value.classList.add('km-wrap');
         value.title = a.label;
         el.classList.add('km-key');
         if (a.none) el.classList.add('dim');
@@ -232,8 +238,22 @@ function renderBoard() {
     el.onclick = e => clickKey(key.slot, e.ctrlKey || e.metaKey || e.shiftKey);
     board.appendChild(el);
   }
+  fitKeyLabels(board);
   renderLegend(lo, hi);
 }
+
+// Keycap labels that don't fit shrink one step, and only wrap if they still don't fit.
+function fitKeyLabels(board = $('board')) {
+  for (const v of board.querySelectorAll('.key-value')) {
+    v.classList.remove('fit-1', 'fit-2');
+    if (!v.textContent || v.classList.contains('rt-split')) continue;
+    if (v.scrollWidth <= v.clientWidth + 1) continue;
+    v.classList.add('fit-1');
+    if (v.scrollWidth > v.clientWidth + 1) { v.classList.remove('fit-1'); v.classList.add('fit-2'); }
+  }
+}
+let fitTimer;
+window.addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(() => fitKeyLabels(), 120); });
 
 function place(el, k) {
   el.style.left = `${(k.x / LAYOUT_WIDTH) * 100}%`;
@@ -270,7 +290,7 @@ function renderLegend(lo, hi) {
   if (state.view === 'actuation') {
     el.innerHTML = `<span>${mm(lo)} mm</span><span class="ramp" aria-hidden="true"></span><span>${mm(hi)} mm</span><span class="muted">stronger color = shorter travel</span>`;
   } else if (state.view === 'rt') {
-    el.innerHTML = '<span class="swatch swatch-rt"></span><span>Rapid Trigger on · values are press / release sensitivity (mm)</span>';
+    el.innerHTML = '<span class="swatch swatch-rt"></span><span>Rapid Trigger on · sensitivity in mm (↓ press, ↑ release when they differ)</span>';
   } else if (state.view === 'live') {
     const why = liveUnavailableReason();
     el.innerHTML = state.live
