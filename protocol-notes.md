@@ -414,8 +414,16 @@ Two paths exist in qmk.top/v4. RT75 Studio uses only the first.
   - qmk.top only offers it when the device entry has `other.deBounce`
     (`supportDebounce()`). The RT75 Pro's doesn't, so RT75 Studio shows it read-only and never
     writes it. The RT75 Pro reports 0.
-- **Sleep timers (not implemented):** the RT75 Pro entry declares `sleep24` and `sleepBT` ranges:
-  sleep 0–18 h, Bluetooth deep sleep 10 s–18 h (`0x11` / `0x91`).
+- **Sleep timers:** set `[0x11, 0…, checksum, …]` with four uint16 LE values in **seconds** at bytes
+  8–15: BT backlight off, 2.4G backlight off, BT deep sleep, 2.4G deep sleep. Read them with
+  `0x91` (same layout).
+  - qmk.top labels the first two "close backlight" times (`getBluetoothCloseBacklightTime`) and
+    shows them in minutes; its help text says 0 = never.
+  - qmk.top's own fallback defaults are 120 s and 28 min.
+  - The RT75 Pro declares `sleep24.sleep` and `sleepBT.sleep` as 0–18 h and `sleepBT.deep` as
+    10 s–18 h. It declares no 2.4G deep sleep, so RT75 Studio always writes that value back
+    unchanged.
+  - Implemented in RT75 Studio and tested on the simulated keyboard; not yet run on the real one.
 - These writes were tested against the demo's simulated keyboard (packets, read-back, refusals),
   then verified on the real keyboard (2026-10-15): the polling-rate change with read-back and
   Undo, and switching profile 1 → 2 → 1 all worked as expected.

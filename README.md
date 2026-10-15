@@ -81,8 +81,10 @@ be exported to a file and imported again. Demo-mode presets are stored separatel
   - known key modes only; valid checksum
 - The device ID is re-checked before writing, and writing is disabled if the travel precision
   is unknown.
-- **Keyboard-wide writes** are only polling rate `[03, 00, code]` (codes 0–6) and profile
-  `[04, index]` (0–3). Each has its own validator and is read back afterwards.
+- **Keyboard-wide writes** are only polling rate `[03, 00, code]` (codes 0–6), profile
+  `[04, index]` (0–3) and sleep timers (`0x11`, four 16-bit values in seconds, range-checked as
+  above, with 2.4G deep sleep always written back unchanged). Each has its own validator and is
+  read back afterwards.
 - **The live test** sends only `0x1B 01` and `0x1B 00`, which turn depth reporting on and off.
   The same toggle is used by qmk.top's Simulation Test. It's turned off when you stop, leave the
   tab, refresh or close the page.
