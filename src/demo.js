@@ -1,6 +1,7 @@
 // In-memory stand-in for the RT75 Pro, used by ?demo. It answers the same HID reports as
 // the real keyboard (IDs, settings reads, single-key magnet writes) from a saved dump,
 // so the whole read / edit / write / verify flow can be tried without hardware.
+// Profiles 1-4 each keep their own key settings; profile 2 starts with every key at 1.00 mm.
 
 const PARAMS = { 7: 'mode', 0: 'actuation', 1: 'release', 6: 'bottomDeadZone', 2: 'rtPress', 3: 'rtRelease', 251: 'topDeadZone', 9: 'snapPartner', 252: 'switchType' };
 const WIDE = new Set([0, 1, 6, 2, 3]);
@@ -8,7 +9,12 @@ const WIDE = new Set([0, 1, 6, 2, 3]);
 // options.ignore: [{ slot, param }] writes the simulated keyboard silently drops, to reproduce
 // failed writes (e.g. ?demo&ignore=15:7 drops mode writes to S).
 export function createDemoDevice(dump, { ignore = [] } = {}) {
-  const store = structuredClone(dump.magnet);
+  const profiles = Array.from({ length: 4 }, () => structuredClone(dump.magnet));
+  profiles[1].actuation = profiles[1].actuation.map(v => (v ? 200 : 0));
+  profiles[1].release = profiles[1].release.map(v => (v ? 200 : 0));
+  profiles[1].mode = profiles[1].mode.map(() => 0);
+  let profile = 0, rateCode = 3; // 1000 Hz
+  const store = () => profiles[profile];
 
   // Vendor report interface: while 0x1B 01 is on, push a repeating press cycle
   // (a full press, then a light press that stops short of the actuation point).
@@ -55,10 +61,12 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
     async sendFeatureReport(_id, buf) {
       last = Uint8Array.from(buf);
       if (last[0] === 0x1b) { setReporting(last[1] === 1); return; }
+      if (last[0] === 0x03) { rateCode = last[2]; return; }
+      if (last[0] === 0x04) { profile = last[1]; return; }
       if (last[0] === 0x65 && ignore.some(x => x.slot === last[3] && x.param === last[1])) return;
       if (last[0] === 0x65 && last[2] === 0) {
         const name = PARAMS[last[1]];
-        if (name) store[name][last[3]] = WIDE.has(last[1]) ? last[8] | (last[9] << 8) : last[8];
+        if (name) store()[name][last[3]] = WIDE.has(last[1]) ? last[8] | (last[9] << 8) : last[8];
       }
     },
 
@@ -68,13 +76,13 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
         case 0x8f: r.set([0x8f, 0x31, 0x0b, 0, 0, 0, 0, 0x12, 0x05]); break;
         case 0x80: r.set([0x80]); break;
         case 0xe6: r.set([0xe6]); break;          // no feature list, like the real keyboard
-        case 0x84: r.set([0x84, 0]); break;
-        case 0x83: r.set([0x83, 0, 3]); break;    // 1000 Hz
+        case 0x84: r.set([0x84, profile]); break;
+        case 0x83: r.set([0x83, 0, rateCode]); break;
         case 0x86: r.set([0x86, 0]); break;
         case 0x8a: r.set(keymap.slice(last[3] * 64, last[3] * 64 + 64)); break;
         case 0xe5: {
           const name = PARAMS[last[1]];
-          const bytes = WIDE.has(last[1]) ? store[name].flatMap(v => [v & 255, v >> 8]) : store[name];
+          const bytes = WIDE.has(last[1]) ? store()[name].flatMap(v => [v & 255, v >> 8]) : store()[name];
           r.set(bytes.slice(last[3] * 64, last[3] * 64 + 64));
           break;
         }

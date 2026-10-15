@@ -41,6 +41,15 @@ outline, until you click **Review changes…**. The review shows every before �
 can download a backup first. After writing, the app reads the values back from the keyboard to
 confirm them and offers **Undo**. A backup file can be reopened with **Open dump…**.
 
+## Keyboard settings
+
+Below the keyboard:
+- **Profile (1–4)** switches the active profile straight away, then re-reads everything,
+  because each profile stores its own key settings.
+- **Polling rate** (125Hz–8kHz) is queued like any other edit and written through the review.
+- **Debounce** is shown read-only: qmk.top doesn't offer it for this keyboard, and magnetic
+  switches don't bounce like mechanical contacts.
+
 ## Live test
 
 The **Live test** tab shows how deep the key you're pressing goes, live, against that key's
@@ -69,6 +78,8 @@ be exported to a file and imported again. Demo-mode presets are stored separatel
   - known key modes only; valid checksum
 - The device ID is re-checked before writing, and writing is disabled if the travel precision
   is unknown.
+- **Keyboard-wide writes** are only polling rate `[03, 00, code]` (codes 0–6) and profile
+  `[04, index]` (0–3). Each has its own validator and is read back afterwards.
 - **The live test** sends only `0x1B 01` and `0x1B 00`, which turn depth reporting on and off.
   The same toggle is used by qmk.top's Simulation Test. It's turned off when you stop, leave the
   tab, refresh or close the page.

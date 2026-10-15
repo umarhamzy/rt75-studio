@@ -420,3 +420,22 @@ button { font: inherit; color: inherit; }
 .live-gauge .depth-fill { fill: url(#liveFillGrad); }
 .live-gauge .fill-stop { stop-color: var(--depth-color); }
 .live-gauge .depth-edge { fill: var(--depth-color); }
+
+/* ---------- Keyboard-wide settings ---------- */
+.kb-settings {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px;
+  margin-top: 10px; padding: 12px 14px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.kb-settings[hidden] { display: none; }
+.kb-item { display: flex; align-items: center; gap: 10px; }
+.segmented-sm { padding: 2px; }
+.segmented-sm button { padding: 4px 12px; }
+.segmented-sm button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
+.segmented-sm button:disabled { cursor: default; }
+.kb-settings select {
+  padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--surface-2); color: var(--text); font: inherit;
+}
+.kb-settings select.is-pending { outline: 2px dashed var(--snap); outline-offset: 1px; }
+.kb-note { margin: 0; font-size: 12px; color: var(--muted); }

@@ -1,7 +1,7 @@
 import { KEYS, DEFAULT_MATRIX, LAYOUT_WIDTH, LAYOUT_HEIGHT, DEVICE_ID } from './layout.js';
 import {
   isSupported, requestKeyboard, findGrantedKeyboard, readSettings, settingsFromDump,
-  writeBounds, writeKeySettings, startLiveTravel, LIMITS,
+  writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, LIMITS, RATE_OPTIONS, PROFILE_COUNT,
 } from './device.js';
 
 // ---------- Key naming ----------
@@ -53,6 +53,7 @@ const state = {
   selected: new Set(),       // matrix slots
   knob: false,               // knob selected instead of keys
   pending: new Map(),        // slot -> { field: raw value } differing from settings
+  pendingKb: {},             // keyboard-wide edits, e.g. { reportRateHz: 8000 }
   picking: null,             // slot waiting for a Snap Tap partner click
   // "Release at the same point" / "Same for press and release" unticked by the user. Kept per
   // selection; without it the boxes re-ticked themselves whenever the values were still equal.
@@ -308,10 +309,13 @@ function renderDevice() {
 // ---------- Pending bar ----------
 function renderPendingBar() {
   const edits = pendingEdits();
-  const n = edits.length;
+  const n = edits.length, kb = kbChanges().length;
   const settingsCount = edits.reduce((a, e) => a + Object.keys(e).length - 1, 0);
-  $('pendingBar').hidden = n === 0;
-  $('pendingText').textContent = `${settingsCount} unsaved change${settingsCount === 1 ? '' : 's'} on ${n} key${n === 1 ? '' : 's'}`;
+  $('pendingBar').hidden = n === 0 && kb === 0;
+  const parts = [];
+  if (n) parts.push(`${settingsCount} unsaved change${settingsCount === 1 ? '' : 's'} on ${n} key${n === 1 ? '' : 's'}`);
+  if (kb) parts.push(n ? 'polling rate' : 'Unsaved polling rate change');
+  $('pendingText').textContent = parts.join(' + ');
   $('btnReview').disabled = !editable();
   $('btnDiscard').disabled = state.busy;
 }
@@ -717,7 +721,17 @@ function renderLivePanel() {
   drawLive();
 }
 
-function hasAnyPending() { return pendingEdits().length > 0; }
+function hasAnyPending() { return pendingEdits().length > 0 || kbChanges().length > 0; }
+
+// Keyboard-wide edits that differ from the keyboard: [{ field, label, from, to }].
+function kbChanges() {
+  const s = state.settings, k = state.pendingKb;
+  if (!s) return [];
+  return k.reportRateHz !== undefined && k.reportRateHz !== s.reportRateHz
+    ? [{ field: 'reportRateHz', label: 'Polling rate', from: s.reportRateHz, to: k.reportRateHz }] : [];
+}
+const fmtHz = hz => (hz === undefined ? '?' : hz >= 1000 ? `${hz / 1000} kHz` : `${hz} Hz`);
+const kbRows = changes => changes.map(c => `<tr><td>Keyboard</td><td>${c.label}</td><td>${fmtHz(c.from)}</td><td><strong>${fmtHz(c.to)}</strong></td></tr>`).join('');
 
 function drawLive() {
   const live = state.live;
@@ -958,12 +972,12 @@ function changeRows(edits, before) {
 }
 
 function openReview() {
-  if (!editable() || !pendingEdits().length) return;
+  if (!editable() || !hasAnyPending()) return;
   const edits = pendingEdits();
   $('reviewBody').innerHTML = `
     <p>These settings will be written to the keyboard (profile ${(state.settings.profile ?? 0) + 1}). Nothing else changes.</p>
     <div class="table-wrap"><table class="changes"><thead><tr><th>Key</th><th>Setting</th><th>Now</th><th>New</th></tr></thead>
-    <tbody>${changeRows(edits, (slot, f) => state.settings.magnet[f][slot])}</tbody></table></div>
+    <tbody>${changeRows(edits, (slot, f) => state.settings.magnet[f][slot])}${kbRows(kbChanges())}</tbody></table></div>
     <label class="check"><input type="checkbox" id="chkBackup" checked> Download a backup of the current settings first</label>`;
   $('reviewStatus').textContent = '';
   $('reviewStatus').className = 'review-status';
@@ -974,7 +988,7 @@ function openReview() {
   $('reviewDialog').showModal();
 }
 
-async function applyEdits(edits, { backup }) {
+async function applyEdits(edits, { backup, kb = kbChanges() }) {
   const before = new Map(edits.map(e => [e.slot, Object.fromEntries(Object.keys(e).filter(f => f !== 'slot').map(f => [f, state.settings.magnet[f][e.slot]]))]));
   if (backup) downloadBackup();
   state.busy = true;
@@ -985,20 +999,30 @@ async function applyEdits(edits, { backup }) {
   status.className = 'review-status';
   status.textContent = 'Writing…';
   try {
-    const result = await writeKeySettings(state.dev, state.settings, edits, (f, label) => { status.textContent = `${label}… ${Math.round(f * 100)}%`; });
+    const result = edits.length
+      ? await writeKeySettings(state.dev, state.settings, edits, (f, label) => { status.textContent = `${label}… ${Math.round(f * 100)}%`; })
+      : { magnet: {}, mismatches: [], retried: 0 };
     Object.assign(state.settings.magnet, result.magnet);       // trust what the keyboard reports
     for (const e of edits) state.pending.delete(e.slot);
+    for (const c of kb) {
+      status.textContent = `Writing ${c.label.toLowerCase()}…`;
+      const got = await writeReportRate(state.dev, state.settings, c.to);
+      state.settings.reportRateHz = got;
+      delete state.pendingKb[c.field];
+      if (got !== c.to) result.mismatches.push({ kb: true, label: c.label, expected: fmtHz(c.to), actual: fmtHz(got) });
+    }
     if (result.mismatches.length) {
       status.className = 'review-status is-error';
       status.textContent = `Written and retried once, but ${result.mismatches.length} value(s) still read back differently: ` +
-        result.mismatches.map(m => `${keyBySlot(m.slot).label} ${FIELD_LABELS[m.field]} expected ${fmt(m.field, m.expected)}, got ${fmt(m.field, m.actual)}`).join('; ');
+        result.mismatches.map(m => m.kb ? `${m.label} expected ${m.expected}, got ${m.actual}`
+          : `${keyBySlot(m.slot).label} ${FIELD_LABELS[m.field]} expected ${fmt(m.field, m.expected)}, got ${fmt(m.field, m.actual)}`).join('; ');
     } else {
-      const n = edits.reduce((a, e) => a + Object.keys(e).length - 1, 0);
+      const n = edits.reduce((a, e) => a + Object.keys(e).length - 1, 0) + kb.length;
       status.className = 'review-status is-ok';
       status.textContent = `Done. All ${n} setting${n === 1 ? '' : 's'} written and confirmed by reading them back.` +
         (result.retried ? ` (${result.retried} needed a second try.)` : '');
     }
-    state.lastApplied = { undo: [...before].map(([slot, fields]) => ({ slot, ...fields })) };
+    state.lastApplied = { undo: [...before].map(([slot, fields]) => ({ slot, ...fields })), undoKb: kb.map(c => ({ ...c, from: c.to, to: c.from })) };
     $('btnApply').hidden = true;
     $('btnUndo').hidden = false;
     $('btnCancel').textContent = 'Close';
@@ -1021,12 +1045,13 @@ async function undoLast() {
     .map(e => Object.fromEntries(Object.entries(e).filter(([f, v]) => !((f === 'rtPress' || f === 'rtRelease') && v === 0))))
     .map(e => sendable(e, s => e.mode ?? state.settings.magnet.mode[s]))
     .filter(e => Object.keys(e).length > 1);
+  const undoKb = state.lastApplied.undoKb ?? [];
   state.lastApplied = null;
   $('btnUndo').hidden = true;
   $('reviewBody').innerHTML = `<p>Restoring the previous values:</p>
     <div class="table-wrap"><table class="changes"><thead><tr><th>Key</th><th>Setting</th><th>Now</th><th>Restored</th></tr></thead>
-    <tbody>${changeRows(undo, (slot, f) => state.settings.magnet[f][slot])}</tbody></table></div>`;
-  await applyEdits(undo, { backup: false });
+    <tbody>${changeRows(undo, (slot, f) => state.settings.magnet[f][slot])}${kbRows(undoKb)}</tbody></table></div>`;
+  await applyEdits(undo, { backup: false, kb: undoKb });
   $('btnUndo').hidden = true;
 }
 
@@ -1049,6 +1074,67 @@ function downloadBackup() {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+// ---------- Keyboard-wide settings ----------
+function renderKeyboardSettings() {
+  const el = $('kbSettings');
+  const s = state.settings;
+  el.hidden = !s;
+  if (!s) return;
+  const can = editable();
+  const rate = state.pendingKb.reportRateHz ?? s.reportRateHz;
+  const ratePending = kbChanges().length > 0;
+  el.innerHTML = `
+    <div class="kb-item">
+      <span class="stat-label">Profile</span>
+      <div class="segmented segmented-sm" role="group" aria-label="Active profile">
+        ${Array.from({ length: PROFILE_COUNT }, (_, i) => `<button type="button" data-profile="${i}" aria-pressed="${s.profile === i}" ${can ? '' : 'disabled'}>${i + 1}</button>`).join('')}
+      </div>
+    </div>
+    <div class="kb-item">
+      <label class="stat-label" for="rateSelect">Polling rate</label>
+      <select id="rateSelect" class="${ratePending ? 'is-pending' : ''}" ${can ? '' : 'disabled'}>
+        ${RATE_OPTIONS.map(hz => `<option value="${hz}" ${hz === rate ? 'selected' : ''}>${fmtHz(hz)}${hz === s.reportRateHz ? ' (current)' : ''}</option>`).join('')}
+      </select>
+    </div>
+    <div class="kb-item">
+      <span class="stat-label">Debounce</span>
+      <span class="stat-value" title="qmk.top doesn't offer debounce for this keyboard; magnetic (Hall-effect) switches don't bounce like mechanical contacts.">${s.debounce ?? '?'} · not adjustable here</span>
+    </div>
+    ${s.source !== 'device' ? '<p class="note kb-note">Connect the keyboard to change these.</p>' : ''}`;
+  el.querySelectorAll('[data-profile]').forEach(b => b.onclick = () => changeProfile(Number(b.dataset.profile)));
+  $('rateSelect').onchange = e => {
+    const hz = Number(e.target.value);
+    if (hz === s.reportRateHz) delete state.pendingKb.reportRateHz; else state.pendingKb.reportRateHz = hz;
+    refresh();
+  };
+}
+
+// Profiles hold their own key settings, so switching re-reads everything.
+async function changeProfile(index) {
+  const s = state.settings;
+  if (!editable() || index === s.profile) return;
+  if (hasAnyPending() && !confirm(`Switching to profile ${index + 1} discards your unsaved changes. Continue?`)) return;
+  showError(null);
+  const dev = state.dev;
+  state.busy = true;
+  refresh();
+  try {
+    setBusy(0.05, `Switching to profile ${index + 1}…`);
+    const now = await switchProfile(dev, s, index);
+    if (now !== index) throw new Error(`the keyboard stayed on profile ${now + 1}`);
+    const settings = await readSettings(dev, (f, label) => setBusy(f, `Reading profile ${index + 1}: ${label}…`));
+    settings.demo = s.demo;
+    state.busy = false;
+    load(settings, dev);
+  } catch (e) {
+    showError('Profile switch failed: ' + e.message);
+  } finally {
+    state.busy = false;
+    setBusy(null);
+    refresh();
+  }
+}
+
 // ---------- Plumbing ----------
 function renderBoardOnly() {
   renderBoard();
@@ -1060,6 +1146,7 @@ function refresh() {
   renderBoard();
   renderSelectionTools();
   renderStats();
+  renderKeyboardSettings();
   renderPendingBar();
   renderInspector();
 }
@@ -1077,6 +1164,7 @@ function load(settings, dev = null) {
   state.settings = settings;
   state.dev = dev;
   state.pending.clear();
+  state.pendingKb = {};
   state.lastApplied = null;
   refresh();
 }
@@ -1100,7 +1188,7 @@ function setBusy(fraction, label) {
 async function connect() {
   showError(null);
   if (!isSupported()) { showError('WebHID is not available in this browser. Use Chrome or Edge.'); return; }
-  if (pendingEdits().length && !confirm('Refreshing discards your unsaved changes. Continue?')) return;
+  if (hasAnyPending() && !confirm('Refreshing discards your unsaved changes. Continue?')) return;
   if (state.live) await stopLive();
   try {
     const dev = state.settings?.source === 'device' ? (await findGrantedKeyboard() ?? await requestKeyboard()) : await requestKeyboard();
@@ -1120,7 +1208,7 @@ async function connect() {
 
 async function openFile(file) {
   showError(null);
-  if (pendingEdits().length && !confirm('Opening a file discards your unsaved changes. Continue?')) return;
+  if (hasAnyPending() && !confirm('Opening a file discards your unsaved changes. Continue?')) return;
   try {
     load(settingsFromDump(JSON.parse(await file.text())));
   } catch (e) {
@@ -1138,7 +1226,7 @@ $('btnSample').onclick = async () => {
 };
 $('btnSelectAll').onclick = () => { state.knob = false; state.selected = new Set(MAGNETIC.map(k => k.slot)); refresh(); };
 $('btnClearSel').onclick = () => { state.selected.clear(); refresh(); };
-$('btnDiscard').onclick = () => { state.pending.clear(); refresh(); };
+$('btnDiscard').onclick = () => { state.pending.clear(); state.pendingKb = {}; refresh(); };
 $('btnReview').onclick = openReview;
 $('btnApply').onclick = () => applyEdits(pendingEdits(), { backup: $('chkBackup')?.checked });
 $('btnUndo').onclick = undoLast;
@@ -1150,7 +1238,7 @@ document.addEventListener('keydown', e => {
   if (state.picking !== null) { state.picking = null; refresh(); return; }
   if (state.selected.size || state.knob) { state.selected.clear(); state.knob = false; refresh(); }
 });
-window.addEventListener('beforeunload', e => { if (pendingEdits().length || state.busy) e.preventDefault(); });
+window.addEventListener('beforeunload', e => { if (hasAnyPending() || state.busy) e.preventDefault(); });
 // Best effort: turn live reporting off if the tab closes mid-test.
 window.addEventListener('pagehide', () => { state.live?.stop().catch(() => {}); });
 $('btnPresets').onclick = openPresets;

@@ -395,3 +395,26 @@ Two paths exist in qmk.top/v4. RT75 Studio uses only the first.
    - Outside calibration the keyboard answers by echoing the request header, which qmk.top treats as
      zeros.
    - Because entering this mode rewrites switch calibration, RT75 Studio doesn't use it.
+
+## Keyboard-wide settings (RY5088 base)
+
+- **Polling rate:** set `[0x03, 0, code]`, read `0x83` → `resp[2]`. Codes: 0 = 8000, 1 = 4000,
+  2 = 2000, 3 = 1000, 4 = 500, 5 = 250, 6 = 125 Hz.
+  - qmk.top shows the control only when `isSupportReportRate()` is true: the filter entry's
+    `reportRate` must be > 1000, and the USB or RF version ≥ 1024.
+  - The RT75 Pro qualifies: its USB (0x5030) and dongle (0x5038) filters both declare
+    `reportRate: 8000`, and the firmware is 0x0512. So all seven rates are offered.
+- **Profiles:** set `[0x04, index]` then wait 200 ms; read `0x84` → `resp[1]`.
+  - qmk.top's "Profile 1–4" are the device's key layers (`当前按键层`, `deviceType.layer = 4`).
+  - After a switch qmk.top re-reads every key (`___获取所有按键信息`), so magnet settings and the
+    key matrix are stored per profile.
+  - The key-matrix read `[0x8A, profile, 0xFF, page, sub]` takes the profile in byte 1. Byte 4 is
+    a sub-layer, which is why the earlier "all 4 layers" dump (byte 4 = 0..3) read back empty.
+- **Debounce:** set `[0x06, value]`, read `0x86` → `resp[1]`.
+  - qmk.top only offers it when the device entry has `other.deBounce`
+    (`supportDebounce()`). The RT75 Pro's doesn't, so RT75 Studio shows it read-only and never
+    writes it. The RT75 Pro reports 0.
+- **Sleep timers (not implemented):** the RT75 Pro entry declares `sleep24` and `sleepBT` ranges:
+  sleep 0–18 h, Bluetooth deep sleep 10 s–18 h (`0x11` / `0x91`).
+- These writes were tested against the demo's simulated keyboard (packets, read-back, refusals).
+  They haven't been run on the real keyboard yet.

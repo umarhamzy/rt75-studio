@@ -64,6 +64,10 @@ const MAGNET_PARAMS = [
 ];
 
 const REPORT_RATES = { 0: 8000, 1: 4000, 2: 2000, 3: 1000, 4: 500, 5: 250, 6: 125 };
+// The RT75 Pro's USB and dongle filters in qmk.top/v4 declare reportRate 8000, so every rate is offered.
+export const RATE_OPTIONS = [8000, 4000, 2000, 1000, 500, 250, 125];
+// qmk.top's "Profile 1–4" are the device's key layers (deviceType.layer = 4).
+export const PROFILE_COUNT = 4;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -136,8 +140,9 @@ class Transport {
   }
 
   // Write path, mirroring qmk.top/v4 sendMsg: no reply is read.
-  async send(pkt, bounds) {
-    assertAllowedWrite(pkt, bounds);
+  // check: validator for the packet; defaults to the per-key magnet write rules.
+  async send(pkt, bounds, check = assertAllowedWrite) {
+    check(pkt, bounds);
     if (this.viaDongle) {
       await this.#rawSend([0xf6, 0x0a]);
       if (!await this.#waitFor('canSend')) throw new Error('Dongle not ready to send');
@@ -442,4 +447,63 @@ export async function startLiveTravel(featureDev, settings, onSample, inputDev =
       try { await featureDev.close(); } catch { /* ignore */ }
     }
   };
+}
+
+// ---------- Keyboard-wide settings ----------
+// Formats from qmk.top/v4's RY5088 base: setReportRate [0x03, 0, code], setCurrentProfile
+// [0x04, index] (then a 200 ms pause). Debounce (0x06) is not offered: qmk.top only shows it when
+// the device entry declares other.deBounce, which the RT75 Pro's does not.
+const SET_REPORT_RATE = 0x03;
+const SET_PROFILE = 0x04;
+const RATE_CODES = Object.fromEntries(Object.entries(REPORT_RATES).map(([code, hz]) => [hz, Number(code)]));
+
+function assertAllowedKeyboardWrite(p) {
+  const fail = why => { throw new Error(`Blocked write (${why}): ${[...p.slice(0, 9)].map(b => b.toString(16).padStart(2, '0')).join(' ')}`); };
+  if (p.length !== 64) fail('length');
+  if (p[7] !== 255 - (p.slice(0, 7).reduce((a, b) => a + b, 0) & 0xff)) fail('checksum');
+  if (p.slice(3, 7).some(b => b !== 0) || p.slice(8).some(b => b !== 0)) fail('unexpected bytes');
+  if (p[0] === SET_REPORT_RATE) {
+    if (p[1] !== 0 || !(p[2] in REPORT_RATES)) fail('bad polling-rate code');
+  } else if (p[0] === SET_PROFILE) {
+    if (p[1] >= PROFILE_COUNT || p[2] !== 0) fail('bad profile index');
+  } else {
+    fail('not a keyboard-setting command');
+  }
+}
+
+async function withDevice(dev, settings, fn) {
+  if (!dev.opened) await dev.open();
+  const t = new Transport(dev);
+  try {
+    if (t.viaDongle && !(await t.dongleStatus()).keyboardOnline) throw new Error('Keyboard is asleep or out of range. Press a key and try again.');
+    const id = await t.query([CMD.GET_USB_VERSION]);
+    if (new DataView(id.buffer).getUint32(1, true) !== settings.deviceId) throw new Error('A different keyboard is connected. Refresh first.');
+    return await fn(t);
+  } finally {
+    try { await dev.close(); } catch { /* already closed */ }
+  }
+}
+
+// Sets the polling rate and reads it back. Returns the rate the keyboard reports.
+export async function writeReportRate(dev, settings, hz) {
+  if (!(hz in RATE_CODES)) throw new Error(`Unsupported polling rate ${hz}`);
+  const pkt = encode([SET_REPORT_RATE, 0, RATE_CODES[hz]]);
+  assertAllowedKeyboardWrite(pkt);
+  return withDevice(dev, settings, async t => {
+    await t.send(pkt, null, assertAllowedKeyboardWrite);
+    await sleep(300);
+    return REPORT_RATES[(await t.query([CMD.GET_REPORT_RATE]))[2]];
+  });
+}
+
+// Switches the active profile (0-based) and reads it back. The caller should re-read settings,
+// since key settings are stored per profile.
+export async function switchProfile(dev, settings, index) {
+  const pkt = encode([SET_PROFILE, index]);
+  assertAllowedKeyboardWrite(pkt);
+  return withDevice(dev, settings, async t => {
+    await t.send(pkt, null, assertAllowedKeyboardWrite);
+    await sleep(300); // qmk.top waits 200 ms
+    return (await t.query([CMD.GET_PROFILE]))[1];
+  });
 }
