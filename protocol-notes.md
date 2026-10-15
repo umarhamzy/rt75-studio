@@ -587,10 +587,20 @@ So RT75 Studio doesn't rely on macro reads.
   - "Read steps" returned all `FF` for both.
   - So it isn't RT75 Studio's write path: newly written macros don't read back at their slot,
     whoever wrote them. Spam F (index 0, written long ago) does.
-- **Next hypothesis (zero-risk test):** new macros are kept in memory and saved to flash later
-  (for example at power-down), and `0x8B` reads flash.
-  - Test: unplug and replug, then read slots 4 and 5 again.
-  - `macro-probe.html` (read-only, slots 0–49) is on this branch to see slots 1–8 in full.
+- **Power-cycle hypothesis disproved:** after unplugging and replugging, slots 4 and 5 still read
+  all `FF`.
+- **Investigation closed (2026-10-15).** Ruled out:
+  - off by one
+  - write order (key before or after macro)
+  - "stored in write order"
+  - "packed list of macros keys use"
+  - "kept only if a key uses it"
+  - RT75 Studio's write format (qmk.top's own macros fail the same way)
+  - "saved to flash at power-down"
+  
+  The read works for some older macros (Spam F, index 0) but not for newly written ones. RT75
+  Studio's library design doesn't depend on it, and the read is only offered as a labelled preview.
+  `macro-probe.html` (read-only, slots 0–49) stays on this branch for any future look.
 
 ### RT75 Studio's macro library (feature/macro-library)
 
