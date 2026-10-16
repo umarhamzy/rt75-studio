@@ -202,7 +202,7 @@ function renderBoard() {
 
     const legend = document.createElement('span');
     legend.className = 'key-legend';
-    legend.textContent = key.label;
+    legend.textContent = keycapLabel(key);
     el.appendChild(legend);
 
     if (d) {
@@ -957,6 +957,10 @@ const platformOs = () => (/mac/i.test(navigator.userAgentData?.platform ?? navig
 const currentOs = () => (state.osPref === 'auto' ? keyboardOs() ?? platformOs() : state.osPref);
 const fnLayer = () => (currentOs() === 'mac' ? 'fnMac' : 'fnWin');
 const shownLayers = () => ['base', fnLayer()];
+// Mac names (Win → Cmd, Alt → Opt) for the Mac Fn layer, and for the base layer while the UI is
+// in Mac mode. Labels only: the bytes are the same HID codes either way.
+const macNames = layer => layer === 'fnMac' || (layer === 'base' && currentOs() === 'mac');
+const keycapLabel = key => (currentOs() === 'mac' ? key.label.replace(/^Win$/, 'Cmd').replace(/^Alt$/, 'Opt') : key.label);
 const layerName = id => (id === 'base' ? 'Base' : 'Fn');
 function setOsPref(pref) {
   if (!['auto', 'win', 'mac'].includes(pref)) return;
@@ -996,7 +1000,7 @@ const actionLabel = (layer, bytes) => {
     const entry = macroForSlot(bytes[2]).entry;
     return `${entry ? `“${entry.name}”` : `Macro slot ${bytes[2] + 1}`} · ${MACRO_MODES[bytes[1]]?.name ?? `mode ${bytes[1]}`}`;
   }
-  return decodeAction(bytes, { mac: layer === 'fnMac' }).label;
+  return decodeAction(bytes, { mac: macNames(layer) }).label;
 };
 const kmRows = changes => changes.map(c => `<tr><td>${keyBySlot(c.slot).label}</td><td>${LAYERS[c.layer].label}</td><td>${escapeHtml(actionLabel(c.layer, c.from))}</td><td><strong>${escapeHtml(actionLabel(c.layer, c.to))}</strong></td></tr>`).join('');
 
@@ -1006,13 +1010,13 @@ function layerAction(layer, slot) {
   const factory = LAYERS[layer].defaults.slice(slot * 4, slot * 4 + 4);
   const changed = b.join() !== factory.join();
   if (LAYERS[layer].fn && b.every(x => x === 0)) return { none: true, changed, short: '·', label: 'No Fn action', bytes: b, factory };
-  return { ...decodeAction(b, { mac: layer === 'fnMac' }), changed, bytes: b, factory };
+  return { ...decodeAction(b, { mac: macNames(layer) }), changed, bytes: b, factory };
 }
 
 function factoryLabel(layer, slot) {
   const f = LAYERS[layer].defaults.slice(slot * 4, slot * 4 + 4);
   if (LAYERS[layer].fn && f.every(x => x === 0)) return 'No Fn action';
-  return decodeAction(f, { mac: layer === 'fnMac' }).label;
+  return decodeAction(f, { mac: macNames(layer) }).label;
 }
 
 // ---------- Macro library ----------
@@ -1463,7 +1467,7 @@ function revertChipHtml(slot) {
 }
 
 function keyEditorHtml(layer, slot) {
-  const L = LAYERS[layer], mac = layer === 'fnMac';
+  const L = LAYERS[layer], mac = macNames(layer);
   const cur = layerBytes(layer, slot);
   const a = decodeAction(cur, { mac });
   const isKey = a.kind === 'key' || a.kind === 'combo';
