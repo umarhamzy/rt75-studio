@@ -728,11 +728,6 @@ function editorHtml(datas) {
     </div>
     <label class="check"><input type="checkbox" id="relLink" ${linked ? 'checked' : ''}> Release at the same point</label>
 
-    <h3>Dead zones</h3>
-    ${slider('tdz', 'Top dead zone', tdz, DZ.min, DZ.max, datas.some(d => d.topDeadZone === 0)
-      ? '<span class="warn-badge" title="A top dead zone of 0 can cause accidental presses. qmk.top shows the same warning.">⚠ 0 may misfire</span>' : '')}
-    ${slider('bdz', 'Bottom dead zone', bdz, DZ.min, DZ.max)}
-
     <h3>Rapid Trigger</h3>
     <label class="switch"><input type="checkbox" id="rtToggle" ${rt ? 'checked' : ''}><span class="switch-track"></span>
       <span>${rt === null ? 'On for some keys' : rt ? 'On' : 'Off'}</span></label>
@@ -742,7 +737,12 @@ function editorHtml(datas) {
       ${rtLinked ? '' : slider('rtr', 'Release sensitivity', rtR, rtMin, LIMITS.rt.max)}` : ''}
 
     <h3>Snap Tap</h3>
-    ${snapHtml(datas)}`;
+    ${snapHtml(datas)}
+
+    <h3>Dead zones</h3>
+    ${slider('tdz', 'Top dead zone', tdz, DZ.min, DZ.max, datas.some(d => d.topDeadZone === 0)
+      ? '<span class="warn-badge" title="A top dead zone of 0 can cause accidental presses. qmk.top shows the same warning.">⚠ 0 may misfire</span>' : '')}
+    ${slider('bdz', 'Bottom dead zone', bdz, DZ.min, DZ.max)}`;
 }
 
 // Snap Tap only replaces Normal mode here; keys using DKS, mod-tap or toggle are left alone.

@@ -868,3 +868,10 @@ button.km-row:hover { background: var(--surface-2); }
 .set-undo:hover { background: var(--accent-soft); }
 .set-undo:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .set-undo svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+/* Loading pill sits above the keys (selected and hovered keys stack higher than plain ones). */
+.progress { z-index: 20; }
+/* Polling-rate chips: active state matches the Actuation / Rapid Trigger / Snap Tap tabs. */
+.set-chips button[aria-pressed="true"] { background: var(--surface-3); color: var(--text); font-weight: 600; }
+/* The side panel keeps room for its scrollbar, so turning on Rapid Trigger (a taller panel) doesn't
+   shift everything sideways; the scrollbar itself is thin and dark. */
+.inspector { scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
