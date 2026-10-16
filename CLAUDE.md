@@ -19,7 +19,8 @@ touching device code.
 - **Reference code:** `node tools/fetch-qmk.mjs` downloads qmk.top's GearHub and v4 bundles plus
   the RY5088 base class (the whole protocol), the RT75 device module and the layout chunk, into
   `reference/qmk/` (git-ignored).
-- **Diagnostics:** `probe.html` (device ID) and `dump.html` (full read-only settings dump to JSON).
+- **Diagnostics:** `probe.html` (device ID), `dump.html` (full read-only settings dump to JSON) and
+  `knob-listen.html` (sends nothing; logs the keyboard's own reports, e.g. knob and lighting pushes).
 
 ## Code map
 

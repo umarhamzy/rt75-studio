@@ -439,6 +439,68 @@ Two paths exist in qmk.top/v4. RT75 Studio uses only the first.
      zeros.
    - Because entering this mode rewrites switch calibration, RT75 Studio doesn't use it.
 
+## Knob modes and push reports (listen-only test, 2026-10-16)
+
+Question: can the app tell which mode the knob is in (volume, brightness, lighting …)? The user
+changes mode by holding the knob down.
+
+- **No command reports the mode.** qmk.top never reads it; the KB option read (`0x89`) returns
+  OS, Fn index, anti-mistouch, RT stability and WASD swap only.
+- **Test page:** `knob-listen.html` (branch `diag/knob-listen`) opens every interface and only
+  listens; it never sends a report or requests one.
+- **Run 1, wired (user, 2026-10-16):**
+  - Two interfaces opened: `0x0C/0x01 + 0xFFFF/0x01` (one HIDDevice, two collections) and
+    `0xFFFF/0x02` (the feature interface, no input reports). Chrome delivered the consumer reports.
+  - **Volume mode:** turning sends consumer report ID 3, `E9 00` (Volume Up) or `EA 00`
+    (Volume Down), each followed by `00 00`. Pressing sends `E2 00` (Mute).
+  - **Holding the knob:** a vendor push, report ID 5, `0F 01` then `0F 00` about 30 ms later.
+    qmk.top's push decoder (`U4` in the v4 bundle) calls these "start" and "stop". It's not proven
+    that this pair is the mode change rather than any knob event.
+  - **After the hold, turning** sends report ID 5 `06 nn` with nn stepping `02 03 04` up, then
+    `03 02 01 00` down, each followed by `0F 01` / `0F 00`. No consumer reports. nn looks like the
+    backlight brightness (0–4, the same scale as byte 3 of `0x87`); not yet cross-checked by a read.
+  - qmk.top's decoder treats any push whose first byte is 4–7 as "lighting changed" (切灯效) and
+    doesn't decode the value.
+- **Run 2, wired (user, 2026-10-16), one full cycle with marks:**
+  - **The knob has two modes, and a hold toggles between them.** Volume → hold → lighting →
+    hold → volume again.
+  - **Volume mode:** turn = `E9`/`EA`, press = `E2` (consumer report 3), as in run 1.
+  - **Lighting mode:** turn = `06 nn`, brightness stepping 3, 2, 1, 0, then 1, 2.
+    Press = `04 nn`, the next effect, read as 0x0C, 0x0E, 0x0F, 0x10. These are exactly the
+    `0x87` effect IDs Neon, Radiant, Loop and Color Grid, in order, skipping 13 (Custom). So
+    `04` = effect and `06` = brightness, matching qmk.top's "4–7 = lighting" range.
+  - **Every hold sent a lone `0F 01` / `0F 00` pair** (31.9 s and 54.1 s in run 2, 37.5 s in run 1).
+    Every other `0F` pair followed a `04`/`06` push by 5–10 ms. So a `0F` pair with no lighting
+    push just before it marks the mode toggle. The pair carries no mode value.
+  - **Fn brightness keys send the same `06 nn`** (up: `06 04`; down: `06 03 … 00`). A `06` push
+    alone doesn't prove the knob is in lighting mode.
+- **What the app can know:**
+  - With only two modes, any `E9`/`EA`/`E2` from the knob puts it in volume mode, and each lone
+    `0F` pair flips the mode.
+  - Until one of those is seen after connecting, the mode is unknown.
+  - Media keys elsewhere (an Fn+F-key volume binding) send the same consumer codes, so this is a
+    best guess, not a reading.
+  - Bonus: `06 nn` and `04 nn` pushes let the Lighting panel follow brightness and effect changes
+    made on the keyboard, without a read.
+- **Run 3, 2.4G through the dongle (user, 2026-10-16): same reports as wired.**
+  - They arrive on the dongle's device (PID 0x5038, collections `0xFFFF/0x01 + 0x0C/0x01`), with
+    the same report IDs and bytes, and need no `F6`/`F7`/`FC` relay traffic.
+  - Volume mode: `E9`/`EA`/`E2`. Each hold: a lone `0F 01` / `0F 00` (24.7 s and 59.5 s).
+  - Lighting mode: turn = `06 nn` (0–4); press = `04 05`, `04 06`, `04 07` (Water Ripple,
+    Star Dots, Flow: consecutive effect IDs again). Fn brightness: `06 nn` again.
+- **Summary (label → report):**
+
+  | Mode | Action | Report |
+  |---|---|---|
+  | Volume | turn right / left | ID 3 `E9 00` / `EA 00`, then `00 00` |
+  | Volume | press | ID 3 `E2 00`, then `00 00` |
+  | Lighting | turn | ID 5 `06 nn` (brightness 0–4), then `0F 01`, `0F 00` |
+  | Lighting | press | ID 5 `04 nn` (next effect ID), then `0F 01`, `0F 00` |
+  | Either | hold | ID 5 `0F 01`, `0F 00`, with no lighting push before it (switches mode) |
+  | — | Fn brightness keys | ID 5 `06 nn`, the same as turning in lighting mode |
+
+- **Untested:** whether anything other than a hold sends a lone `0F` pair.
+
 ## Keyboard-wide settings (RY5088 base)
 
 - **Polling rate:** set `[0x03, 0, code]`, read `0x83` → `resp[2]`. Codes: 0 = 8000, 1 = 4000,
