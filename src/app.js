@@ -2307,8 +2307,10 @@ function renderKeyboardSettings() {
   const group = (title, sub, tiles, note) =>
     `<section class="set-group"><h2>${title}${sub ? ` <span class="muted">${sub}</span>` : ''}</h2>
       <div class="set-tiles">${tiles}</div>${note ? `<p class="set-foot">${note}</p>` : ''}</section>`;
-  const tile = (label, body, { wide = false, pending = false } = {}) =>
-    `<div class="set-tile${wide ? ' is-wide' : ''}${pending ? ' is-pending' : ''}"><div class="set-label">${label}</div>${body}</div>`;
+  // A changed tile gets an undo arrow next to its title that drops just that change.
+  const tile = (label, body, { wide = false, pending = false, field = '' } = {}) =>
+    `<div class="set-tile${wide ? ' is-wide' : ''}${pending ? ' is-pending' : ''}"><div class="set-head"><div class="set-label">${label}</div>${pending && field
+      ? `<button type="button" class="set-undo" id="undo-${field}" data-undo="${field}" title="Undo this change" aria-label="Undo the ${label.toLowerCase()} change"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/></svg></button>` : ''}</div>${body}</div>`;
 
   const kbOs = s?.kbOption?.system;
   const osPicker = `<div class="segmented segmented-sm" role="group" aria-label="Fn layer shown">
@@ -2332,10 +2334,9 @@ function renderKeyboardSettings() {
       </div>
       <div class="set-note">${ratePending ? `Now ${fmtHz(s.reportRateHz)} · written when you review` : 'How often the keyboard reports to the computer.'}</div>`;
     const kb = group('Keyboard', 'every profile',
-      tile('Polling rate', rateChips, { wide: true, pending: ratePending }) +
+      tile('Polling rate', rateChips, { wide: true, pending: ratePending, field: 'reportRateHz' }) +
       tile('Win/Mac switch', `<div class="set-value">${kbOs ? OS_NAMES[kbOs] : '—'}</div><div class="set-note">Read from the switch on the keyboard.</div>`) +
-      tile('Debounce', `<div class="set-value is-muted">${s.debounce ?? '?'}</div><div class="set-note">Fixed.</div>`),
-      'Debounce can’t be changed here: qmk.top doesn’t offer it for this keyboard, and magnetic switches don’t bounce.');
+      tile('Debounce', `<div class="set-value is-muted">${s.debounce ?? '?'}</div><div class="set-note">Magnetic keys don’t bounce. Disabled.</div>`));
     const power = s.sleep ? group('Wireless power saving', 'minutes, 0 = never',
       sleepTile(tile, 'time_bt', 'Bluetooth backlight off', can) +
       sleepTile(tile, 'deepTime_bt', 'Bluetooth deep sleep', can) +
@@ -2362,6 +2363,7 @@ function renderKeyboardSettings() {
     });
   }
   el.querySelectorAll('[data-os]').forEach(b => b.onclick = () => setOsPref(b.dataset.os));
+  el.querySelectorAll('[data-undo]').forEach(b => b.onclick = () => { delete state.pendingKb[b.dataset.undo]; refresh(); });
   if (focusId) el.querySelector(`#${CSS.escape(focusId)}`)?.focus({ preventScroll: true });
 }
 
@@ -2375,7 +2377,7 @@ function sleepTile(tile, field, label, can) {
       <span class="set-minutes"><input type="number" id="sleep-${field}" data-sleep="${field}" min="${lo / 60}" max="${hi / 60}" step="1" value="${+(sec / 60).toFixed(2)}" aria-label="${label}, minutes" ${dis}><span class="muted">min</span></span>
       <button type="button" class="btn" id="step-${field}-up" data-step="${field}" data-dir="1" aria-label="${label}: one minute more" ${dis}>+</button>
     </div>
-    <div class="set-note">${pending ? `Now ${fmtSecs(s.sleep[field])} · written when you review` : fmtSecs(sec)}</div>`, { pending });
+    <div class="set-note">${pending ? `Now ${fmtSecs(s.sleep[field])} · written when you review` : fmtSecs(sec)}</div>`, { pending, field });
 }
 
 // The inputs work in whole minutes, so deep sleep starts at 1 minute (the keyboard allows 10 s;
