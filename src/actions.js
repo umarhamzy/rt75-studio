@@ -44,6 +44,9 @@ export const FUNCTIONS = [
   ['Apps', 'Web forward', [3, 0, 37, 2]], ['Apps', 'Web refresh', [3, 0, 39, 2]], ['Apps', 'Web favourites', [3, 0, 42, 2]],
   ['Apps', 'Launchpad (Mac)', [3, 0, 160, 2]], ['Apps', 'Task view', [3, 0, 159, 2]], ['Apps', 'Siri (Mac)', [18, 0, 227, 44]],
   ['System', 'System sleep', [2, 130, 0, 0]], ['System', 'System wake', [2, 131, 0, 0]], ['System', 'System power', [2, 129, 0, 0]],
+  // Test (2026-10-16): qmk.top's RT75 table (h5) writes sleep as [2, 0, 130, 0]; the generic table
+  // (K0, above) as [2, 130, 0, 0], which works over USB but not 2.4G. Checking which one the RT75 wants.
+  ['System', 'System sleep (test: 02 00 82 00)', [2, 0, 130, 0]],
   ['Keyboard', 'Fn', [10, 1, 0, 0]], ['Keyboard', 'Win key lock', [10, 3, 0, 0]], ['Keyboard', 'Switch to Windows', [10, 5, 0, 0]],
   ['Keyboard', 'Switch to Mac', [10, 5, 1, 0]], ['Keyboard', 'Switch OS (cycle)', [10, 5, 3, 0]], ['Keyboard', 'Keyboard lock', [10, 7, 0, 0]],
   ['Keyboard', 'Check battery', [10, 8, 0, 0]], ['Keyboard', 'WASD ↔ arrows', [10, 10, 0, 0]], ['Keyboard', 'Power saving', [10, 12, 0, 0]],
@@ -65,7 +68,7 @@ const FN_SHORT = {
   'Volume down': 'Vol −', 'Media player': 'Player', 'Screen brightness up': 'Scr +', 'Screen brightness down': 'Scr −',
   Mail: 'Mail', Calculator: 'Calc', 'My computer': 'PC', 'Web search': 'Search', 'Web home': 'Home', 'Web back': 'Back',
   'Web forward': 'Fwd', 'Web refresh': 'Reload', 'Web favourites': 'Fav', 'Launchpad (Mac)': 'Launch', 'Task view': 'Tasks',
-  'Siri (Mac)': 'Siri', 'System sleep': 'Sleep', 'System wake': 'Wake', 'System power': 'Power', Fn: 'Fn', 'Win key lock': 'Win lock',
+  'Siri (Mac)': 'Siri', 'System sleep': 'Sleep', 'System sleep (test: 02 00 82 00)': 'Sleep²', 'System wake': 'Wake', 'System power': 'Power', Fn: 'Fn', 'Win key lock': 'Win lock',
   'Switch to Windows': 'Win OS', 'Switch to Mac': 'Mac OS', 'Switch OS (cycle)': 'OS', 'Keyboard lock': 'KB lock',
   'Check battery': 'Battery', 'WASD ↔ arrows': 'WASD', 'Power saving': 'Eco', 'Fn lock': 'Fn lock', 'Volume ↔ keyboard brightness': 'Vol⇄Bri',
   'Alt+Tab': 'Alt+Tab', 'Reset to factory': 'Reset', 'Next profile': 'Prof +', 'Previous profile': 'Prof −',

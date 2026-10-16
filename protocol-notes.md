@@ -600,6 +600,12 @@ changes mode by holding the knob down.
     a label only.
   - The knob's extra slots 94–97 (`13,2,1/2,0` and `13,3,1/2,0`) decode as lighting brightness and
     speed up/down, presumably the actions for the knob's lighting modes; not confirmed.
+  - **System sleep has two encodings in qmk.top.** The generic table (K0) has `2,130,0,0`; the RT75's
+    table (h5) has `2,0,130,0` (wake `2,0,131,0`, power `2,0,129,0`). qmk.top's RT75 UI doesn't
+    offer sleep at all. RT75 Studio used K0's `2,130,0,0`. On Fn+] it works over USB but not over
+    2.4G (user, 2026-10-16), even though the dongle exposes a HID system controller in Device
+    Manager. The menu has a test entry, "System sleep (test: 02 00 82 00)", to try h5's encoding
+    on both links. Not yet tested.
   - **Speed names are swapped from qmk.top's.** On the RT75 the factory Fn+← is `13,3,1,0` and
     Fn+→ is `13,3,2,0`. The user reported (2026-10-16) that ← should read speed − and → speed +.
     That fits the lighting read, which stores speed inverted (`0x87` byte 2 = 4 − speed), so a raw
