@@ -3,7 +3,7 @@ import { decodeAction, encodeKey, splitKey, FUNCTIONS, RISKY, KEY_CHOICES, CODE_
 import {
   isSupported, requestKeyboard, findGrantedKeyboard, readSettings, readKeymaps, settingsFromDump, setDongleTiming,
   writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, writeSleepTimes,
-  writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot,
+  writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot, watchKeyboardEvents,
   LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS,
 } from './device.js';
 import { EFFECTS, effectById, isOffered, normalizeLighting, lightingDiff, lightingFields, hex, MAX_LEVEL } from './lighting.js';
@@ -75,9 +75,13 @@ const state = {
   busy: false,
   lastApplied: null,         // { undo: edits } for the most recent successful write
   live: null,                // running live test: { stop, depth, peak, trace, focus, down }
+  knobMode: 'unknown',       // 'volume' | 'lighting' | 'unknown': inferred from what the knob sends
+  knobSeenAt: 0,             // when the knob (or a lighting push) was last heard
+  watch: null,               // { dev, stop } listening for knob and lighting reports, or null
 };
 const $ = id => document.getElementById(id);
 const MAGNETIC = KEYS.filter(k => !k.knob);
+const NO_SELECT_VIEWS = new Set(['lighting', 'macros', 'device']);
 const keyBySlot = slot => KEYS.find(k => k.slot === slot && !k.knob);
 
 const bounds = () => (state.settings?.source === 'device' ? writeBounds(state.settings.travelStep) : null);
@@ -163,8 +167,10 @@ function renderBoard() {
   const pairs = s ? snapPairs() : new Map();
   const led = s && state.view === 'lighting' ? ledPreview() : null;
   board.classList.toggle('led-board', !!led);
-  // Lighting and Macros don't use key selection: hide it there (it's kept for the other tabs).
-  const selectable = !!s && state.view !== 'lighting' && state.view !== 'macros';
+  // Lighting, Macros and Keyboard settings don't use key selection: hide it there (it's kept for
+  // the other views).
+  const selectable = !!s && !NO_SELECT_VIEWS.has(state.view);
+  board.classList.toggle('inert-board', !!s && state.view === 'device');
   board.classList.toggle('mc-board', !!s && state.view === 'macros');
 
   // The three knob entries share one physical knob.
@@ -172,9 +178,12 @@ function renderBoard() {
   const kx = Math.min(...knobKeys.map(k => k.x)), kw = Math.max(...knobKeys.map(k => k.x + k.w)) - kx;
   const knob = document.createElement('button');
   knob.type = 'button';
-  knob.className = 'knob' + (state.knob && selectable ? ' is-selected' : '');
+  knob.id = 'knob';
+  knob.className = `knob mode-${state.knobMode}` + (state.knob && selectable ? ' is-selected' : '');
   place(knob, { x: kx, y: 0, w: kw, h: knobKeys[0].h });
-  knob.setAttribute('aria-label', 'Volume knob');
+  knob.innerHTML = knobRockerHtml();
+  knob.setAttribute('aria-label', `Volume knob: ${KNOB_MODE_NAMES[state.knobMode].toLowerCase()} mode`);
+  knob.title = knobModeNote();
   if (!selectable) knob.tabIndex = -1;
   else knob.onclick = () => { state.knob = !state.knob; state.selected.clear(); refresh(); };
   board.appendChild(knob);
@@ -202,8 +211,14 @@ function renderBoard() {
       if (state.view === 'actuation') {
         value.textContent = mm(d.actuation);
         const t = hi > lo ? (hi - d.actuation) / (hi - lo) : 0;   // shorter travel = stronger color
-        el.style.setProperty('--heat', `${Math.round(15 + t * 70)}%`);
+        el.style.setProperty('--heat-t', t.toFixed(3));
         el.classList.add('heat');
+        // Bar on the right edge, filled from the top down to the actuation point, like a key press.
+        const bar = document.createElement('span');
+        bar.className = 'key-bar';
+        bar.setAttribute('aria-hidden', 'true');
+        bar.innerHTML = `<span style="height:${Math.min(100, (d.actuation / MAX_TRAVEL_MM) * 100).toFixed(1)}%"></span>`;
+        el.appendChild(bar);
       } else if (state.view === 'rt') {
         if (d.rt) {
           // One value when press and release sensitivity match (the usual case); otherwise
@@ -269,6 +284,8 @@ function renderBoard() {
       // Clicking a key that runs a library macro opens that macro; other keys do nothing here.
       if (el.dataset.macroId) el.onclick = () => openMacroEditor(libById(el.dataset.macroId));
       else el.tabIndex = -1;
+    } else if (state.view === 'device') {
+      el.tabIndex = -1; // keyboard-wide settings: the board is only shown for context
     } else el.onclick = e => clickKey(key.slot, e.ctrlKey || e.metaKey || e.shiftKey);
     board.appendChild(el);
   }
@@ -278,6 +295,11 @@ function renderBoard() {
 
 // Keycap labels that don't fit shrink one step, and only wrap if they still don't fit.
 function fitKeyLabels(board = $('board')) {
+  // Legends on narrow keys (PgUp, PgDn) shrink a step instead of running into the travel bar.
+  for (const l of board.querySelectorAll('.key-legend')) {
+    l.classList.remove('fit-1');
+    if (l.scrollWidth > l.clientWidth + 1) l.classList.add('fit-1');
+  }
   for (const v of board.querySelectorAll('.key-value')) {
     v.classList.remove('fit-1', 'fit-2');
     if (!v.textContent || v.classList.contains('rt-split')) continue;
@@ -288,6 +310,101 @@ function fitKeyLabels(board = $('board')) {
 }
 let fitTimer;
 window.addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(() => fitKeyLabels(), 120); });
+
+// ---------- Knob ----------
+// Two modes, toggled by holding the knob: volume (turn = volume, press = mute) and lighting (turn =
+// brightness, press = next effect). The keyboard never reports the mode, so it's inferred from what
+// the knob sends while the page is open (protocol-notes.md, "Knob modes and push reports").
+const KNOB_MODE_NAMES = { volume: 'Volume', lighting: 'Lighting', unknown: 'Unknown' };
+const KNOB_SVG = {
+  mute: '<svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M22 9l-6 6M16 9l6 6"/></svg>',
+  effect: '<svg viewBox="0 0 24 24"><path d="M12 3l2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2z"/></svg>',
+};
+
+function knobRockerHtml() {
+  const press = state.knobMode === 'lighting' ? KNOB_SVG.effect : KNOB_SVG.mute;
+  return `<span class="knob-rocker" aria-hidden="true"><span class="kz" data-zone="left">−</span><span class="kz" data-zone="press">${press}</span><span class="kz" data-zone="right">+</span></span>`;
+}
+
+function knobModeNote() {
+  if (!state.watch) return state.settings?.source === 'device' ? 'Knob mode: not available (the keyboard’s report interface isn’t open).' : 'Connect the keyboard to follow the knob’s mode.';
+  if (state.knobMode === 'unknown') return 'Knob mode: unknown until you turn or press the knob.';
+  return `Knob mode: ${KNOB_MODE_NAMES[state.knobMode].toLowerCase()} (last seen ${new Date(state.knobSeenAt).toLocaleTimeString()}).`;
+}
+
+function flashKnob(zone) {
+  const z = document.querySelector(`#knob .kz[data-zone="${zone}"]`);
+  if (!z) return;
+  z.classList.add('is-flash');
+  clearTimeout(z.flashTimer);
+  z.flashTimer = setTimeout(() => z.classList.remove('is-flash'), 220);
+}
+
+function onKeyboardEvent(ev) {
+  const before = state.knobMode;
+  const l = state.settings?.lighting;
+  let lightingChanged = false;
+  if (ev.type === 'volume') {
+    state.knobMode = 'volume';
+  } else if (ev.type === 'brightness' || ev.type === 'effect') {
+    // In volume mode these come from the Fn brightness / effect keys, not the knob.
+    if (state.knobMode === 'unknown') state.knobMode = 'lighting';
+    // The keyboard reports the new value, so the lighting read stays in step without a re-read.
+    const field = ev.type === 'effect' ? 'effect' : 'brightness';
+    if (l && l[field] !== ev.value) { l[field] = ev.value; lightingChanged = true; }
+  } else if (ev.type === 'toggle' && state.knobMode !== 'unknown') {
+    state.knobMode = state.knobMode === 'volume' ? 'lighting' : 'volume';
+  }
+  state.knobSeenAt = Date.now();
+  if (state.knobMode !== before) renderBoard();
+  renderDevice();
+  if (lightingChanged && state.view === 'lighting' && !state.busy) refresh();
+  else if (lightingChanged) renderReviewButton(); // a pending lighting edit may now match
+  if (state.knob && !state.busy) renderInspector();
+  const zone = ev.type === 'volume' ? { up: 'right', down: 'left', mute: 'press' }[ev.action]
+    : ev.type === 'effect' ? 'press' : ev.type === 'brightness' ? (ev.value >= (ev.prev ?? 0) ? 'right' : 'left') : null;
+  const fromKnob = ev.type === 'volume' ? state.knobMode === 'volume' : state.knobMode === 'lighting';
+  if (zone && fromKnob) flashKnob(zone);
+}
+
+// Listens (only) on the keyboard's report interface while it's connected.
+async function startWatching(dev) {
+  if (state.watch?.dev === dev) return;
+  await stopWatching();
+  state.knobMode = 'unknown';
+  if (!dev) return;
+  try {
+    let lastBrightness = state.settings?.lighting?.brightness;
+    const stop = await watchKeyboardEvents(dev, ev => {
+      if (ev.type === 'brightness') { ev.prev = lastBrightness; lastBrightness = ev.value; }
+      onKeyboardEvent(ev);
+    }, dev.demoInput ?? null);
+    if (stop) state.watch = { dev, stop };
+  } catch { /* the knob mode just stays unknown */ }
+  renderDevice();
+  renderBoard();
+}
+
+async function stopWatching() {
+  const w = state.watch;
+  state.watch = null;
+  if (w) { try { await w.stop(); } catch { /* ignore */ } }
+}
+
+function knobPanelHtml() {
+  const m = state.knobMode;
+  const head = state.watch
+    ? (m === 'unknown' ? 'Mode: <strong>unknown</strong> until you turn or press the knob.' : `Mode: <strong>${KNOB_MODE_NAMES[m]}</strong> · last seen ${new Date(state.knobSeenAt).toLocaleTimeString()}`)
+    : knobModeNote();
+  return `<div class="insp-head"><h2>Volume knob</h2></div>
+    <p class="sub">${head}</p>
+    <h3>Volume mode${m === 'volume' ? ' <span class="km-badge">now</span>' : ''}</h3>
+    <dl>${row('Turn', 'Volume down / up')}${row('Press', 'Mute')}</dl>
+    <h3>Lighting mode${m === 'lighting' ? ' <span class="km-badge">now</span>' : ''}</h3>
+    <dl>${row('Turn', 'Brightness down / up')}${row('Press', 'Next effect')}</dl>
+    <p class="note">Hold the knob to switch modes. The keyboard doesn’t report which mode it’s in, so RT75 Studio follows what the knob sends while this page is open. Brightness keys on the Fn layer send the same reports as the knob in lighting mode.</p>
+    <p class="note">The knob isn’t a magnetic switch, so it has no travel settings.</p>`;
+}
 
 function place(el, k) {
   el.style.left = `${(k.x / LAYOUT_WIDTH) * 100}%`;
@@ -341,6 +458,8 @@ function renderLegend(lo, hi) {
         ${Object.entries(LAYERS).map(([id, l]) => `<button type="button" data-layer="${id}" aria-pressed="${state.layer === id}">${l.label}</button>`).join('')}
       </div><span class="swatch swatch-mc"></span><span>library macro</span><span class="muted">(click to edit)</span><span class="swatch swatch-mc-elsewhere"></span><span>made elsewhere</span>`;
     el.querySelectorAll('[data-layer]').forEach(b => b.onclick = () => { state.layer = b.dataset.layer; refresh(); });
+  } else if (state.view === 'device') {
+    el.innerHTML = '<span class="muted">Polling rate, debounce and wireless power saving, for every profile.</span>';
   } else if (state.view === 'lighting') {
     const l = currentLight();
     const e = l && effectById(l.effect);
@@ -355,7 +474,7 @@ function renderLegend(lo, hi) {
 
 function renderSelectionTools() {
   const el = $('selectTools');
-  if (!state.settings || state.view === 'lighting' || state.view === 'macros') { el.hidden = true; return; }
+  if (!state.settings || NO_SELECT_VIEWS.has(state.view)) { el.hidden = true; return; }
   el.hidden = false;
   $('selectCount').textContent = state.selected.size ? `${state.selected.size} selected` : 'Ctrl/Shift-click to select several';
   $('btnClearSel').disabled = !state.selected.size;
@@ -381,42 +500,57 @@ function renderStats() {
 function renderDevice() {
   const s = state.settings;
   $('device').hidden = !s;
+  $('badgeMode').hidden = !s;
   $('badgeMode').textContent = editable() || (bounds() && state.busy) ? 'Review before write' : 'Read-only';
+  renderProfiles();
   if (!s) return;
   $('deviceName').textContent = s.deviceId === DEVICE_ID ? 'Yunzii RT75 Pro' : (s.productName ?? 'Keyboard');
-  const fw = s.usbVersion ? `fw ${(s.usbVersion >> 8).toString(16)}.${(s.usbVersion & 0xff).toString(16).padStart(2, '0')}` : 'fw ?';
-  $('chipFirmware').textContent = fw;
-  $('chipRate').textContent = s.reportRateHz ? `${s.reportRateHz >= 1000 ? s.reportRateHz / 1000 + ' kHz' : s.reportRateHz + ' Hz'} polling` : 'polling ?';
-  $('chipProfile').textContent = `Profile ${(s.profile ?? 0) + 1}`;
-  $('chipBattery').hidden = s.battery === undefined;
-  if (s.battery !== undefined) $('chipBattery').textContent = `Battery ${s.battery}%`;
-  $('chipSource').textContent = s.demo ? 'Demo · simulated keyboard' : s.source === 'device' ? (s.viaDongle ? 'Live · 2.4G' : 'Live · USB') : 'From file';
+  $('deviceDot').className = 'status-dot' + (s.source === 'device' && state.dev ? ' is-live' : '');
+  $('chipFirmware').textContent = s.usbVersion ? `${(s.usbVersion >> 8).toString(16)}.${(s.usbVersion & 0xff).toString(16).padStart(2, '0')}` : '?';
+  $('chipRate').textContent = fmtHz(s.reportRateHz);
+  $('chipBatteryLabel').hidden = $('chipBattery').hidden = s.battery === undefined;
+  if (s.battery !== undefined) $('chipBattery').textContent = `${s.battery}%`;
+  $('chipKnob').textContent = KNOB_MODE_NAMES[state.knobMode];
+  $('chipKnob').title = knobModeNote();
+  $('chipSource').textContent = s.demo ? 'Demo' : s.source === 'device' ? (s.viaDongle ? '2.4G' : 'USB') : 'File';
   // How long the last full read took, so wireless speed can be compared (?dongle=classic).
   const ls = s.loadStats;
   if (ls && !s.demo) {
     $('chipSource').textContent += ` · ${(ls.ms / 1000).toFixed(1)} s`;
     $('chipSource').title = `Last read: ${(ls.ms / 1000).toFixed(1)} s, ${ls.reads} reads${ls.timing === 'usb' ? '' : `, ${ls.timing} dongle timing`}`;
-  } else $('chipSource').title = '';
+  } else $('chipSource').title = s.demo ? 'Simulated keyboard' : '';
   $('btnConnect').textContent = s.source === 'device' ? 'Refresh' : 'Connect keyboard';
 }
 
-// ---------- Pending bar ----------
-function renderPendingBar() {
-  const edits = pendingEdits();
-  const n = edits.length, kb = kbChanges().length, km = keymapChanges().length, lt = lightChange() ? 1 : 0, mw = macroWrites().length;
-  const settingsCount = edits.reduce((a, e) => a + Object.keys(e).length - 1, 0);
-  $('pendingBar').hidden = n === 0 && kb === 0 && km === 0 && !lt && !mw;
-  const parts = [];
-  if (n) parts.push(`${settingsCount} unsaved change${settingsCount === 1 ? '' : 's'} on ${n} key${n === 1 ? '' : 's'}`);
-  if (kb) parts.push(n ? `${kb} keyboard setting${kb === 1 ? '' : 's'}` : `${kb} unsaved keyboard setting${kb === 1 ? '' : 's'}`);
-  if (km) parts.push(`${km} key mapping${km === 1 ? '' : 's'}`);
-  if (lt) parts.push('lighting');
-  if (mw) parts.push(`${mw} macro${mw === 1 ? '' : 's'}`);
-  $('pendingText').textContent = parts.length === 1 && km && !n && !kb ? `${km} unsaved key mapping${km === 1 ? '' : 's'}`
-    : parts.length === 1 && lt ? 'Unsaved lighting change'
-    : parts.length === 1 && mw ? `${mw} macro${mw === 1 ? '' : 's'} to write` : parts.join(' + ');
-  $('btnReview').disabled = !editable();
-  $('btnDiscard').disabled = state.busy;
+// Profile 1–4 in the header. Profiles hold their own key settings, so switching re-reads them.
+function renderProfiles() {
+  const el = $('profiles'), s = state.settings;
+  el.hidden = !s || s.profile === undefined;
+  if (el.hidden) return;
+  const can = editable();
+  el.innerHTML = Array.from({ length: PROFILE_COUNT }, (_, i) =>
+    `<button type="button" data-profile="${i}" aria-pressed="${s.profile === i}" ${can ? '' : 'disabled'}>Profile ${i + 1}</button>`).join('');
+  el.querySelectorAll('[data-profile]').forEach(b => b.onclick = () => changeProfile(Number(b.dataset.profile)));
+}
+
+// ---------- Review button (header) ----------
+// One count for everything waiting to be written: each key setting, keyboard setting, key mapping,
+// lighting field and macro, i.e. the rows the review dialog will list.
+function pendingCount() {
+  const keySettings = pendingEdits().reduce((a, e) => a + Object.keys(e).length - 1, 0);
+  return keySettings + kbChanges().length + keymapChanges().length + (lightChange()?.fields.length ?? 0) + macroWrites().length;
+}
+
+function renderReviewButton() {
+  const n = pendingCount();
+  const btn = $('btnReview');
+  btn.disabled = !n || !editable();
+  btn.classList.toggle('has-changes', n > 0);
+  $('reviewLabel').textContent = n ? 'Review changes' : 'No changes';
+  $('reviewCount').hidden = !n;
+  $('reviewCount').textContent = n;
+  btn.setAttribute('aria-label', n ? `Review ${n} unsaved change${n === 1 ? '' : 's'}` : 'No unsaved changes');
+  btn.title = n && !editable() ? (state.busy ? 'Writing…' : 'Connect the keyboard to write these changes.') : '';
 }
 
 // ---------- Inspector ----------
@@ -430,19 +564,33 @@ function common(datas, f) {
   return vals.length === 1 ? vals[0] : null;
 }
 
+// Re-rendering replaces the panel's controls; keep keyboard focus and scroll where they were.
 function renderInspector() {
+  const el = $('inspector');
+  const focusId = el.contains(document.activeElement) ? document.activeElement.id : '';
+  const scroll = el.scrollTop;
+  renderInspectorBody();
+  el.scrollTop = scroll;
+  if (focusId) el.querySelector(`#${CSS.escape(focusId)}`)?.focus({ preventScroll: true });
+}
+
+function renderInspectorBody() {
   const el = $('inspector');
   if (state.view === 'live' && state.settings) { renderLivePanel(); return; }
   if (state.view === 'lighting' && state.settings) { renderLightingPanel(); return; }
   if (state.view === 'macros' && state.settings) { renderLibraryPanel(); return; }
+  if (state.view === 'device') {
+    if (state.settings) renderKeyboardSettings();
+    else el.innerHTML = '<p class="inspector-hint">Connect the keyboard (or open a dump) to see its settings.</p>';
+    return;
+  }
   if (state.view === 'keymap' && state.settings && !state.knob && state.selected.size) { renderKeymapPanel(); return; }
   if (!state.settings || (!state.knob && !state.selected.size)) {
     el.innerHTML = '<p class="inspector-hint">Select a key to see its settings. Ctrl- or Shift-click to select several.</p>';
     return;
   }
   if (state.knob) {
-    el.innerHTML = `<h2>Volume knob</h2><dl>${row('Turn', 'Volume down / up')}${row('Press', 'Mute')}</dl>
-      <p class="note">The knob is not a magnetic switch, so it has no travel settings.</p>`;
+    el.innerHTML = knobPanelHtml();
     return;
   }
 
@@ -458,7 +606,7 @@ function renderInspector() {
   const revert = editable() && datas.some(d => d.pending)
     ? `<button class="revert-chip" id="btnRevertSel" type="button" title="Discard unsaved changes on ${keys.length === 1 ? 'this key' : 'these keys'}">Unsaved · Revert</button>` : '';
   let html = `<div class="insp-head"><h2>${title}</h2>${revert}</div><p class="sub">${subtitle}</p>`;
-  if (single) html += `<div class="travel" aria-hidden="true">${travelDiagram(single)}</div>`;
+  if (single && !editable()) html += `<div class="travel" aria-hidden="true">${travelDiagram(single)}</div>`;
 
   if (editable()) html += editorHtml(datas);
   else html += readOnlyHtml(datas, single);
@@ -503,6 +651,33 @@ function slider(id, label, value, min, max, badge = '') {
     </div>`;
 }
 
+// Keychron-style vertical slider: 0 mm (key up) at the top, the deepest setting at the bottom, so
+// moving the handle down is like pressing the key further. Drag it, use the arrow keys (Shift for
+// 0.1 mm steps), or type in the bubble. Dead zones are hatched at the ends.
+const travelPct = v => `${((Math.min(Math.max(v, 0), MAX_TRAVEL_MM) / MAX_TRAVEL_MM) * 100).toFixed(2)}%`;
+function travelSlider(id, label, value, min, max, { tone = 'act', dzTop = 0, dzBottom = 0 } = {}) {
+  const mixed = value === null;
+  return `<div class="tslider tone-${tone}${mixed ? ' is-mixed' : ''}" id="${id}Slider" style="--p:${mixed ? '50%' : travelPct(value)}">
+      <div class="ts-body">
+        <div class="ts-track" id="${id}Track">
+          <input class="ts-range" type="range" id="${id}Range" min="${min}" max="${max}" step="0.01" value="${mixed ? (min + max) / 2 : value}"
+            aria-label="${label}" aria-orientation="vertical" aria-valuetext="${mixed ? 'mixed' : `${mm3(value)} millimetres`}">
+          <span class="ts-cap">
+            <span class="ts-fill"></span>
+            ${dzTop > 0 ? `<span class="ts-dz ts-dz-top" style="height:${travelPct(dzTop)}"></span>` : ''}
+            ${dzBottom > 0 ? `<span class="ts-dz ts-dz-bottom" style="height:${travelPct(dzBottom)}"></span>` : ''}
+          </span>
+          <span class="ts-handle"></span>
+        </div>
+        <span class="ts-ticks" aria-hidden="true"></span>
+        <span class="ts-side">
+          <span class="ts-bubble"><input type="number" id="${id}Num" min="${min}" max="${max}" step="0.005" value="${mixed ? '' : mm3(value)}" placeholder="mixed" aria-label="${label} in millimetres"><span>mm</span></span>
+        </span>
+      </div>
+      <span class="ts-label">${label}</span>
+    </div>`;
+}
+
 // Resets the link toggles when the selection changes.
 function unlinked() {
   const key = [...state.selected].sort((a, b) => a - b).join(',');
@@ -522,11 +697,14 @@ function editorHtml(datas) {
   const T = LIMITS.travel, DZ = LIMITS.deadZone;
   const tdz = common(datas, d => d.topDeadZone), bdz = common(datas, d => d.bottomDeadZone);
 
+  const dz = { dzTop: tdz ?? 0, dzBottom: bdz ?? 0 };
   return `
     <h3>Travel</h3>
-    ${slider('act', 'Actuation point', act, T.min, T.max)}
+    <div class="ts-row">
+      ${travelSlider('act', linked ? 'Press & release' : 'Press (actuation)', act, T.min, T.max, dz)}
+      ${linked ? '' : travelSlider('rel', 'Release', rel, T.min, T.max, { ...dz, tone: 'rel' })}
+    </div>
     <label class="check"><input type="checkbox" id="relLink" ${linked ? 'checked' : ''}> Release at the same point</label>
-    ${linked ? '' : slider('rel', 'Release point', rel, T.min, T.max)}
 
     <h3>Dead zones</h3>
     ${slider('tdz', 'Top dead zone', tdz, DZ.min, DZ.max, datas.some(d => d.topDeadZone === 0)
@@ -612,12 +790,58 @@ function wireEditor(el) {
     num.addEventListener('change', () => { if (num.value === '') return; onValue(Number(num.value), min, max); apply(); });
   };
 
+  // The vertical travel sliders: board and header update while dragging; the panel re-renders on release.
+  const bindTravel = (id, onValue, min, max) => {
+    const box = el.querySelector(`#${id}Slider`), track = el.querySelector(`#${id}Track`);
+    if (!track) return;
+    const range = el.querySelector(`#${id}Range`), num = el.querySelector(`#${id}Num`);
+    const set = v => {
+      v = Math.min(max, Math.max(min, Math.round(v * 100) / 100));
+      box.style.setProperty('--p', travelPct(v));
+      box.classList.remove('is-mixed');
+      num.value = mm3(v);
+      range.value = v;
+      range.setAttribute('aria-valuetext', `${mm3(v)} millimetres`);
+      onValue(v, min, max);
+      renderBoardOnly();
+    };
+    const fromY = y => { const r = track.getBoundingClientRect(); return ((y - r.top) / r.height) * MAX_TRAVEL_MM; };
+    let dragging = false, keyTimer;
+    track.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      try { track.setPointerCapture(e.pointerId); } catch { /* synthetic events have no capturable pointer */ }
+      dragging = true;
+      box.classList.add('is-dragging');
+      range.focus({ preventScroll: true });
+      set(fromY(e.clientY));
+    });
+    track.addEventListener('pointermove', e => { if (dragging) set(fromY(e.clientY)); });
+    const end = () => { if (!dragging) return; dragging = false; box.classList.remove('is-dragging'); apply(); };
+    track.addEventListener('pointerup', end);
+    track.addEventListener('pointercancel', end);
+    track.addEventListener('lostpointercapture', end);
+    // Down = deeper, like the handle: ArrowDown/Right add travel, ArrowUp/Left take it away.
+    range.addEventListener('keydown', e => {
+      const cur = Number(range.value), step = e.shiftKey ? 0.1 : 0.01;
+      const v = { ArrowDown: cur + step, ArrowRight: cur + step, ArrowUp: cur - step, ArrowLeft: cur - step,
+        PageDown: cur + 0.1, PageUp: cur - 0.1, Home: min, End: max }[e.key];
+      if (v === undefined) return;
+      e.preventDefault();
+      set(v);
+      clearTimeout(keyTimer);
+      keyTimer = setTimeout(() => { keyTimer = null; apply(); }, 500);
+    });
+    range.addEventListener('blur', () => { if (keyTimer) { clearTimeout(keyTimer); keyTimer = null; apply(); } });
+    num.addEventListener('change', () => { if (num.value === '') return; onValue(Number(num.value), min, max); apply(); });
+  };
+
   const linked = () => el.querySelector('#relLink')?.checked;
-  bind('act', (v, min, max) => slots.forEach(s => {
+  bindTravel('act', (v, min, max) => slots.forEach(s => {
     setPending(s, 'actuation', toRaw(v, min, max));
     if (linked()) setPending(s, 'release', toRaw(v, min, max));
   }), T.min, T.max);
-  bind('rel', (v, min, max) => slots.forEach(s => setPending(s, 'release', toRaw(v, min, max))), T.min, T.max);
+  bindTravel('rel', (v, min, max) => slots.forEach(s => setPending(s, 'release', toRaw(v, min, max))), T.min, T.max);
   const DZ = LIMITS.deadZone;
   bind('tdz', (v, min, max) => slots.forEach(s => setPending(s, 'topDeadZone', toRaw(v, min, max))), DZ.min, DZ.max);
   bind('bdz', (v, min, max) => slots.forEach(s => setPending(s, 'bottomDeadZone', toRaw(v, min, max))), DZ.min, DZ.max);
@@ -1633,9 +1857,7 @@ function applyPreset(p) {
   const n = pendingEdits().reduce((a, e) => a + Object.keys(e).length - 1, 0);
   showError(null);
   if (skipped) showError(`Loaded "${p.name}". ${skipped} value(s) were skipped (DKS, mod-tap or toggle keys, or values outside the safe ranges).`);
-  $('pendingText').textContent = n ? `"${p.name}" loaded: ${n} change${n === 1 ? '' : 's'} on ${pendingEdits().length} key${pendingEdits().length === 1 ? '' : 's'} to review` : `"${p.name}" matches the keyboard already`;
-  $('pendingBar').hidden = false;
-  if (!n) setTimeout(renderPendingBar, 2500);
+  showNotice(n ? `"${p.name}" loaded: ${n} change${n === 1 ? '' : 's'} on ${pendingEdits().length} key${pendingEdits().length === 1 ? '' : 's'}. Use Review changes to write them.` : `"${p.name}" matches the keyboard already.`);
 }
 
 function exportPreset(p) {
@@ -1714,6 +1936,8 @@ function openReview() {
   $('btnApply').hidden = false;
   $('btnApply').disabled = false;
   $('btnUndo').hidden = true;
+  $('btnDiscard').hidden = false;
+  $('btnDiscard').disabled = false;
   $('btnCancel').textContent = 'Cancel';
   $('reviewDialog').showModal();
 }
@@ -1727,6 +1951,7 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
   refresh();
   $('btnApply').disabled = true;
   $('btnCancel').disabled = true;
+  $('btnDiscard').hidden = true; // what's left pending after a write is reviewed again from the header
   const status = $('reviewStatus');
   status.className = 'review-status';
   status.textContent = 'Writing…';
@@ -1901,7 +2126,7 @@ function setLight(patch, { quiet = false } = {}) {
   } else next = { ...cur, ...patch };
   next = normalizeLighting(next);
   state.pendingLight = lightingDiff(saved, next).length ? next : null;
-  if (quiet) { renderBoard(); renderPendingBar(); return; }
+  if (quiet) { renderBoard(); renderReviewButton(); return; }
   // Re-rendering replaces the buttons; keep keyboard focus on the one just used.
   const a = document.activeElement;
   const attr = a?.closest?.('#inspector') ? [...a.attributes].find(x => x.name.startsWith('data-')) : null;
@@ -2023,21 +2248,16 @@ function renderLightingPanel() {
 }
 
 // ---------- Keyboard-wide settings ----------
+// Shown in the inspector on the Keyboard settings view. (Profiles are in the header.)
 function renderKeyboardSettings() {
-  const el = $('kbSettings');
+  const el = $('inspector');
   const s = state.settings;
-  el.hidden = !s;
-  if (!s) return;
   const can = editable();
   const rate = state.pendingKb.reportRateHz ?? s.reportRateHz;
   const ratePending = kbChanges().some(c => c.field === 'reportRateHz');
-  el.innerHTML = `
-    <div class="kb-item">
-      <span class="stat-label">Profile</span>
-      <div class="segmented segmented-sm" role="group" aria-label="Active profile">
-        ${Array.from({ length: PROFILE_COUNT }, (_, i) => `<button type="button" data-profile="${i}" aria-pressed="${s.profile === i}" ${can ? '' : 'disabled'}>${i + 1}</button>`).join('')}
-      </div>
-    </div>
+  el.innerHTML = `<div class="insp-head"><h2>Keyboard settings</h2></div>
+    <p class="sub">These apply to the whole keyboard, on every profile.</p>
+    <div class="kb-settings">
     <div class="kb-item">
       <label class="stat-label" for="rateSelect">Polling rate</label>
       <select id="rateSelect" class="${ratePending ? 'is-pending' : ''}" ${can ? '' : 'disabled'}>
@@ -2054,7 +2274,8 @@ function renderKeyboardSettings() {
       ${sleepInput('deepTime_bt', 'Bluetooth deep sleep', can)}
       ${sleepInput('time_24', '2.4G backlight off', can)}
     </div>` : ''}
-    ${s.source !== 'device' ? '<p class="note kb-note">Connect the keyboard to change these.</p>' : ''}`;
+    ${s.source !== 'device' ? '<p class="note kb-note">Connect the keyboard to change these.</p>' : ''}
+    </div>`;
   el.querySelectorAll('[data-sleep]').forEach(inp => inp.onchange = () => {
     const field = inp.dataset.sleep, [lo, hi] = uiSleepLimits(field);
     if (inp.value === '') return;
@@ -2062,7 +2283,6 @@ function renderKeyboardSettings() {
     if (sec === s.sleep[field]) delete state.pendingKb[field]; else state.pendingKb[field] = sec;
     refresh();
   });
-  el.querySelectorAll('[data-profile]').forEach(b => b.onclick = () => changeProfile(Number(b.dataset.profile)));
   $('rateSelect').onchange = e => {
     const hz = Number(e.target.value);
     if (hz === s.reportRateHz) delete state.pendingKb.reportRateHz; else state.pendingKb.reportRateHz = hz;
@@ -2115,25 +2335,43 @@ async function changeProfile(index) {
 // ---------- Plumbing ----------
 function renderBoardOnly() {
   renderBoard();
-  renderPendingBar();
+  renderReviewButton();
 }
 
 function refresh() {
   renderDevice();
+  renderNav();
   renderBoard();
   renderSelectionTools();
   renderStats();
-  renderKeyboardSettings();
-  renderPendingBar();
+  renderReviewButton();
   renderInspector();
   renderTabs();
+}
+
+// Configuration (Actuation / Rapid Trigger / Snap Tap tabs) and the other sidebar sections.
+const CONFIG_VIEWS = new Set(['actuation', 'rt', 'snap']);
+const VIEW_TITLES = { keymap: 'Key map', macros: 'Macros', lighting: 'Lighting', live: 'Live test', device: 'Keyboard settings' };
+let lastConfigView = 'actuation';
+
+function renderNav() {
+  const config = CONFIG_VIEWS.has(state.view);
+  document.querySelectorAll('[data-nav]').forEach(b => {
+    const on = b.dataset.nav === (config ? 'config' : state.view);
+    if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  });
+  document.querySelectorAll('#configTabs [data-view]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === state.view)));
+  $('configTabs').hidden = !config;
+  $('viewTitle').hidden = config;
+  $('viewTitle').textContent = VIEW_TITLES[state.view] ?? '';
+  $('navMacroCount').textContent = state.library.length || '';
 }
 
 function setView(view) {
   if (view !== 'live' && state.live) stopLive();
   state.view = view;
-  document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === view)));
-  refresh(); // the inspector differs per view (key map, macros, lighting, live test)
+  if (CONFIG_VIEWS.has(view)) lastConfigView = view;
+  refresh(); // the inspector differs per view (key map, macros, lighting, live test, keyboard settings)
   if (KEYMAP_VIEWS.has(view)) ensureKeymaps();
 }
 
@@ -2199,12 +2437,22 @@ function load(settings, dev = null) {
   refresh();
   keymapsFailed = false;
   ensureKeymaps(); // the key map loads in the background; device operations queue behind each other
+  startWatching(settings.source === 'device' ? dev : null); // same device (a profile switch): keeps listening
 }
 
 function showError(msg) {
   const el = $('error');
   el.hidden = !msg;
   el.textContent = msg ?? '';
+}
+
+let noticeTimer;
+function showNotice(msg, ms = 6000) {
+  const el = $('notice');
+  el.hidden = !msg;
+  el.textContent = msg ?? '';
+  clearTimeout(noticeTimer);
+  if (msg) noticeTimer = setTimeout(() => { el.hidden = true; }, ms);
 }
 
 function setBusy(fraction, label) {
@@ -2258,7 +2506,12 @@ $('btnSample').onclick = async () => {
 };
 $('btnSelectAll').onclick = () => { state.knob = false; state.selected = new Set(MAGNETIC.map(k => k.slot)); refresh(); };
 $('btnClearSel').onclick = () => { state.selected.clear(); refresh(); };
-$('btnDiscard').onclick = () => { state.pending.clear(); state.pendingKb = {}; state.pendingKeys.clear(); state.pendingLight = null; state.pendingMacroWrites.clear(); state.capture = null; refresh(); };
+$('btnDiscard').onclick = () => {
+  if (state.busy) return;
+  state.pending.clear(); state.pendingKb = {}; state.pendingKeys.clear(); state.pendingLight = null; state.pendingMacroWrites.clear(); state.capture = null;
+  $('reviewDialog').close();
+  refresh();
+};
 $('btnReview').onclick = openReview;
 $('btnMacroDone').onclick = saveMacroDraft;
 $('btnMacroCancel').onclick = closeMacroEditor;
@@ -2271,6 +2524,7 @@ $('btnUndo').onclick = undoLast;
 $('btnCancel').onclick = () => $('reviewDialog').close();
 $('reviewDialog').addEventListener('cancel', e => { if (state.busy) e.preventDefault(); });
 document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
+document.querySelector('[data-nav="config"]').onclick = () => setView(lastConfigView);
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape' || $('reviewDialog').open || $('presetDialog').open) return;
   if (state.picking !== null) { state.picking = null; refresh(); return; }
@@ -2300,6 +2554,7 @@ async function startDemo() {
   settings.demo = true;
   load(settings, dev);
   $('btnConnect').hidden = true;
+  window.rt75Demo = dev; // for poking the simulated keyboard from the console, e.g. knob reports
 }
 
 refresh();

@@ -27,7 +27,7 @@ touching device code.
 | File | Role |
 |---|---|
 | `src/device.js` | Everything that touches HID: transport (wired and 2.4G dongle relay), reads, validated writes, live depth, keyboard-wide settings |
-| `src/app.js` | UI state and rendering: board, inspector/editor, pending edits, review dialog, Undo, live test, presets, keyboard section |
+| `src/app.js` | UI state and rendering: sidebar and header, board, knob mode, inspector/editor (travel sliders), pending edits, review dialog, Undo, live test, presets, keyboard settings |
 | `src/layout.js` | RT75 key positions (from qmk.top) and the factory key matrix; `slot` = key-matrix index |
 | `src/macros.js` | Macro buffer encoding (mirrors qmk.top), checks, modes, step labels |
 | `src/library.js` | Macro library in this browser: storage, export/import, out-of-date check |
@@ -117,6 +117,15 @@ write, read-back and Undo. Brightness 0 = fully off; lighting is shared by all p
 **2.4G speed (perf/dongle-speed):** the dongle is routed once per operation and its status is polled
 without fixed 100 ms waits; the key map loads in the background after startup (Key map / Macros
 tabs spin until it's in). Startup over 2.4G: 24.7 s → 3.0 s, verified on the real keyboard.
+
+**Configuration redesign (feature/config-redesign, demo-tested, not yet verified on the keyboard):**
+- Dark-only theme (amber accent, Archivo + JetBrains Mono from Google Fonts with system fallbacks).
+- Sidebar navigation and a device card; Profile 1–4 and **Review changes** (with a live count) in
+  the header. The pending bar is gone; Discard all is in the review dialog.
+- Keychron-style vertical actuation and release sliders.
+- The knob is drawn as a rocker on a dial and shows the mode it last saw. `watchKeyboardEvents`
+  (device.js) only listens on the report interface, already granted at connect; it never sends.
+- Design mockups: the "RT75 Studio UI styles" canvas artifact (Rounds 1–7).
 
 **Next, in the user's order:** mod-tap, then custom lighting patterns (`0x0C`/`0x8C`).
 

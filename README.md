@@ -28,24 +28,50 @@ A USB cable is faster than the 2.4G dongle.
 To try the editor without a keyboard, open http://127.0.0.1:5180/?demo. It runs against a
 simulated RT75 Pro loaded from `fixtures/sample-dump.json`.
 
+## Layout
+
+The app is dark only. A sidebar holds the sections: **Configuration** (with Actuation, Rapid
+Trigger and Snap Tap tabs above the board), **Key map**, **Macros**, **Lighting**, **Live test** and
+**Keyboard settings**, plus a card with the keyboard's firmware, link, polling rate, battery and
+knob mode. The header has **Profile 1–4** and **Review changes**, which shows how many changes
+are waiting.
+
 ## Editing
 
 Select keys (Ctrl- or Shift-click for several, or **Select all**), then change actuation, release
 point, top and bottom dead zones, Rapid Trigger and RT sensitivity in the side panel.
 
+Actuation and release use vertical sliders: 0 mm (key up) at the top, the deepest setting at the
+bottom, so moving the handle down is like pressing the key further. Drag the handle, use the arrow
+keys (Shift for 0.1 mm), or type a value in the bubble next to it. Untick **Release at the same
+point** to get a second slider for the release point. Dead zones are hatched at the ends. On the
+board, each key's bar on its right edge fills from the top down to its actuation point.
+
 For Snap Tap, select a key and choose **Pair with another key…**, then click its partner.
 You can also select exactly two keys and choose **Pair these two keys**. Pairing a key that
 already has a partner releases the old partner, and **Remove pair** releases both keys. Rapid
-Trigger is kept either way. Keys using DKS, mod-tap or toggle modes aren't changed by this app. Changes stay local, shown with a dashed
-outline, until you click **Review changes…**. The review shows every before → after value and
-can download a backup first. After writing, the app reads the values back from the keyboard to
-confirm them and offers **Undo**. A backup file can be reopened with **Open dump…**.
+Trigger is kept either way. Keys using DKS, mod-tap or toggle modes aren't changed by this app. Changes stay local, shown with an amber dashed
+outline, until you click **Review changes** in the header. The review shows every before → after
+value, can download a backup first, and has **Discard all**. After writing, the app reads the values
+back from the keyboard to confirm them and offers **Undo**. A backup file can be reopened with
+**Open dump…**.
+
+## Volume knob
+
+The knob has two modes; holding it down switches between them. In volume mode, turning it
+changes the volume and pressing it mutes. In lighting mode, turning it changes brightness and
+pressing it picks the next effect. The keyboard doesn't report which mode it's in, so RT75 Studio
+listens (it sends nothing) to what the knob reports while the page is open and shows the mode it
+last saw: on the knob's icons, in the device card, and in the knob's panel. Until you use the knob
+the mode shows as unknown. Brightness and effect changes made on the keyboard also update the
+Lighting view.
 
 ## Keyboard settings
 
-Below the keyboard:
-- **Profile (1–4)** switches the active profile straight away, then re-reads everything,
-  because each profile stores its own key settings.
+- **Profile 1–4** (in the header) switches the active profile straight away, then re-reads
+  everything, because each profile stores its own key settings.
+
+In the **Keyboard settings** section:
 - **Polling rate** (125Hz–8kHz) is queued like any other edit and written through the review.
 - **Wireless power saving** sets, in minutes: Bluetooth backlight off (0 = never), Bluetooth deep
   sleep (at least 10 seconds) and 2.4G backlight off (0 = never). Each goes up to 18 hours,

@@ -4,88 +4,117 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RT75 Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
 <link rel="stylesheet" href="src/styles.css">
 </head>
 <body>
-<header class="topbar">
-  <div class="brand">
-    <span class="brand-mark" aria-hidden="true"></span>
-    <span class="brand-name">RT75 Studio</span>
-    <span class="badge-readonly" id="badgeMode" title="Changes are only written after you review them">Read-only</span>
-  </div>
-  <div class="device" id="device" hidden>
-    <span class="device-name" id="deviceName"></span>
-    <span class="chip" id="chipFirmware"></span>
-    <span class="chip" id="chipRate"></span>
-    <span class="chip" id="chipProfile"></span>
-    <span class="chip" id="chipBattery" hidden></span>
-    <span class="chip chip-muted" id="chipSource"></span>
-  </div>
-  <div class="actions">
-    <button class="btn" id="btnOpen" type="button">Open dump…</button>
-    <button class="btn btn-primary" id="btnConnect" type="button">Connect keyboard</button>
-    <input type="file" id="fileInput" accept="application/json,.json" hidden>
-  </div>
-</header>
-
-<main class="workspace">
-  <section class="board-panel">
-    <div class="toolbar">
-      <div class="segmented" role="tablist" aria-label="View">
-        <button role="tab" data-view="actuation" aria-selected="true">Actuation</button>
-        <button role="tab" data-view="rt" aria-selected="false">Rapid Trigger</button>
-        <button role="tab" data-view="snap" aria-selected="false">Snap Tap</button>
-        <button role="tab" data-view="keymap" aria-selected="false">Key map</button>
-        <button role="tab" data-view="macros" aria-selected="false">Macros</button>
-        <button role="tab" data-view="lighting" aria-selected="false">Lighting</button>
-        <button role="tab" data-view="live" aria-selected="false">Live test</button>
-      </div>
-      <div class="legend" id="legend"></div>
-      <div class="select-tools" id="selectTools" hidden>
-        <span class="muted" id="selectCount"></span>
-        <button class="btn btn-small" id="btnPresets" type="button">Presets…</button>
-        <button class="btn btn-small" id="btnSelectAll" type="button">Select all</button>
-        <button class="btn btn-small" id="btnClearSel" type="button">Clear</button>
-      </div>
+<div class="app">
+  <nav class="sidebar" aria-label="Sections">
+    <div class="brand">
+      <svg class="brand-mark" width="26" height="26" viewBox="0 0 30 30" aria-hidden="true"><rect x="1" y="1" width="28" height="28" rx="6"/><path d="M8 20V10h5a3 3 0 010 6H8m5 0l4 4M19 10h4m-2 0v10"/></svg>
+      <span class="brand-name">RT75 Studio</span>
     </div>
 
-    <div class="board-wrap">
-      <div class="board" id="board" aria-label="Keyboard"></div>
-      <div class="empty" id="empty">
-        <h2>Connect your RT75 Pro</h2>
-        <p>Close qmk.top first, then use <strong>Connect keyboard</strong> (Chrome or Edge). You can also open a
-           saved dump, or <button class="link" id="btnSample" type="button">load the sample</button>.</p>
-      </div>
-      <div class="progress" id="progress" hidden>
-        <div class="progress-bar"><span id="progressFill"></span></div>
-        <span id="progressLabel">Reading…</span>
-      </div>
+    <div class="nav-group">
+      <div class="nav-label">Keys</div>
+      <button class="nav-item" type="button" data-nav="config">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Configuration</button>
+      <button class="nav-item" type="button" data-nav="keymap" data-view="keymap">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/></svg>Key map</button>
+      <button class="nav-item" type="button" data-nav="macros" data-view="macros">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M4 12h10M4 18h6M17 14l4 3-4 3z"/></svg>Macros<span class="nav-count" id="navMacroCount"></span></button>
     </div>
 
-    <div class="pending-bar" id="pendingBar" hidden>
-      <span id="pendingText"></span>
-      <button class="btn" id="btnDiscard" type="button">Discard</button>
-      <button class="btn btn-primary" id="btnReview" type="button">Review changes…</button>
+    <div class="nav-group">
+      <div class="nav-label">Device</div>
+      <button class="nav-item" type="button" data-nav="lighting" data-view="lighting">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>Lighting</button>
+      <button class="nav-item" type="button" data-nav="live" data-view="live">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Live test</button>
+      <button class="nav-item" type="button" data-nav="device" data-view="device">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h3"/></svg>Keyboard settings</button>
     </div>
 
-    <div class="stats" id="stats"></div>
-    <section class="kb-settings" id="kbSettings" aria-label="Keyboard settings" hidden></section>
-    <p class="error" id="error" role="alert" hidden></p>
-  </section>
+    <div class="device-card" id="device" hidden>
+      <div class="device-title"><span class="status-dot" id="deviceDot"></span><span class="device-name" id="deviceName"></span></div>
+      <dl class="device-facts">
+        <dt>FW</dt><dd id="chipFirmware"></dd>
+        <dt>Link</dt><dd id="chipSource"></dd>
+        <dt>Poll</dt><dd id="chipRate"></dd>
+        <dt id="chipBatteryLabel">Bat</dt><dd id="chipBattery"></dd>
+        <dt>Knob</dt><dd id="chipKnob"></dd>
+      </dl>
+    </div>
+  </nav>
 
-  <aside class="inspector" id="inspector" aria-live="polite">
-    <p class="inspector-hint">Select a key to see its settings.</p>
-  </aside>
-</main>
+  <div class="main">
+    <header class="topbar">
+      <div class="profiles" id="profiles" role="group" aria-label="Profile" hidden></div>
+      <span class="badge-readonly" id="badgeMode" title="Changes are only written after you review them">Read-only</span>
+      <div class="actions">
+        <button class="btn" id="btnOpen" type="button">Open dump…</button>
+        <button class="btn" id="btnConnect" type="button">Connect keyboard</button>
+        <button class="btn btn-review" id="btnReview" type="button" disabled><span id="reviewLabel">No changes</span><span class="review-count" id="reviewCount" hidden></span></button>
+        <input type="file" id="fileInput" accept="application/json,.json" hidden>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="board-panel">
+        <div class="toolbar">
+          <div class="segmented" id="configTabs" role="tablist" aria-label="Configuration view">
+            <button role="tab" data-view="actuation" aria-selected="true">Actuation</button>
+            <button role="tab" data-view="rt" aria-selected="false">Rapid Trigger</button>
+            <button role="tab" data-view="snap" aria-selected="false">Snap Tap</button>
+          </div>
+          <h1 class="view-title" id="viewTitle" hidden></h1>
+          <div class="legend" id="legend"></div>
+          <div class="select-tools" id="selectTools" hidden>
+            <span class="muted" id="selectCount"></span>
+            <button class="btn btn-small" id="btnPresets" type="button">Presets…</button>
+            <button class="btn btn-small" id="btnSelectAll" type="button">Select all</button>
+            <button class="btn btn-small" id="btnClearSel" type="button">Clear</button>
+          </div>
+        </div>
+
+        <div class="board-wrap">
+          <div class="board" id="board" aria-label="Keyboard"></div>
+          <div class="empty" id="empty">
+            <h2>Connect your RT75 Pro</h2>
+            <p>Close qmk.top first, then use <strong>Connect keyboard</strong> (Chrome or Edge). You can also open a
+               saved dump, or <button class="link" id="btnSample" type="button">load the sample</button>.</p>
+          </div>
+          <div class="progress" id="progress" hidden>
+            <div class="progress-bar"><span id="progressFill"></span></div>
+            <span id="progressLabel">Reading…</span>
+          </div>
+        </div>
+
+        <div class="stats" id="stats"></div>
+        <p class="error" id="error" role="alert" hidden></p>
+        <p class="notice" id="notice" role="status" hidden></p>
+      </section>
+
+      <aside class="inspector" id="inspector" aria-live="polite">
+        <p class="inspector-hint">Select a key to see its settings.</p>
+      </aside>
+    </main>
+  </div>
+</div>
 
 <dialog class="review" id="reviewDialog" aria-labelledby="reviewTitle">
   <h2 id="reviewTitle">Review changes</h2>
   <div id="reviewBody"></div>
   <p class="review-status" id="reviewStatus" role="status"></p>
   <div class="review-actions">
-    <button class="btn" id="btnCancel" type="button">Cancel</button>
-    <button class="btn" id="btnUndo" type="button" hidden>Undo these changes</button>
-    <button class="btn btn-primary" id="btnApply" type="button">Write to keyboard</button>
+    <button class="btn btn-danger-link" id="btnDiscard" type="button">Discard all</button>
+    <span class="review-actions-right">
+      <button class="btn" id="btnCancel" type="button">Cancel</button>
+      <button class="btn" id="btnUndo" type="button" hidden>Undo these changes</button>
+      <button class="btn btn-primary" id="btnApply" type="button">Write to keyboard</button>
+    </span>
   </div>
 </dialog>
 
@@ -93,8 +122,10 @@
   <h2 id="macroTitle">Macro</h2>
   <div id="macroBody"></div>
   <div class="review-actions">
-    <button class="btn" id="btnMacroCancel" type="button">Cancel</button>
-    <button class="btn btn-primary" id="btnMacroDone" type="button">Save</button>
+    <span class="review-actions-right">
+      <button class="btn" id="btnMacroCancel" type="button">Cancel</button>
+      <button class="btn btn-primary" id="btnMacroDone" type="button">Save</button>
+    </span>
   </div>
 </dialog>
 
@@ -108,9 +139,11 @@
   <ul class="preset-list" id="presetList"></ul>
   <p class="review-status" id="presetStatus" role="status"></p>
   <div class="review-actions">
-    <button class="btn" id="btnPresetImport" type="button">Import…</button>
-    <input type="file" id="presetFile" accept="application/json,.json" hidden>
-    <button class="btn" id="btnPresetClose" type="button">Close</button>
+    <span class="review-actions-right">
+      <button class="btn" id="btnPresetImport" type="button">Import…</button>
+      <input type="file" id="presetFile" accept="application/json,.json" hidden>
+      <button class="btn" id="btnPresetClose" type="button">Close</button>
+    </span>
   </div>
 </dialog>
 

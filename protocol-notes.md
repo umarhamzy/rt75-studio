@@ -500,6 +500,13 @@ changes mode by holding the knob down.
   | — | Fn brightness keys | ID 5 `06 nn`, the same as turning in lighting mode |
 
 - **Untested:** whether anything other than a hold sends a lone `0F` pair.
+- **RT75 Studio (feature/config-redesign)** uses this in `watchKeyboardEvents`. It listens only
+  on the report interface that was granted at connect: no picker, nothing sent.
+  - A lone `0F 01` counts as a hold only when no lighting or other push came in the previous 40 ms
+    and no read or write of ours is running or ended in the last 1.5 s. Saves may send busy pairs.
+  - A volume report sets volume mode. A brightness or effect push sets lighting mode only while the
+    mode is unknown, since in volume mode it's an Fn key. A hold flips a known mode.
+  - Brightness and effect pushes also update the lighting read.
 
 ## Keyboard-wide settings (RY5088 base)
 

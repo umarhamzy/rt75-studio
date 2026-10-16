@@ -228,9 +228,15 @@ export async function findGrantedKeyboard() {
 // Device operations run one at a time: each opens the keyboard, works, and closes it again, so
 // two at once (say, loading the key map while a write runs) would trip over each other.
 let deviceQueue = Promise.resolve();
+// While operations run (and just after), the keyboard's own "busy" pushes aren't knob events.
+let running = 0, lastIo = 0;
+const touchIo = () => { lastIo = performance.now(); };
+const ioActive = (graceMs) => running > 0 || performance.now() - lastIo < graceMs;
 function exclusive(fn) {
+  running++;
   const run = deviceQueue.then(fn, fn);
   deviceQueue = run.catch(() => {});
+  run.finally(() => { running--; touchIo(); }).catch(() => {});
   return run;
 }
 
@@ -487,6 +493,7 @@ async function sendReportToggle(dev, on) {
   const pkt = encode([SET_MAGNETISM_REPORT, on ? 1 : 0]);
   if (pkt.slice(2, 7).some(b => b !== 0) || pkt.slice(8).some(b => b !== 0)) throw new Error('Blocked report toggle');
   await sleep(10);
+  touchIo();
   await dev.sendFeatureReport(0, pkt);
 }
 
@@ -530,9 +537,52 @@ export async function startLiveTravel(featureDev, settings, onSample, inputDev =
     try { await sendReportToggle(featureDev, false); }
     finally {
       input.removeEventListener('inputreport', onReport);
-      try { await input.close(); } catch { /* ignore */ }
+      if (input !== watchedInput) { try { await input.close(); } catch { /* ignore */ } } // the knob watcher keeps listening
       try { await featureDev.close(); } catch { /* ignore */ }
     }
+  };
+}
+
+// ---------- Knob and lighting events (listen-only) ----------
+// The keyboard reports these on its own; nothing is sent (protocol-notes.md, "Knob modes and push
+// reports"). Consumer report 3: E9 volume up, EA down, E2 mute. Vendor pushes: 06 nn brightness,
+// 04 nn effect, then 0F 01 / 0F 00. A 0F 01 with no lighting push just before it is a knob hold,
+// which toggles the knob between volume and lighting mode. The same reports arrive through the
+// 2.4G dongle. onEvent gets { type: 'volume', action: 'up'|'down'|'mute' }, { type: 'brightness',
+// value }, { type: 'effect', value } or { type: 'toggle' }.
+let watchedInput = null;
+const CONSUMER_ACTIONS = { 0xe9: 'up', 0xea: 'down', 0xe2: 'mute' };
+const PUSH_GAP_MS = 40;        // a 0F pair follows its lighting push within ~12 ms
+const IO_GRACE_MS = 1500;      // 0F pairs during or right after our own reads and writes are ignored
+
+export async function watchKeyboardEvents(featureDev, onEvent, inputDev = null) {
+  const input = inputDev ?? (await navigator.hid.getDevices()).find(d => d !== featureDev &&
+    d.vendorId === featureDev.vendorId && d.productId === featureDev.productId &&
+    d.collections.some(c => c.usagePage === 0xffff && c.usage === 1));
+  if (!input) return null; // not granted: no picker here, the knob mode just stays unknown
+  if (!input.opened) await input.open();
+  let lastPush = -Infinity;
+  const onReport = e => {
+    const d = new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength);
+    if (e.reportId === 3) {
+      const action = CONSUMER_ACTIONS[d[0]];
+      if (action) onEvent({ type: 'volume', action });
+      return;
+    }
+    if (d[0] === 0x06) { lastPush = performance.now(); onEvent({ type: 'brightness', value: d[1] }); }
+    else if (d[0] === 0x04) { lastPush = performance.now(); onEvent({ type: 'effect', value: d[1] }); }
+    else if (d[0] >= 0x01 && d[0] <= 0x0e) lastPush = performance.now(); // other pushes (profile, rate, …) also end in 0F
+    else if (d[0] === 0x0f && d[1] === 1 && performance.now() - lastPush > PUSH_GAP_MS && !ioActive(IO_GRACE_MS)) onEvent({ type: 'toggle' });
+  };
+  input.addEventListener('inputreport', onReport);
+  watchedInput = input;
+  let stopped = false;
+  return async function stop() {
+    if (stopped) return;
+    stopped = true;
+    input.removeEventListener('inputreport', onReport);
+    if (watchedInput === input) watchedInput = null;
+    try { await input.close(); } catch { /* ignore */ }
   };
 }
 
