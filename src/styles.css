@@ -913,3 +913,10 @@ select.dd-native { display: none !important; }
 .km-key-row .dd-trigger { flex: 1; min-width: 0; }
 .km-edit > .dd-trigger { width: 100%; }
 .mc-toolbar .dd-trigger { max-width: 190px; }
+/* Macro editor: Record matches the dropdowns beside it. */
+.mc-record { min-height: 34px; gap: 8px; padding: 0 14px 0 12px; }
+.rec-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); flex: none; }
+.mc-record.is-recording { border-color: var(--danger); color: var(--danger); }
+.mc-record.is-recording .rec-dot { border-radius: 2px; animation: live-pulse 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .mc-record.is-recording .rec-dot { animation: none; } }
+.mc-toolbar { align-items: center; }

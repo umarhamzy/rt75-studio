@@ -1111,6 +1111,8 @@ function macroCardHtml(bytes) {
 function macroEditorHtml(cur) {
   const isMacro = cur[0] === 9;
   const curLabel = isMacro ? (macroForSlot(cur[2]).entry?.name ?? `Macro slot ${cur[2] + 1}`) : 'Run a macro…';
+  // Loop count comes from the library macro (set in its editor); unknown for macros made elsewhere.
+  const repeat = isMacro ? macroForSlot(cur[2]).entry?.repeat : undefined;
   return `<span class="km-edit-label">Macro</span>
     <div class="km-key-row">
       <select id="kmMacroSelect" aria-label="Run a macro">
@@ -1120,7 +1122,7 @@ function macroEditorHtml(cur) {
         <option value="new">New macro…</option>
       </select>
       ${isMacro ? `<select id="kmMacroMode" aria-label="Play mode">
-        ${Object.entries(MACRO_MODES).map(([id, m]) => `<option value="${id}" ${Number(id) === cur[1] ? 'selected' : ''}>${m.name}</option>`).join('')}
+        ${Object.entries(MACRO_MODES).map(([id, m]) => `<option value="${id}" ${Number(id) === cur[1] ? 'selected' : ''}>${m.name}${Number(id) === 0 && repeat ? ` · ${repeat}×` : ''}</option>`).join('')}
       </select>` : ''}
     </div>`;
 }
@@ -1335,7 +1337,7 @@ function renderMacroDialog() {
   $('macroBody').innerHTML = `
     <label class="mc-name">Name <input type="text" id="mcName" maxlength="40" value="${escapeHtml(d.name)}" ${dis}></label>
     <div class="mc-toolbar">
-      <button class="btn btn-small${rec ? ' btn-stop' : ''}" id="mcRecord" type="button">${rec ? '■ Stop' : '● Record'}</button>
+      <button class="btn mc-record${rec ? ' is-recording' : ''}" id="mcRecord" type="button" aria-pressed="${!!rec}"><span class="rec-dot" aria-hidden="true"></span>${rec ? 'Stop' : 'Record'}</button>
       <select id="mcAddKey" aria-label="Add a key press and release" ${dis}>
         <option value="">+ Key…</option>${KEY_CHOICES.map(c => `<option value="${c}">${keyName(c)}</option>`).join('')}
         <optgroup label="Modifiers">${MODIFIERS.map(c => `<option value="${c}">${keyName(c)}</option>`).join('')}</optgroup>
