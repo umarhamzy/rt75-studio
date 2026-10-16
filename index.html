@@ -63,23 +63,37 @@
 
     <main class="workspace">
       <section class="board-panel">
+        <!-- Two fixed-height rows, so the board starts at the same place on every view. -->
         <div class="toolbar">
-          <div class="segmented" id="configTabs" role="tablist" aria-label="Configuration view">
-            <button role="tab" data-view="actuation" aria-selected="true">Actuation</button>
-            <button role="tab" data-view="rt" aria-selected="false">Rapid Trigger</button>
-            <button role="tab" data-view="snap" aria-selected="false">Snap Tap</button>
+          <div class="toolbar-main">
+            <div class="segmented" id="configTabs" role="tablist" aria-label="Configuration view">
+              <button role="tab" data-view="actuation" aria-selected="true">Actuation</button>
+              <button role="tab" data-view="rt" aria-selected="false">Rapid Trigger</button>
+              <button role="tab" data-view="snap" aria-selected="false">Snap Tap</button>
+            </div>
+            <h1 class="view-title" id="viewTitle" hidden></h1>
+            <div class="select-tools" id="selectTools" hidden>
+              <span class="muted" id="selectCount"></span>
+              <button class="btn btn-small" id="btnPresets" type="button">Presets…</button>
+              <select class="btn btn-small select-menu" id="selectPreset" aria-label="Select a group of keys">
+                <option value="" selected>Select…</option>
+                <option value="all">All keys</option>
+                <option value="wasd">WASD</option>
+                <option value="letters">Letters A–Z</option>
+                <option value="numbers">Numbers 1–0</option>
+                <option value="function">Function keys F1–F12</option>
+                <option value="modifiers">Modifiers (Shift, Ctrl, Alt, Win)</option>
+                <option value="arrows">Arrow keys</option>
+              </select>
+              <button class="btn btn-small" id="btnClearSel" type="button">Clear</button>
+            </div>
           </div>
-          <h1 class="view-title" id="viewTitle" hidden></h1>
           <div class="legend" id="legend"></div>
-          <div class="select-tools" id="selectTools" hidden>
-            <span class="muted" id="selectCount"></span>
-            <button class="btn btn-small" id="btnPresets" type="button">Presets…</button>
-            <button class="btn btn-small" id="btnSelectAll" type="button">Select all</button>
-            <button class="btn btn-small" id="btnClearSel" type="button">Clear</button>
-          </div>
         </div>
 
-        <div class="board-wrap">
+        <section class="settings-panel" id="settingsPanel" aria-label="Keyboard settings" hidden></section>
+
+        <div class="board-wrap" id="boardWrap">
           <div class="board" id="board" aria-label="Keyboard"></div>
           <div class="empty" id="empty">
             <h2>Connect your RT75 Pro</h2>

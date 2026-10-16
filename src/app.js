@@ -57,6 +57,7 @@ const state = {
   dev: null,                 // HIDDevice from the last live read, used for writes
   view: 'actuation',
   layer: 'base',             // key map view: 'base' | 'fnWin' | 'fnMac'
+  os: loadOs(),              // which Fn layer the UI shows: 'win' | 'mac' (a preference in this browser)
   selected: new Set(),       // matrix slots
   knob: false,               // knob selected instead of keys
   pending: new Map(),        // slot -> { field: raw value } differing from settings
@@ -446,27 +447,27 @@ function renderLegend(lo, hi) {
   const el = $('legend');
   if (!state.settings) { el.innerHTML = ''; return; }
   if (state.view === 'actuation') {
-    el.innerHTML = `<span>${mm(LIMITS.travel.min)} mm</span><span class="ramp" aria-hidden="true"></span><span>${MAX_TRAVEL_MM} mm</span><span class="muted">stronger color = shorter travel · this board ${mm(lo)}–${mm(hi)} mm</span>`;
+    el.innerHTML = `<span>${mm(LIMITS.travel.min)} mm</span><span class="ramp" aria-hidden="true"></span><span>${MAX_TRAVEL_MM} mm</span><span class="muted">stronger color = shorter travel</span>`;
   } else if (state.view === 'rt') {
-    el.innerHTML = '<span class="swatch swatch-rt"></span><span>Rapid Trigger on · sensitivity in mm (↓ press, ↑ release when they differ)</span>';
+    el.innerHTML = '<span class="swatch swatch-rt"></span><span class="legend-fit">Rapid Trigger on · sensitivity in mm (↓ press, ↑ release when they differ)</span>';
   } else if (state.view === 'live') {
     const why = liveUnavailableReason();
     el.innerHTML = state.live
-      ? '<button class="btn btn-small btn-stop" id="btnLive" type="button">Stop live test</button><span class="live-dot"></span><span>Live: press keys to see their depth</span>'
+      ? '<button class="btn btn-small btn-stop" id="btnLive" type="button">Stop live test</button><span class="live-dot"></span><span class="legend-fit">Live: press keys to see their depth</span>'
       : `<button class="btn btn-small btn-primary" id="btnLive" type="button" ${why ? 'disabled' : ''}>Start live test</button><span class="muted">${why ?? 'Shows how deep the key you press goes, against its trigger points.'}</span>`;
     $('btnLive').onclick = () => (state.live ? stopLive() : startLive());
   } else if (state.view === 'keymap') {
     el.innerHTML = `<div class="segmented segmented-sm" role="group" aria-label="Layer">
-        ${Object.entries(LAYERS).map(([id, l]) => `<button type="button" data-layer="${id}" aria-pressed="${state.layer === id}">${l.label}</button>`).join('')}
+        ${shownLayers().map(id => `<button type="button" data-layer="${id}" aria-pressed="${state.layer === id}">${layerName(id)}</button>`).join('')}
       </div><span class="swatch swatch-km"></span><span class="muted">changed from factory</span>`;
     el.querySelectorAll('[data-layer]').forEach(b => b.onclick = () => { state.layer = b.dataset.layer; refresh(); });
   } else if (state.view === 'macros') {
     el.innerHTML = `<div class="segmented segmented-sm" role="group" aria-label="Layer">
-        ${Object.entries(LAYERS).map(([id, l]) => `<button type="button" data-layer="${id}" aria-pressed="${state.layer === id}">${l.label}</button>`).join('')}
+        ${shownLayers().map(id => `<button type="button" data-layer="${id}" aria-pressed="${state.layer === id}">${layerName(id)}</button>`).join('')}
       </div><span class="swatch swatch-mc"></span><span>library macro</span><span class="muted">(click to edit)</span><span class="swatch swatch-mc-elsewhere"></span><span>made elsewhere</span>`;
     el.querySelectorAll('[data-layer]').forEach(b => b.onclick = () => { state.layer = b.dataset.layer; refresh(); });
   } else if (state.view === 'device') {
-    el.innerHTML = '<span class="muted">Polling rate, debounce and wireless power saving, for every profile.</span>';
+    el.innerHTML = '<span class="muted">For the whole keyboard (every profile), plus how RT75 Studio shows it.</span>';
   } else if (state.view === 'lighting') {
     const l = currentLight();
     const e = l && effectById(l.effect);
@@ -475,8 +476,10 @@ function renderLegend(lo, hi) {
          <span>${e?.name ?? `Effect ${l.effect}`} · ${l.brightness ? `brightness ${l.brightness}/${MAX_LEVEL}` : 'lights off'}</span><span class="muted">preview is approximate</span>`
       : '<span class="muted">Lighting wasn’t read from this source.</span>';
   } else {
-    el.innerHTML = '<span class="swatch swatch-snap"></span><span>Snap Tap pairs: the last key pressed wins</span>';
+    el.innerHTML = '<span class="swatch swatch-snap"></span><span class="muted">Snap Tap pairs: the last key pressed wins</span>';
   }
+  // The legend is one line (so the board never moves); long text is cut, and shown in full here.
+  el.title = el.textContent.replace(/\s+/g, ' ').trim();
 }
 
 function renderSelectionTools() {
@@ -586,11 +589,7 @@ function renderInspectorBody() {
   if (state.view === 'live' && state.settings) { renderLivePanel(); return; }
   if (state.view === 'lighting' && state.settings) { renderLightingPanel(); return; }
   if (state.view === 'macros' && state.settings) { renderLibraryPanel(); return; }
-  if (state.view === 'device') {
-    if (state.settings) renderKeyboardSettings();
-    else el.innerHTML = '<p class="inspector-hint">Connect the keyboard (or open a dump) to see its settings.</p>';
-    return;
-  }
+  if (state.view === 'device') { renderKeyboardSettings(); return; } // drawn in place of the board
   if (state.view === 'keymap' && state.settings && !state.knob && state.selected.size) { renderKeymapPanel(); return; }
   if (!state.settings || (!state.knob && !state.selected.size)) {
     el.innerHTML = '<p class="inspector-hint">Select a key to see its settings. Ctrl- or Shift-click to select several.</p>';
@@ -934,6 +933,23 @@ const LAYERS = {
   fnMac: { label: 'Fn · Mac', field: 'fnMac', defaults: DEFAULT_FN_MAC_MATRIX, fn: true },
 };
 
+// The UI shows one Fn layer, Windows or Mac (chosen in Keyboard settings), to avoid showing both
+// everywhere. The keyboard keeps both; edits made to either are still reviewed and written.
+function loadOs() {
+  try { const v = localStorage.getItem('rt75-studio-os'); if (v === 'win' || v === 'mac') return v; } catch { /* storage blocked */ }
+  return /mac/i.test(navigator.userAgentData?.platform ?? navigator.platform ?? '') ? 'mac' : 'win';
+}
+const fnLayer = () => (state.os === 'mac' ? 'fnMac' : 'fnWin');
+const shownLayers = () => ['base', fnLayer()];
+const layerName = id => (id === 'base' ? 'Base' : 'Fn');
+function setOs(os) {
+  if (os !== 'win' && os !== 'mac') return;
+  state.os = os;
+  try { localStorage.setItem('rt75-studio-os', os); } catch { /* storage blocked: kept for this visit */ }
+  if (LAYERS[state.layer].fn) state.layer = fnLayer();
+  refresh();
+}
+
 // What the keyboard has now (ignores unsaved edits).
 function deviceBytes(layer, slot) {
   const arr = state.settings?.[LAYERS[layer].field];
@@ -1011,7 +1027,8 @@ function slotUsers(slot) {
   }
   return users;
 }
-const userLabel = u => `${u.layer === 'base' ? '' : 'Fn+'}${u.key.label}${u.layer === 'fnMac' ? ' (Mac)' : ''}`;
+// The other OS's Fn layer is hidden in the UI, so keys there are labelled with it.
+const userLabel = u => `${u.layer === 'base' ? '' : 'Fn+'}${u.key.label}${LAYERS[u.layer].fn && u.layer !== fnLayer() ? (u.layer === 'fnMac' ? ' (Mac)' : ' (Windows)') : ''}`;
 
 // Slots keys use that no library macro claims: made in qmk.top, or before the library existed.
 function elsewhereSlots() {
@@ -1386,11 +1403,11 @@ function renderKeymapPanel() {
   }
 
   const key = keys[0];
-  const rows = Object.entries(LAYERS).map(([id, l]) => {
+  const rows = shownLayers().map(id => {
     const a = layerAction(id, key.slot);
     const pending = state.pendingKeys.has(`${id}:${key.slot}`);
     return `<button type="button" class="km-row${id === layer ? ' is-current' : ''}${pending ? ' is-pending' : ''}" data-layer-row="${id}">
-      <span class="km-layer">${l.label}</span>
+      <span class="km-layer">${layerName(id)}</span>
       <span class="km-now">${a.kind === 'macro' ? escapeHtml(macroForSlot(a.bytes[2]).entry?.name ?? `Macro slot ${a.bytes[2] + 1}`) + ` · ${MACRO_MODES[a.bytes[1]]?.name ?? ''}` : a.label}${a.changed ? ' <span class="km-badge">changed</span>' : ''}${pending ? ' <span class="km-badge km-badge-pending">unsaved</span>' : ''}</span>
       ${a.note ? `<span class="km-factory muted">${a.note}</span>` : ''}
       ${a.kind === 'unknown' ? `<span class="km-factory muted">A built-in keyboard function qmk.top doesn’t name either (bytes ${a.raw}); left untouched.</span>` : ''}
@@ -1405,7 +1422,7 @@ function renderKeymapPanel() {
 
   el.innerHTML = `
     <div class="insp-head"><h2>${key.label}</h2>${revertChipHtml(key.slot)}</div>
-    <p class="sub">What this key sends. Base is for profile ${(state.settings.profile ?? 0) + 1}; the Fn layers apply while Fn is held and are shared by all profiles. Click a layer to edit it.</p>
+    <p class="sub">What this key sends. Base is for profile ${(state.settings.profile ?? 0) + 1}; Fn applies while Fn is held and is shared by all profiles (showing the ${state.os === 'mac' ? 'Mac' : 'Windows'} Fn layer; change it in Keyboard settings). Click a layer to edit it.</p>
     <div class="km-rows">${rows}</div>
     ${editor}
     ${canEdit ? '' : `<p class="note">${state.settings.source === 'device' ? (state.live ? 'Stop the live test to edit.' : '') : 'Viewing a file. Connect the keyboard to edit.'}</p>`}`;
@@ -2230,7 +2247,7 @@ function renderLightingPanel() {
     <div class="fx-grid" role="group" aria-label="Effect">${effects}</div>
     <div class="lt-row">
       <div><h3 class="lt-head${changed('brightness')}">Brightness</h3>${levels('bright', l.brightness, true)}</div>
-      <div><h3 class="lt-head${changed('speed')}">Speed <span class="muted">${e?.speed ? 'slow → fast' : 'fixed'}</span></h3>${levels('speed', l.speed, !!e?.speed)}</div>
+      <div><h3 class="lt-head${changed('speed')}">Speed${e?.speed ? '' : ' <span class="muted">fixed</span>'}</h3>${levels('speed', l.speed, !!e?.speed)}</div>
     </div>
     <h3 class="lt-head${changed('rainbow') || changed('color')}">Colour ${hasColor ? '' : '<span class="muted">set by the effect</span>'}</h3>
     <div class="sw-row${hasColor ? '' : ' is-off'}" role="group" aria-label="Colour">${swatches}</div>
@@ -2255,46 +2272,64 @@ function renderLightingPanel() {
 }
 
 // ---------- Keyboard-wide settings ----------
-// Shown in the inspector on the Keyboard settings view. (Profiles are in the header.)
+// The Keyboard settings view, drawn in place of the board. (Profiles are in the header.)
 function renderKeyboardSettings() {
-  const el = $('inspector');
+  const el = $('settingsPanel');
+  const focusId = el.contains(document.activeElement) ? document.activeElement.id : '';
   const s = state.settings;
   const can = editable();
-  const rate = state.pendingKb.reportRateHz ?? s.reportRateHz;
-  const ratePending = kbChanges().some(c => c.field === 'reportRateHz');
-  el.innerHTML = `<div class="insp-head"><h2>Keyboard settings</h2></div>
-    <p class="sub">These apply to the whole keyboard, on every profile.</p>
-    <div class="kb-settings">
-    <div class="kb-item">
-      <label class="stat-label" for="rateSelect">Polling rate</label>
-      <select id="rateSelect" class="${ratePending ? 'is-pending' : ''}" ${can ? '' : 'disabled'}>
-        ${RATE_OPTIONS.map(hz => `<option value="${hz}" ${hz === rate ? 'selected' : ''}>${fmtHz(hz)}${hz === s.reportRateHz ? ' (current)' : ''}</option>`).join('')}
-      </select>
-    </div>
-    <div class="kb-item">
-      <span class="stat-label">Debounce</span>
-      <span class="stat-value" title="qmk.top doesn't offer debounce for this keyboard; magnetic (Hall-effect) switches don't bounce like mechanical contacts.">${s.debounce ?? '?'} · not adjustable here</span>
-    </div>
-    ${s.sleep ? `<div class="kb-item kb-sleep">
-      <span class="stat-label">Wireless power saving <span class="muted">(minutes, 0 = never)</span></span>
-      ${sleepInput('time_bt', 'Bluetooth backlight off', can)}
-      ${sleepInput('deepTime_bt', 'Bluetooth deep sleep', can)}
-      ${sleepInput('time_24', '2.4G backlight off', can)}
-    </div>` : ''}
-    ${s.source !== 'device' ? '<p class="note kb-note">Connect the keyboard to change these.</p>' : ''}
+  const osCard = `<div class="set-card">
+      <h2>Fn layer shown</h2>
+      <div class="segmented segmented-sm" role="group" aria-label="Fn layer shown">
+        <button type="button" id="osWin" data-os="win" aria-pressed="${state.os === 'win'}">Windows</button>
+        <button type="button" id="osMac" data-os="mac" aria-pressed="${state.os === 'mac'}">Mac</button>
+      </div>
+      <p class="note">Only changes what RT75 Studio shows in Key map and Macros. The keyboard keeps both Fn layers; this is saved in this browser.</p>
     </div>`;
-  el.querySelectorAll('[data-sleep]').forEach(inp => inp.onchange = () => {
-    const field = inp.dataset.sleep, [lo, hi] = uiSleepLimits(field);
-    if (inp.value === '') return;
-    const sec = Math.min(hi, Math.max(lo, Math.round(Number(inp.value) * 60)));
-    if (sec === s.sleep[field]) delete state.pendingKb[field]; else state.pendingKb[field] = sec;
-    refresh();
-  });
-  $('rateSelect').onchange = e => {
-    const hz = Number(e.target.value);
-    if (hz === s.reportRateHz) delete state.pendingKb.reportRateHz; else state.pendingKb.reportRateHz = hz;
-    refresh();
-  };
+  if (!s) {
+    el.innerHTML = `<div class="set-grid">${osCard}<div class="set-card"><h2>Keyboard</h2><p class="note">Connect the keyboard (or open a dump) to see its settings.</p></div></div>`;
+  } else {
+    const rate = state.pendingKb.reportRateHz ?? s.reportRateHz;
+    const ratePending = kbChanges().some(c => c.field === 'reportRateHz');
+    el.innerHTML = `<div class="set-grid">
+      <div class="set-card">
+        <h2><label for="rateSelect">Polling rate</label></h2>
+        <select id="rateSelect" class="${ratePending ? 'is-pending' : ''}" ${can ? '' : 'disabled'}>
+          ${RATE_OPTIONS.map(hz => `<option value="${hz}" ${hz === rate ? 'selected' : ''}>${fmtHz(hz)}${hz === s.reportRateHz ? ' (current)' : ''}</option>`).join('')}
+        </select>
+        <p class="note">How often the keyboard reports to the computer, on every profile.</p>
+      </div>
+      ${s.sleep ? `<div class="set-card set-card-wide">
+        <h2>Wireless power saving <span class="muted">minutes, 0 = never</span></h2>
+        <div class="kb-sleep">
+          ${sleepInput('time_bt', 'Bluetooth backlight off', can)}
+          ${sleepInput('deepTime_bt', 'Bluetooth deep sleep', can)}
+          ${sleepInput('time_24', '2.4G backlight off', can)}
+        </div>
+      </div>` : ''}
+      ${osCard}
+      <div class="set-card">
+        <h2>Debounce</h2>
+        <p class="set-value" title="qmk.top doesn't offer debounce for this keyboard; magnetic (Hall-effect) switches don't bounce like mechanical contacts.">${s.debounce ?? '?'}</p>
+        <p class="note">Not adjustable here: qmk.top doesn’t offer it for this keyboard, and magnetic switches don’t bounce.</p>
+      </div>
+      ${s.source !== 'device' ? '<p class="note">Viewing a file. Connect the keyboard to change these.</p>' : ''}
+    </div>`;
+    el.querySelectorAll('[data-sleep]').forEach(inp => inp.onchange = () => {
+      const field = inp.dataset.sleep, [lo, hi] = uiSleepLimits(field);
+      if (inp.value === '') return;
+      const sec = Math.min(hi, Math.max(lo, Math.round(Number(inp.value) * 60)));
+      if (sec === s.sleep[field]) delete state.pendingKb[field]; else state.pendingKb[field] = sec;
+      refresh();
+    });
+    $('rateSelect').onchange = e => {
+      const hz = Number(e.target.value);
+      if (hz === s.reportRateHz) delete state.pendingKb.reportRateHz; else state.pendingKb.reportRateHz = hz;
+      refresh();
+    };
+  }
+  el.querySelectorAll('[data-os]').forEach(b => b.onclick = () => setOs(b.dataset.os));
+  if (focusId) el.querySelector(`#${CSS.escape(focusId)}`)?.focus({ preventScroll: true });
 }
 
 // The inputs work in whole minutes, so deep sleep starts at 1 minute (the keyboard allows 10 s;
@@ -2370,6 +2405,13 @@ function renderNav() {
   document.querySelectorAll('#configTabs [data-view]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === state.view)));
   $('configTabs').hidden = !config;
   $('viewTitle').hidden = config;
+  // Keyboard settings replace the board, and need no side panel.
+  const settings = state.view === 'device';
+  $('boardWrap').hidden = settings;
+  $('stats').hidden = settings;
+  $('settingsPanel').hidden = !settings;
+  $('inspector').hidden = settings;
+  document.querySelector('.workspace').classList.toggle('is-single', settings);
   $('viewTitle').textContent = VIEW_TITLES[state.view] ?? '';
   $('navMacroCount').textContent = state.library.length || '';
 }
@@ -2511,7 +2553,25 @@ $('btnSample').onclick = async () => {
   try { load(settingsFromDump(await (await fetch('fixtures/sample-dump.json')).json())); }
   catch (e) { showError('Could not load the sample: ' + e.message); }
 };
-$('btnSelectAll').onclick = () => { state.knob = false; state.selected = new Set(MAGNETIC.map(k => k.slot)); refresh(); };
+// Key groups for the "Select…" menu, by browser key code (see layout.js).
+const KEY_GROUPS = {
+  all: () => true,
+  wasd: k => ['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(k.code),
+  letters: k => /^Key[A-Z]$/.test(k.code),
+  numbers: k => /^Digit\d$/.test(k.code),
+  function: k => /^F\d+$/.test(k.code),
+  modifiers: k => /^(Shift|Control|Alt|Meta)(Left|Right)$/.test(k.code),
+  arrows: k => k.code.startsWith('Arrow'),
+};
+$('selectPreset').onchange = e => {
+  const pick = KEY_GROUPS[e.target.value];
+  e.target.value = '';
+  if (!pick) return;
+  state.knob = false;
+  state.picking = null;
+  state.selected = new Set(MAGNETIC.filter(pick).map(k => k.slot));
+  refresh();
+};
 $('btnClearSel').onclick = () => { state.selected.clear(); refresh(); };
 $('btnDiscard').onclick = () => {
   if (state.busy) return;

@@ -160,7 +160,8 @@ button, input, select { font: inherit; color: inherit; }
 @media (max-width: 1240px) { .workspace { grid-template-columns: minmax(0, 1fr); } }
 
 .board-panel { min-width: 0; }
-.toolbar { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; margin-bottom: 16px; min-height: 40px; }
+.toolbar { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.toolbar-main { display: flex; align-items: center; gap: 8px 20px; flex-wrap: wrap; min-height: 40px; }
 .view-title { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
 
 .segmented { display: inline-flex; background: var(--surface-2); border-radius: 9px; padding: 3px; }
@@ -172,7 +173,10 @@ button, input, select { font: inherit; color: inherit; }
 .segmented button[aria-selected="true"] { background: var(--surface-3); color: var(--text); font-weight: 600; }
 .segmented button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-.legend { display: flex; align-items: center; gap: 8px; font: 500 12px var(--mono); color: var(--text-2); flex-wrap: wrap; }
+/* One line, fixed height: long legends are cut with an ellipsis (full text in the title), so the board never moves between views. */
+.legend { display: flex; align-items: center; gap: 8px; height: 30px; overflow: hidden; white-space: nowrap; font: 500 12px var(--mono); color: var(--text-2); }
+.legend > * { flex: none; }
+.legend > .muted:last-child, .legend > .legend-fit { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .legend .muted { color: var(--muted); }
 .ramp { width: 120px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--accent), var(--surface-3)); }
 .swatch { width: 12px; height: 12px; border-radius: 3px; }
@@ -613,7 +617,6 @@ button.km-row:hover { background: var(--surface-2); }
 .fx-breathe { background: radial-gradient(ellipse, var(--accent), color-mix(in oklab, var(--accent) 25%, #2a2e37)); }
 
 .lt-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.lt-head.is-changed::after { content: "• unsaved"; margin-left: 6px; color: var(--pending); text-transform: none; letter-spacing: 0; }
 .level-picker { display: flex; width: 100%; }
 .level-picker button { flex: 1; padding: 4px 0; font-variant-numeric: tabular-nums; }
 .opt-picker { flex-wrap: wrap; }
@@ -777,3 +780,24 @@ button.km-row:hover { background: var(--surface-2); }
 .tslider.is-dragging .ts-handle { background: linear-gradient(180deg, #ffffff, #c8ccd3); }
 .key-legend { max-width: 100%; }
 .key-legend.fit-1 { font-size: clamp(7.5px, 0.76vw, 10.5px); }
+@media (min-width: 700px) { .toolbar-main { flex-wrap: nowrap; } .select-tools { flex: 0 1 auto; min-width: 0; } #selectCount { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; } }
+.select-menu { appearance: none; -webkit-appearance: none; padding-right: 26px; cursor: pointer;
+  background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238f949e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 9px center; }
+.select-menu option { background: var(--surface); color: var(--text); }
+.btn-small { min-height: 30px; padding: 0 10px; font-size: 12px; }
+
+/* Keyboard settings view (in place of the board) */
+.workspace.is-single { grid-template-columns: minmax(0, 1fr); }
+.set-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); grid-auto-flow: dense; gap: 16px; align-items: start; }
+.set-card { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.set-card-wide { grid-column: span 2; }
+@media (max-width: 700px) { .set-card-wide { grid-column: auto; } }
+.set-card h2 { margin: 0; font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.set-card h2 .muted { text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.set-card .note { margin: 0; font-size: 12px; color: var(--muted); }
+.set-value { margin: 0; font: 700 22px var(--mono); }
+.set-card select { padding: 7px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: 500 14px var(--mono); }
+.set-card select.is-pending { outline: 2px dashed var(--pending); outline-offset: 1px; }
+.set-card .kb-sleep { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.set-card .sleep-field { display: grid; grid-template-columns: minmax(0, 1fr) 80px 70px; align-items: center; gap: 10px; width: 100%; padding: 4px 6px; }
+.set-card .segmented-sm button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 700; box-shadow: none; }

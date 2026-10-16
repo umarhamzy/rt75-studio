@@ -38,8 +38,9 @@ are waiting.
 
 ## Editing
 
-Select keys (Ctrl- or Shift-click for several, or **Select all**), then change actuation, release
-point, top and bottom dead zones, Rapid Trigger and RT sensitivity in the side panel.
+Select keys (Ctrl- or Shift-click for several, or a group from **Select…**: all keys, WASD,
+letters, numbers, function keys, modifiers or arrows), then change actuation, release point, top
+and bottom dead zones, Rapid Trigger and RT sensitivity in the side panel.
 
 Actuation and release use vertical sliders: 0 mm (key up) at the top, the deepest setting at the
 bottom, so moving the handle down is like pressing the key further. Drag the handle, use the arrow
@@ -71,7 +72,9 @@ Lighting view.
 - **Profile 1–4** (in the header) switches the active profile straight away, then re-reads
   everything, because each profile stores its own key settings.
 
-In the **Keyboard settings** section:
+The **Keyboard settings** section replaces the board with these cards:
+- **Fn layer shown** (Windows or Mac) picks which Fn layer Key map and Macros show. It's saved in
+  this browser and doesn't change the keyboard, which keeps both.
 - **Polling rate** (125Hz–8kHz) is queued like any other edit and written through the review.
 - **Wireless power saving** sets, in minutes: Bluetooth backlight off (0 = never), Bluetooth deep
   sleep (at least 10 seconds) and 2.4G backlight off (0 = never). Each goes up to 18 hours,
@@ -82,7 +85,7 @@ In the **Keyboard settings** section:
 ## Key map
 
 The **Key map** tab shows what every key sends on the active profile, for the base layer and the
-Fn layers (Windows and Mac). Keys that differ from the factory setting are outlined.
+Fn layer (Windows or Mac, as chosen in Keyboard settings). Keys that differ from the factory setting are outlined.
 
 To change a key:
 1. Select it and click the layer row you want to edit.
