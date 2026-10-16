@@ -119,7 +119,7 @@ write, read-back and Undo. Brightness 0 = fully off; lighting is shared by all p
 without fixed 100 ms waits; the key map loads in the background after startup (Key map / Macros
 tabs spin until it's in). Startup over 2.4G: 24.7 s → 3.0 s, verified on the real keyboard.
 
-**Configuration redesign (feature/config-redesign, demo-tested, not yet verified on the keyboard):**
+**Configuration redesign (feature/config-redesign, merged; verified on the real keyboard 2026-10-16):**
 - Dark-only theme (amber accent, Archivo + JetBrains Mono from Google Fonts with system fallbacks).
 - Sidebar navigation and a device card; Profile 1–4 and **Review changes** (with a live count) in
   the header. The pending bar is gone; Discard all is in the review dialog.

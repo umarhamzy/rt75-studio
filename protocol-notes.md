@@ -525,7 +525,8 @@ changes mode by holding the knob down.
 - **Use:** the UI shows one Fn layer. By default it follows this switch: Mac and iOS use the Mac
   layer; Windows and Android use the Windows layer. Keyboard settings can pin Windows or Mac, saved
   in the browser.
-- Demo-tested only so far; not yet checked on the real keyboard.
+- **Verified on the real keyboard (2026-10-16):** flipping the switch with the page open updated
+  Keyboard settings and Key map (Mac shows Cmd/Opt on the base layer).
 
 ## Keyboard-wide settings (RY5088 base)
 
@@ -774,3 +775,12 @@ Like qmk.top's Key Scheme Library:
   
   "Remove from keys" also worked. Mode 2 plays while the key is held, so it's now labelled
   "Hold to play".
+
+## Configuration redesign (feature/config-redesign)
+
+- **Verified on the real keyboard (2026-10-16):** the user checked the redesigned app (sidebar,
+  header profiles and Review changes count, vertical travel sliders, knob mode from the keyboard's
+  own reports, Keyboard settings tiles, styled dropdowns, Sleep PC macro template) and approved it
+  for merge. Lighting speed labels (Fn+←/→ swapped from qmk.top's names) were checked on the keyboard.
+- **Fn+] System sleep:** works over USB, not over 2.4G (firmware/dongle). The Sleep PC macro
+  template (Win+X, U, S) is the workaround.
