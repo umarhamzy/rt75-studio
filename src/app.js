@@ -1168,6 +1168,21 @@ function removeSlotFromKeys(slot) {
 
 // Macros view: the library.
 let libraryStatus = '';
+
+// Ready-made macros for "Add template". Steps: key press/release with the wait after each, in ms.
+const keyStep = (code, down, delay) => ({ kind: 'key', code, down, delay });
+const MACRO_TEMPLATES = {
+  // Windows' own sleep shortcut: Win+X opens the power-user menu, U the "Shut down or sign out"
+  // submenu, S sleeps. Plain key presses, so it works on every link (System sleep doesn't over 2.4G).
+  sleep: {
+    name: 'Sleep PC (Windows)', meta: 'Win+X, U, S',
+    steps: [
+      keyStep(227, true, 20), keyStep(27, true, 20), keyStep(27, false, 20), keyStep(227, false, 400), // Win+X, wait for the menu
+      keyStep(24, true, 20), keyStep(24, false, 400),                                                   // U, wait for the submenu
+      keyStep(22, true, 20), keyStep(22, false, 20),                                                    // S
+    ],
+  },
+};
 function renderLibraryPanel() {
   const el = $('inspector');
   const can = editable();
@@ -1198,6 +1213,10 @@ function renderLibraryPanel() {
       <button class="btn btn-small btn-primary" id="libNew" type="button">New macro</button>
       <button class="btn btn-small" id="libImport" type="button">Import…</button>
       <button class="btn btn-small" id="libExport" type="button" ${state.library.length ? '' : 'disabled'}>Export</button>
+      <select class="btn-small" id="libTemplate" data-placeholder="Add template" aria-label="Add a ready-made macro">
+        <option value="">Add template</option>
+        ${Object.entries(MACRO_TEMPLATES).map(([id, t]) => `<option value="${id}" data-meta="${escapeHtml(t.meta)}">${escapeHtml(t.name)}</option>`).join('')}
+      </select>
       <input type="file" id="libFile" accept="application/json,.json" hidden>
     </div>
     <p class="review-status" id="libStatus" role="status">${escapeHtml(libraryStatus)}</p>
@@ -1211,6 +1230,15 @@ function renderLibraryPanel() {
   const byId = b => libById(b.dataset[Object.keys(b.dataset)[0]]);
   el.querySelectorAll('[data-lib-edit]').forEach(b => b.onclick = () => openMacroEditor(byId(b)));
   el.querySelectorAll('[data-lib-write]').forEach(b => b.onclick = () => { const e = byId(b); state.pendingMacroWrites.set(e.slot, e.id); refresh(); });
+  $('libTemplate').onchange = e => {
+    const t = MACRO_TEMPLATES[e.target.value];
+    if (!t) return;
+    const entry = { id: newId(), name: uniqueName(state.library, t.name), repeat: 1, steps: t.steps.map(s => ({ ...s })) };
+    state.library.push(entry);
+    persistLibrary();
+    libraryStatus = `Added “${entry.name}”. Put it on a key in Key map: select the key, then pick it under Macro.`;
+    refresh();
+  };
   el.querySelectorAll('[data-lib-dup]').forEach(b => b.onclick = () => {
     const e = byId(b);
     state.library.push({ id: newId(), name: uniqueName(state.library, e.name), repeat: e.repeat, steps: e.steps.map(s => ({ ...s })) });
