@@ -325,6 +325,8 @@ So every read costs at least ~0.25 s on 2.4G, and a full RT75 Studio load (60 re
   and the settings loaded normally.
   - With the key map moved out of startup, startup over 2.4G took **3.0 s** (user, 2026-10-16), and
     the Key map tab loaded fine.
+  - The background load verified on the real keyboard (user, 2026-10-16): Key map and Macros spin
+    while the key map loads, then unlock, and Key map opens correctly.
 
 ## Device identification
 

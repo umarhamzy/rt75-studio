@@ -84,7 +84,7 @@ touching device code.
   http://127.0.0.1:5180/?demo.
 - Demo presets use their own storage key (`rt75-studio-presets-demo-2865`).
 
-## Status (2026-10-15)
+## Status (2026-10-16)
 
 **Verified on the real keyboard:**
 - reads and decoding
@@ -112,6 +112,10 @@ write, read-back and Undo. Brightness 0 = fully off; lighting is shared by all p
   so it isn't in `READ_COMMANDS`.
 - Key writes are read back; macro steps can't be.
 - Verified on the real keyboard: create, assign, write, play, and Remove from keys.
+
+**2.4G speed (perf/dongle-speed):** the dongle is routed once per operation and its status is polled
+without fixed 100 ms waits; the key map loads in the background after startup (Key map / Macros
+tabs spin until it's in). Startup over 2.4G: 24.7 s → 3.0 s, verified on the real keyboard.
 
 **Next, in the user's order:** mod-tap, then custom lighting patterns (`0x0C`/`0x8C`).
 
