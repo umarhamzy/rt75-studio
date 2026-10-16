@@ -103,6 +103,7 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
         case 0x84: r.set([0x84, profile]); break;
         case 0x91: r.set([0x91]); r.set(sleepBytes, 8); break;
         case 0x87: r.set([0x87, ...ledBytes]); break;
+        case 0x89: r.set([0x89, this.demoOs ?? 0, 0]); break; // KB options: Windows, Fn layer 0
         case 0x83: r.set([0x83, 0, rateCode]); break;
         case 0x86: r.set([0x86, 0]); break;
         case 0x8a: r.set(keymaps[last[1]].slice(last[3] * 64, last[3] * 64 + 64)); break;

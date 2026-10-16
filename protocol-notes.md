@@ -508,6 +508,25 @@ changes mode by holding the knob down.
     mode is unknown, since in volume mode it's an Fn key. A hold flips a known mode.
   - Brightness and effect pushes also update the lighting read.
 
+## Win/Mac switch (KB options, 0x89)
+
+- **Read** `[0x89]` (Bit7), as qmk.top's `getKBOption` does on connect (`writeToAppState`). Reply:
+  - byte 1: system, 0 Windows, 1 Mac, 2 iOS, 3 Android
+  - byte 2: Fn layer index
+  - byte 3: anti-mistouch
+  - byte 4: RT stability ×25
+  - byte 5: WASD swap
+
+  RT75 Studio reads it at startup (one extra read) and uses only bytes 1 and 2.
+- **Push:** when the switch moves, the keyboard sends `03 nn 00` or `03 nn 02` (report 5).
+  qmk.top's decoder treats `nn & 2` as Mac ("切MAC" / "切WIN") and then re-reads `0x89`.
+  RT75 Studio uses the pushed side straight away, then re-reads to confirm. `03 nn 08` (Fn layer
+  change) and `03 nn 04/09` (power modes) aren't OS changes.
+- **Use:** the UI shows one Fn layer. By default it follows this switch: Mac and iOS use the Mac
+  layer; Windows and Android use the Windows layer. Keyboard settings can pin Windows or Mac, saved
+  in the browser.
+- Demo-tested only so far; not yet checked on the real keyboard.
+
 ## Keyboard-wide settings (RY5088 base)
 
 - **Polling rate:** set `[0x03, 0, code]`, read `0x83` → `resp[2]`. Codes: 0 = 8000, 1 = 4000,

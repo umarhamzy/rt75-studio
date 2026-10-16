@@ -3,7 +3,7 @@ import { decodeAction, encodeKey, splitKey, FUNCTIONS, RISKY, KEY_CHOICES, CODE_
 import {
   isSupported, requestKeyboard, findGrantedKeyboard, readSettings, readKeymaps, settingsFromDump, setDongleTiming,
   writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, writeSleepTimes,
-  writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot, watchKeyboardEvents,
+  writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot, watchKeyboardEvents, readKbOption,
   LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS,
 } from './device.js';
 import { EFFECTS, effectById, isOffered, normalizeLighting, lightingDiff, lightingFields, hex, MAX_LEVEL } from './lighting.js';
@@ -57,7 +57,7 @@ const state = {
   dev: null,                 // HIDDevice from the last live read, used for writes
   view: 'actuation',
   layer: 'base',             // key map view: 'base' | 'fnWin' | 'fnMac'
-  os: loadOs(),              // which Fn layer the UI shows: 'win' | 'mac' (a preference in this browser)
+  osPref: loadOsPref(),      // which Fn layer the UI shows: 'auto' (the keyboard's switch) | 'win' | 'mac'
   selected: new Set(),       // matrix slots
   knob: false,               // knob selected instead of keys
   pending: new Map(),        // slot -> { field: raw value } differing from settings
@@ -355,6 +355,16 @@ function onKeyboardEvent(ev) {
     if (l && l[field] !== ev.value) { l[field] = ev.value; lightingChanged = true; }
   } else if (ev.type === 'toggle' && state.knobMode !== 'unknown') {
     state.knobMode = state.knobMode === 'volume' ? 'lighting' : 'volume';
+  } else if (ev.type === 'os') {
+    // The keyboard's Win/Mac switch moved. Use the reported side now, then re-read the KB options
+    // to confirm, as qmk.top does.
+    const s = state.settings;
+    if (s) {
+      s.kbOption = { ...(s.kbOption ?? { fnIndex: 0 }), system: ev.os };
+      if (!state.busy) refresh();
+      if (state.dev && s.source === 'device') readKbOption(state.dev, s).then(o => { if (o && state.settings === s) { s.kbOption = o; if (!state.busy) refresh(); } }).catch(() => {});
+    }
+    return;
   }
   state.knobSeenAt = Date.now();
   if (state.knobMode !== before) renderBoard();
@@ -933,20 +943,25 @@ const LAYERS = {
   fnMac: { label: 'Fn · Mac', field: 'fnMac', defaults: DEFAULT_FN_MAC_MATRIX, fn: true },
 };
 
-// The UI shows one Fn layer, Windows or Mac (chosen in Keyboard settings), to avoid showing both
-// everywhere. The keyboard keeps both; edits made to either are still reviewed and written.
-function loadOs() {
-  try { const v = localStorage.getItem('rt75-studio-os'); if (v === 'win' || v === 'mac') return v; } catch { /* storage blocked */ }
-  return /mac/i.test(navigator.userAgentData?.platform ?? navigator.platform ?? '') ? 'mac' : 'win';
+// The UI shows one Fn layer, Windows or Mac, to avoid showing both everywhere. By default it
+// follows the keyboard's own Win/Mac switch (KB options, 0x89); Keyboard settings can pin one. The
+// keyboard keeps both layers; edits made to either are still reviewed and written.
+function loadOsPref() {
+  try { const v = localStorage.getItem('rt75-studio-os'); if (v === 'auto' || v === 'win' || v === 'mac') return v; } catch { /* storage blocked */ }
+  return 'auto';
 }
-const fnLayer = () => (state.os === 'mac' ? 'fnMac' : 'fnWin');
+const OS_NAMES = { win: 'Windows', mac: 'Mac', ios: 'iOS', android: 'Android' };
+// iOS uses the Mac Fn layer and Android the Windows one (the keyboard has only those two).
+const keyboardOs = () => { const sys = state.settings?.kbOption?.system; return sys ? (sys === 'mac' || sys === 'ios' ? 'mac' : 'win') : null; };
+const platformOs = () => (/mac/i.test(navigator.userAgentData?.platform ?? navigator.platform ?? '') ? 'mac' : 'win');
+const currentOs = () => (state.osPref === 'auto' ? keyboardOs() ?? platformOs() : state.osPref);
+const fnLayer = () => (currentOs() === 'mac' ? 'fnMac' : 'fnWin');
 const shownLayers = () => ['base', fnLayer()];
 const layerName = id => (id === 'base' ? 'Base' : 'Fn');
-function setOs(os) {
-  if (os !== 'win' && os !== 'mac') return;
-  state.os = os;
-  try { localStorage.setItem('rt75-studio-os', os); } catch { /* storage blocked: kept for this visit */ }
-  if (LAYERS[state.layer].fn) state.layer = fnLayer();
+function setOsPref(pref) {
+  if (!['auto', 'win', 'mac'].includes(pref)) return;
+  state.osPref = pref;
+  try { localStorage.setItem('rt75-studio-os', pref); } catch { /* storage blocked: kept for this visit */ }
   refresh();
 }
 
@@ -1422,7 +1437,7 @@ function renderKeymapPanel() {
 
   el.innerHTML = `
     <div class="insp-head"><h2>${key.label}</h2>${revertChipHtml(key.slot)}</div>
-    <p class="sub">What this key sends. Base is for profile ${(state.settings.profile ?? 0) + 1}; Fn applies while Fn is held and is shared by all profiles (showing the ${state.os === 'mac' ? 'Mac' : 'Windows'} Fn layer; change it in Keyboard settings). Click a layer to edit it.</p>
+    <p class="sub">What this key sends. Base is for profile ${(state.settings.profile ?? 0) + 1}; Fn applies while Fn is held and is shared by all profiles (showing the ${OS_NAMES[currentOs()]} Fn layer${state.osPref === 'auto' && keyboardOs() ? ', from the keyboard’s Win/Mac switch' : ''}). Click a layer to edit it.</p>
     <div class="km-rows">${rows}</div>
     ${editor}
     ${canEdit ? '' : `<p class="note">${state.settings.source === 'device' ? (state.live ? 'Stop the live test to edit.' : '') : 'Viewing a file. Connect the keyboard to edit.'}</p>`}`;
@@ -2278,42 +2293,46 @@ function renderKeyboardSettings() {
   const focusId = el.contains(document.activeElement) ? document.activeElement.id : '';
   const s = state.settings;
   const can = editable();
-  const osCard = `<div class="set-card">
-      <h2>Fn layer shown</h2>
-      <div class="segmented segmented-sm" role="group" aria-label="Fn layer shown">
-        <button type="button" id="osWin" data-os="win" aria-pressed="${state.os === 'win'}">Windows</button>
-        <button type="button" id="osMac" data-os="mac" aria-pressed="${state.os === 'mac'}">Mac</button>
-      </div>
-      <p class="note">Only changes what RT75 Studio shows in Key map and Macros. The keyboard keeps both Fn layers; this is saved in this browser.</p>
+  // One row: what it is (and a short note) on the left, its control or value on the right.
+  const setRow = (label, note, control, extra = '') =>
+    `<div class="set-row${extra}"><div class="set-text"><div class="set-label">${label}</div>${note ? `<div class="set-note">${note}</div>` : ''}</div><div class="set-control">${control}</div></div>`;
+
+  const kbOs = s?.kbOption?.system;
+  const followLabel = `Follow keyboard${kbOs ? ` (${OS_NAMES[keyboardOs()]})` : ''}`;
+  const osPicker = `<div class="segmented segmented-sm" role="group" aria-label="Fn layer shown">
+      ${[['auto', followLabel], ['win', 'Windows'], ['mac', 'Mac']].map(([v, t]) =>
+        `<button type="button" id="os-${v}" data-os="${v}" aria-pressed="${state.osPref === v}">${t}</button>`).join('')}
     </div>`;
+  const studioCard = `<section class="set-card">
+      <h2>RT75 Studio <span class="muted">this browser</span></h2>
+      ${setRow('Fn layer shown', state.osPref === 'auto'
+        ? (kbOs ? `Showing the ${OS_NAMES[currentOs()]} Fn layer, from the keyboard’s Win/Mac switch.` : `The keyboard’s Win/Mac switch isn’t known here, so this follows your computer (${OS_NAMES[currentOs()]}).`)
+        : 'Pinned. Key map and Macros show only this Fn layer; the keyboard keeps both.', osPicker)}
+    </section>`;
+
   if (!s) {
-    el.innerHTML = `<div class="set-grid">${osCard}<div class="set-card"><h2>Keyboard</h2><p class="note">Connect the keyboard (or open a dump) to see its settings.</p></div></div>`;
+    el.innerHTML = `<div class="set-stack">${studioCard}<p class="set-empty">Connect the keyboard (or open a dump) to see its settings.</p></div>`;
   } else {
     const rate = state.pendingKb.reportRateHz ?? s.reportRateHz;
     const ratePending = kbChanges().some(c => c.field === 'reportRateHz');
-    el.innerHTML = `<div class="set-grid">
-      <div class="set-card">
-        <h2><label for="rateSelect">Polling rate</label></h2>
-        <select id="rateSelect" class="${ratePending ? 'is-pending' : ''}" ${can ? '' : 'disabled'}>
-          ${RATE_OPTIONS.map(hz => `<option value="${hz}" ${hz === rate ? 'selected' : ''}>${fmtHz(hz)}${hz === s.reportRateHz ? ' (current)' : ''}</option>`).join('')}
-        </select>
-        <p class="note">How often the keyboard reports to the computer, on every profile.</p>
-      </div>
-      ${s.sleep ? `<div class="set-card set-card-wide">
+    const rateSelect = `<select id="rateSelect" class="${ratePending ? 'is-pending' : ''}" ${can ? '' : 'disabled'} aria-label="Polling rate">
+        ${RATE_OPTIONS.map(hz => `<option value="${hz}" ${hz === rate ? 'selected' : ''}>${fmtHz(hz)}${hz === s.reportRateHz ? ' (current)' : ''}</option>`).join('')}
+      </select>`;
+    el.innerHTML = `<div class="set-stack">
+      <section class="set-card">
+        <h2>Keyboard <span class="muted">every profile</span></h2>
+        ${setRow('Polling rate', 'How often the keyboard reports to the computer.', rateSelect, ratePending ? ' is-pending' : '')}
+        ${setRow('Win/Mac switch', 'Set with the switch on the keyboard.', `<span class="set-value">${kbOs ? OS_NAMES[kbOs] : '—'}</span>`)}
+        ${setRow('Debounce', 'Not adjustable: qmk.top doesn’t offer it here, and magnetic switches don’t bounce.', `<span class="set-value">${s.debounce ?? '?'}</span>`)}
+      </section>
+      ${s.sleep ? `<section class="set-card">
         <h2>Wireless power saving <span class="muted">minutes, 0 = never</span></h2>
-        <div class="kb-sleep">
-          ${sleepInput('time_bt', 'Bluetooth backlight off', can)}
-          ${sleepInput('deepTime_bt', 'Bluetooth deep sleep', can)}
-          ${sleepInput('time_24', '2.4G backlight off', can)}
-        </div>
-      </div>` : ''}
-      ${osCard}
-      <div class="set-card">
-        <h2>Debounce</h2>
-        <p class="set-value" title="qmk.top doesn't offer debounce for this keyboard; magnetic (Hall-effect) switches don't bounce like mechanical contacts.">${s.debounce ?? '?'}</p>
-        <p class="note">Not adjustable here: qmk.top doesn’t offer it for this keyboard, and magnetic switches don’t bounce.</p>
-      </div>
-      ${s.source !== 'device' ? '<p class="note">Viewing a file. Connect the keyboard to change these.</p>' : ''}
+        ${sleepRow(setRow, 'time_bt', 'Bluetooth backlight off', 'Lights go off after this long idle.', can)}
+        ${sleepRow(setRow, 'deepTime_bt', 'Bluetooth deep sleep', 'The keyboard sleeps; press a key to wake it.', can)}
+        ${sleepRow(setRow, 'time_24', '2.4G backlight off', 'Lights go off after this long idle on the dongle.', can)}
+      </section>` : ''}
+      ${studioCard}
+      ${s.source !== 'device' ? '<p class="set-empty">Viewing a file. Connect the keyboard to change these.</p>' : ''}
     </div>`;
     el.querySelectorAll('[data-sleep]').forEach(inp => inp.onchange = () => {
       const field = inp.dataset.sleep, [lo, hi] = uiSleepLimits(field);
@@ -2328,8 +2347,15 @@ function renderKeyboardSettings() {
       refresh();
     };
   }
-  el.querySelectorAll('[data-os]').forEach(b => b.onclick = () => setOs(b.dataset.os));
+  el.querySelectorAll('[data-os]').forEach(b => b.onclick = () => setOsPref(b.dataset.os));
   if (focusId) el.querySelector(`#${CSS.escape(focusId)}`)?.focus({ preventScroll: true });
+}
+
+function sleepRow(setRow, field, label, note, can) {
+  const s = state.settings, sec = state.pendingKb[field] ?? s.sleep[field];
+  const [lo, hi] = uiSleepLimits(field);
+  const pending = state.pendingKb[field] !== undefined && state.pendingKb[field] !== s.sleep[field];
+  return setRow(label, note, `<span class="set-minutes"><input type="number" id="sleep-${field}" data-sleep="${field}" min="${lo / 60}" max="${hi / 60}" step="1" value="${+(sec / 60).toFixed(2)}" aria-label="${label}, minutes" ${can ? '' : 'disabled'}><span class="muted">${fmtSecs(sec)}</span></span>`, pending ? ' is-pending' : '');
 }
 
 // The inputs work in whole minutes, so deep sleep starts at 1 minute (the keyboard allows 10 s;
@@ -2337,15 +2363,6 @@ function renderKeyboardSettings() {
 function uiSleepLimits(field) {
   const [lo, hi] = SLEEP_LIMITS[field];
   return [lo > 0 ? Math.max(lo, 60) : 0, hi];
-}
-
-function sleepInput(field, label, can) {
-  const s = state.settings, sec = state.pendingKb[field] ?? s.sleep[field];
-  const [lo, hi] = uiSleepLimits(field);
-  const pending = state.pendingKb[field] !== undefined && state.pendingKb[field] !== s.sleep[field];
-  return `<label class="sleep-field${pending ? ' is-pending' : ''}"><span>${label}</span>
-    <input type="number" data-sleep="${field}" min="${lo / 60}" max="${hi / 60}" step="1" value="${+(sec / 60).toFixed(2)}" ${can ? '' : 'disabled'}>
-    <span class="muted">${fmtSecs(sec)}</span></label>`;
 }
 
 // Profiles hold their own key settings, so switching re-reads everything.
@@ -2414,6 +2431,8 @@ function renderNav() {
   document.querySelector('.workspace').classList.toggle('is-single', settings);
   $('viewTitle').textContent = VIEW_TITLES[state.view] ?? '';
   $('navMacroCount').textContent = state.library.length || '';
+  // The shown Fn layer can change (the keyboard's Win/Mac switch, or the setting): keep the selection on it.
+  if (LAYERS[state.layer].fn && state.layer !== fnLayer()) state.layer = fnLayer();
 }
 
 function setView(view) {

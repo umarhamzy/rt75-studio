@@ -73,8 +73,11 @@ Lighting view.
   everything, because each profile stores its own key settings.
 
 The **Keyboard settings** section replaces the board with these cards:
-- **Fn layer shown** (Windows or Mac) picks which Fn layer Key map and Macros show. It's saved in
-  this browser and doesn't change the keyboard, which keeps both.
+- **Fn layer shown** picks which Fn layer Key map and Macros show. By default it follows the
+  keyboard's own Win/Mac switch (read at connect, and updated when you move the switch); you can
+  pin Windows or Mac instead. That choice is saved in this browser and doesn't change the
+  keyboard, which keeps both layers.
+- **Win/Mac switch** shows which side the keyboard's switch is on.
 - **Polling rate** (125Hz–8kHz) is queued like any other edit and written through the review.
 - **Wireless power saving** sets, in minutes: Bluetooth backlight off (0 = never), Bluetooth deep
   sleep (at least 10 seconds) and 2.4G backlight off (0 = never). Each goes up to 18 hours,

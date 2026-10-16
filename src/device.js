@@ -29,6 +29,7 @@ const CMD = {
   GET_MAGNETISM: 0xe5,
   GET_FEATURE_LIST: 0xe6,
   GET_LEDPARAM: 0x87,
+  GET_KBOPTION: 0x89,
 };
 const READ_COMMANDS = new Set(Object.values(CMD));
 const SET_MAGNETISM = 0x65;
@@ -245,7 +246,20 @@ const MAGNET_LABELS = {
   rtPress: 'Rapid Trigger', rtRelease: 'Rapid Trigger', topDeadZone: 'Dead zones', snapPartner: 'Snap Tap',
   switchType: 'Switch types',
 };
-const STARTUP_READS = 8 + MAGNET_PARAMS.reduce((a, p) => a + p[2], 0); // single reads + magnet pages
+const STARTUP_READS = 9 + MAGNET_PARAMS.reduce((a, p) => a + p[2], 0); // single reads + magnet pages
+
+// KB options (0x89), as qmk.top's getKBOption reads them on connect: byte 1 is the keyboard's
+// Win/Mac switch (0 Windows, 1 Mac, 2 iOS, 3 Android), byte 2 the Fn layer index.
+const KB_SYSTEMS = { 0: 'win', 1: 'mac', 2: 'ios', 3: 'android' };
+function decodeKbOption(r) {
+  if (!r || r[0] !== CMD.GET_KBOPTION) return undefined;
+  return { system: KB_SYSTEMS[r[1]] ?? 'win', fnIndex: r[2] };
+}
+
+// Re-reads the KB options, as qmk.top does when the keyboard reports a Win/Mac switch.
+export function readKbOption(dev, settings) {
+  return withDevice(dev, settings, async t => decodeKbOption(await t.query([CMD.GET_KBOPTION])));
+}
 const KEYMAP_READS = 8 + 16; // base layer + two Fn layers
 
 // Reads everything the keyboard view needs. onProgress(fraction, label) is optional; the label
@@ -289,6 +303,8 @@ export function readSettings(dev, onProgress = () => {}, { keymaps = true } = {}
       s.sleep = decodeSleep(await t.query([CMD.GET_SLEEPTIME]));
       reading('Lighting');
       s.lighting = decodeLighting(await t.query([CMD.GET_LEDPARAM]));
+      reading('Keyboard options');
+      s.kbOption = decodeKbOption(await t.query([CMD.GET_KBOPTION]));
 
       if (keymaps) Object.assign(s, await readLayers(t, s.profile, reading));
 
@@ -569,7 +585,9 @@ export async function watchKeyboardEvents(featureDev, onEvent, inputDev = null) 
       if (action) onEvent({ type: 'volume', action });
       return;
     }
-    if (d[0] === 0x06) { lastPush = performance.now(); onEvent({ type: 'brightness', value: d[1] }); }
+    // 03 nn 00/02: the keyboard's Win/Mac switch moved (qmk.top's push decoder: nn & 2 = Mac).
+    if (d[0] === 0x03 && (d[2] === 0 || d[2] === 2)) { lastPush = performance.now(); onEvent({ type: 'os', os: d[1] & 2 ? 'mac' : 'win' }); }
+    else if (d[0] === 0x06) { lastPush = performance.now(); onEvent({ type: 'brightness', value: d[1] }); }
     else if (d[0] === 0x04) { lastPush = performance.now(); onEvent({ type: 'effect', value: d[1] }); }
     else if (d[0] >= 0x01 && d[0] <= 0x0e) lastPush = performance.now(); // other pushes (profile, rate, …) also end in 0F
     else if (d[0] === 0x0f && d[1] === 1 && performance.now() - lastPush > PUSH_GAP_MS && !ioActive(IO_GRACE_MS)) onEvent({ type: 'toggle' });
