@@ -128,7 +128,11 @@ tabs spin until it's in). Startup over 2.4G: 24.7 s → 3.0 s, verified on the r
   (device.js) only listens on the report interface, already granted at connect; it never sends.
 - Design mockups: the "RT75 Studio UI styles" canvas artifact (Rounds 1–7).
 
-**Next, in the user's order:** mod-tap, then custom lighting patterns (`0x0C`/`0x8C`).
+**Mod-tap (feature/mod-tap, demo-tested, not yet verified on the keyboard):** Configuration ›
+Mod-tap. Mode 3 + hold key on the base layer + tap key on key-matrix sub-layer 1 + hold time
+(param 5), mirroring qmk.top (protocol-notes.md, "Mod-tap"). The tap layer loads with the key map.
+
+**Next, in the user's order:** custom lighting patterns (`0x0C`/`0x8C`).
 
 **Branches:** `feature/macros` holds the abandoned read-back approach and the full investigation
 log (probe pages). Don't merge it.

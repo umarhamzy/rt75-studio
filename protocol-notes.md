@@ -653,7 +653,7 @@ device declares `noMagneticSwitch`; the RT75 doesn't, so RT75 Studio never write
   sub 1 to zeros and writes the base layer back to the **tap** action (so the key keeps doing what a
   tap did), then sets the mode to Normal. It never writes subs 2–3: only DKS and toggle use them.
 - **Reads stay in range:** `query()` allows sub 0–1 only on `0x8A`.
-- Demo-tested only so far.
+- Demo-tested only so far (write, read-back and Undo; Undo writes the keys, then the mode).
 
 ## Lighting (main backlight)
 

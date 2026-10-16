@@ -52,7 +52,16 @@ board, each key has two thin bars on its right edge, filled from the top down: a
 For Snap Tap, select a key and choose **Pair with another key…**, then click its partner.
 You can also select exactly two keys and choose **Pair these two keys**. Pairing a key that
 already has a partner releases the old partner, and **Remove pair** releases both keys. Rapid
-Trigger is kept either way. Keys using DKS, mod-tap or toggle modes aren't changed by this app. Changes stay local, shown with an amber dashed
+Trigger is kept either way. Keys using DKS or toggle modes aren't changed by this app.
+
+For **mod-tap** (the **Mod-tap** tab), select keys and turn Mod-tap on: a quick tap sends the tap
+key, and holding past the hold time (10–1000 ms, 200 ms by default) sends the hold key. Tap starts
+as what the key sends now, and Hold as Left Ctrl. Pick either from the list, or use **Press keys**
+to record a combo such as Ctrl + C. Turning it off makes the key send its tap key again. A Snap Tap
+key has to leave its pair first. In Key map, a mod-tap key's base layer shows tap/hold and is edited
+here instead.
+
+Changes stay local, shown with an amber dashed
 outline, until you click **Review changes** in the header. The review shows every before → after
 value, can download a backup first, and has **Discard all**. After writing, the app reads the values
 back from the keyboard to confirm them and offers **Undo**. A backup file can be reopened with
@@ -195,7 +204,10 @@ be exported to a file and imported again. Demo-mode presets are stored separatel
   - functions from the list
   - the slot's exact factory value
 
-  It refuses the Fn key, the knob, macros, mouse, mod-tap and unknown actions.
+  It refuses the Fn key, the knob, macros, mouse, key-map mod-tap (action 24) and unknown actions.
+- **Mod-tap** is a key mode (3) plus two key-map entries: the hold key on the base layer and the tap
+  key on sub-layer 1 (`[0A, profile, key, 0, 0, save, 1, …]`), keys only, in qmk.top's mod-tap layout.
+  The hold time is magnet param 5 (one byte, ms ÷ 10, 10–1000 ms).
 - **Lighting writes** are only `[07, effect, speed, brightness, option/colour mode, r, g, b]`
   with qmk.top's byte-8 checksum. The validator allows only the offered effects, values 0–4,
   each effect's own options, and colour mode single colour or rainbow.

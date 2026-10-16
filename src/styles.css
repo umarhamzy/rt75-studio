@@ -22,6 +22,8 @@
   --rt: #4cc9f0;
   --rt-ink: #04202b;
   --snap: #9b7bff;
+  --mt: #51cf66;
+  --mt-ink: #06210d;
   --pair-0: #9b7bff;
   --pair-1: #4cc9f0;
   --pair-2: #f06595;
@@ -182,6 +184,7 @@ button, input, select { font: inherit; color: inherit; }
 .swatch { width: 12px; height: 12px; border-radius: 3px; }
 .swatch-rt { background: var(--rt); }
 .swatch-snap { background: var(--snap); }
+.swatch-mt { background: var(--mt); }
 
 /* ---------- Keyboard ---------- */
 .board-wrap {
@@ -227,6 +230,7 @@ button, input, select { font: inherit; color: inherit; }
 .mark { width: 6px; height: 6px; border-radius: 50%; display: block; }
 .mark-rt { background: var(--rt); }
 .mark-snap { background: var(--snap); }
+.mark-mt { background: var(--mt); }
 .mark-remap { background: var(--muted); }
 
 /* Actuation view: amber by how short the travel is, plus a top-to-bottom bar on the right. */
@@ -247,6 +251,8 @@ button, input, select { font: inherit; color: inherit; }
 .key.hl-rt .key-value { color: var(--rt-ink); }
 .key.hl-snap { --cap-bg: color-mix(in oklab, var(--pair) 72%, var(--cap)); color: #fff; }
 .key.hl-snap .key-value { color: #fff; }
+.key.hl-mt { --cap-bg: color-mix(in oklab, var(--mt) 70%, var(--cap)); color: var(--mt-ink); }
+.key.hl-mt .key-value { color: var(--mt-ink); font-weight: 700; }
 .key.dim { opacity: 0.45; }
 .board.inert-board .key, .board.inert-board .knob { cursor: default; }
 .board.inert-board .key:hover { transform: none; }
@@ -921,3 +927,8 @@ select.dd-native { display: none !important; }
 .mc-record.is-recording .rec-dot { border-radius: 2px; animation: live-pulse 1.2s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .mc-record.is-recording .rec-dot { animation: none; } }
 .mc-toolbar { align-items: center; }
+/* Mod-tap editor (Configuration › Mod-tap section). */
+.mt-edit { display: grid; gap: 8px; margin-top: 10px; }
+.mt-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.mt-side { font-size: 12px; color: var(--muted); }
+.mt-row .dd-trigger { min-width: 0; }

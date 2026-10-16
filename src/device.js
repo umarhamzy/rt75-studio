@@ -369,6 +369,7 @@ export function settingsFromDump(d) {
     sleep: d.sleep,
     lighting: d.lighting,
     keymap: d.keymap?.['0'],
+    tapLayer: d.tapLayer,
     fnWin: d.fnWin,
     fnMac: d.fnMac,
     magnet: d.magnet,
