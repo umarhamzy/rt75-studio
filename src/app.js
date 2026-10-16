@@ -2153,7 +2153,6 @@ function ensureKeymaps() {
   if (keymapsLoading) return keymapsLoading;
   keymapsFailed = false;
   keymapsLoading = (async () => {
-    renderTabs();
     try {
       const km = await readKeymaps(state.dev, s);
       if (state.settings === s) Object.assign(s, km); // ignore if the keyboard was re-read meanwhile
@@ -2167,12 +2166,15 @@ function ensureKeymaps() {
       refresh();
     }
   })();
+  renderTabs(); // after keymapsLoading is set, so the tabs show as loading
   return keymapsLoading;
 }
 
 // Key map and Macros tabs: disabled with a spinner while the key map loads.
 function renderTabs() {
-  const loading = !!keymapsLoading && keymapsPending();
+  // Disabled from the first render until the key map is in (unless the read failed: then opening
+  // a tab retries).
+  const loading = keymapsPending() && !keymapsFailed;
   document.querySelectorAll('[data-view]').forEach(b => {
     if (!KEYMAP_VIEWS.has(b.dataset.view)) return;
     b.disabled = loading;
@@ -2195,7 +2197,8 @@ function load(settings, dev = null) {
   state.capture = null;
   state.lastApplied = null;
   refresh();
-  setTimeout(ensureKeymaps, 0); // the key map loads in the background, after the caller finishes
+  keymapsFailed = false;
+  ensureKeymaps(); // the key map loads in the background; device operations queue behind each other
 }
 
 function showError(msg) {
