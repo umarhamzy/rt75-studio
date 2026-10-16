@@ -233,13 +233,15 @@ button, input, select { font: inherit; color: inherit; }
 .key.heat {
   --cap-bg: color-mix(in oklab, var(--accent) calc(var(--heat-t, 0) * 24%), var(--cap));
   --key-border: color-mix(in oklab, var(--accent) calc(var(--heat-t, 0) * 80%), var(--cap-edge));
-  padding-right: 8px;
+  padding-right: 10px;
 }
 .key.heat.is-selected { --key-border: var(--accent); }
 .key.heat .key-value { color: color-mix(in oklab, var(--accent) calc(var(--heat-t, 0) * 100%), var(--muted)); }
-.key-bar { position: absolute; right: 3px; top: 16%; bottom: 16%; width: 2px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
+.key-bar { position: absolute; right: 6px; top: 16%; bottom: 16%; width: 2px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
 .key-bar span { display: block; width: 100%; background: color-mix(in oklab, var(--accent) calc(var(--heat-t, 0) * 100%), #5a5f69); }
-.key.heat .key-marks { right: 8px; }
+.key-bar.key-bar-rel { right: 3px; }
+.key-bar.key-bar-rel span { background: var(--rt); opacity: 0.85; }
+.key.heat .key-marks { right: 10px; }
 
 .key.hl-rt { --cap-bg: color-mix(in oklab, var(--rt) 70%, var(--cap)); color: var(--rt-ink); }
 .key.hl-rt .key-value { color: var(--rt-ink); }
@@ -828,3 +830,36 @@ button.km-row:hover { background: var(--surface-2); }
 .inspector .row dd { display: flex; align-items: baseline; gap: 6px; }
 /* Snap Tap partner on the keycap: drawn two-way arrow + partner name. */
 .snap-ico { width: 1.2em; height: 1.2em; margin-right: 3px; vertical-align: -0.25em; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.legend-bars { display: inline-flex; gap: 1px; height: 18px; margin-left: 6px; }
+.legend-bars i { width: 3px; border-radius: 2px; background: linear-gradient(180deg, var(--accent) 45%, var(--surface-3) 45%); }
+.legend-bars i + i { background: linear-gradient(180deg, var(--rt) 30%, var(--surface-3) 30%); }
+/* Keyboard settings: grouped sections of tiles (Round 9: S3 + tiles) */
+.set-stack { max-width: 980px; gap: 26px; }
+.set-group h2 { margin: 0 0 10px; padding: 0 4px; font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.set-group h2 .muted { text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.set-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.set-tile { display: flex; flex-direction: column; gap: 10px; padding: 16px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line-soft); min-width: 0; }
+.set-tile.is-wide { grid-column: span 2; }
+@media (max-width: 560px) { .set-tile.is-wide { grid-column: auto; } }
+.set-tile.is-pending { border-color: color-mix(in oklab, var(--pending) 55%, var(--line-soft)); }
+.set-tile .set-label { font-weight: 600; }
+.set-tile.is-pending .set-label::after { content: ""; display: inline-block; width: 7px; height: 7px; margin-left: 8px; border-radius: 50%; background: var(--pending); vertical-align: 1px; }
+.set-tile .set-value { font: 700 24px/1.1 var(--mono); }
+.set-tile .set-value.is-muted { color: var(--muted); }
+.set-tile .set-note { font-size: 12px; color: var(--muted); }
+.set-foot { margin: 8px 4px 0; font-size: 12px; color: var(--muted); }
+.set-chips { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; padding: 3px; background: var(--surface-2); border-radius: 9px; }
+.set-chips button { min-height: 32px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font: 500 12px var(--mono); cursor: pointer; }
+.set-chips button:hover:not(:disabled):not([aria-pressed="true"]) { background: var(--surface-3); color: var(--text); }
+.set-chips button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.set-chips button:disabled { cursor: default; }
+.set-chips button:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+.set-stepper { display: flex; align-items: center; gap: 8px; }
+.set-stepper .btn { width: 36px; padding: 0; font: 600 16px var(--mono); flex: none; }
+.set-stepper .set-minutes { flex: 1; justify-content: center; gap: 6px; }
+.set-stepper .set-minutes input { width: 64px; border-color: transparent; background: transparent; font: 700 24px var(--mono); text-align: center; padding: 2px; }
+.set-stepper .set-minutes input:hover:not(:disabled), .set-stepper .set-minutes input:focus { border-color: var(--line); background: var(--surface-2); }
+.set-stepper .set-minutes input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.set-stepper .set-minutes .muted { min-width: 0; }
+.set-tile.is-pending .set-minutes input { outline: none; }
+.set-tile .segmented-sm { align-self: flex-start; }

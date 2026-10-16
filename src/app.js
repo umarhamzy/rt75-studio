@@ -214,12 +214,17 @@ function renderBoard() {
         const t = heatOf(d.actuation); // fixed scale, so editing one key never re-shades the others
         el.style.setProperty('--heat-t', t.toFixed(3));
         el.classList.add('heat');
-        // Bar on the right edge, filled from the top down to the actuation point, like a key press.
-        const bar = document.createElement('span');
-        bar.className = 'key-bar';
-        bar.setAttribute('aria-hidden', 'true');
-        bar.innerHTML = `<span style="height:${Math.min(100, (d.actuation / MAX_TRAVEL_MM) * 100).toFixed(1)}%"></span>`;
-        el.appendChild(bar);
+        // Two bars on the right edge, filled from the top down like a key press: amber to the
+        // actuation (press) point, cyan to the release point. They're equal when the two match.
+        const fill = v => `${Math.min(100, (v / MAX_TRAVEL_MM) * 100).toFixed(1)}%`;
+        for (const [cls, v] of [['key-bar', d.actuation], ['key-bar key-bar-rel', d.release]]) {
+          const bar = document.createElement('span');
+          bar.className = cls;
+          bar.setAttribute('aria-hidden', 'true');
+          bar.innerHTML = `<span style="height:${fill(v)}"></span>`;
+          el.appendChild(bar);
+        }
+        if (Math.abs(d.actuation - d.release) >= 0.0025) el.title = `${key.label}: press ${mm3(d.actuation)} mm, release ${mm3(d.release)} mm`;
       } else if (state.view === 'rt') {
         if (d.rt) {
           // One value when press and release sensitivity match (the usual case); otherwise
@@ -458,7 +463,7 @@ function renderLegend(lo, hi) {
   const el = $('legend');
   if (!state.settings) { el.innerHTML = ''; return; }
   if (state.view === 'actuation') {
-    el.innerHTML = `<span>${mm(LIMITS.travel.min)} mm</span><span class="ramp" aria-hidden="true"></span><span>${MAX_TRAVEL_MM} mm</span><span class="muted">stronger color = shorter travel</span>`;
+    el.innerHTML = `<span>${mm(LIMITS.travel.min)} mm</span><span class="ramp" aria-hidden="true"></span><span>${MAX_TRAVEL_MM} mm</span><span class="legend-bars" aria-hidden="true"><i></i><i></i></span><span class="muted">bars: press · release · stronger color = shorter travel</span>`;
   } else if (state.view === 'rt') {
     el.innerHTML = '<span class="swatch swatch-rt"></span><span class="legend-fit">Rapid Trigger on · sensitivity in mm (↓ press, ↑ release when they differ)</span>';
   } else if (state.view === 'live') {
@@ -2298,69 +2303,79 @@ function renderKeyboardSettings() {
   const focusId = el.contains(document.activeElement) ? document.activeElement.id : '';
   const s = state.settings;
   const can = editable();
-  // One row: what it is (and a short note) on the left, its control or value on the right.
-  const setRow = (label, note, control, extra = '') =>
-    `<div class="set-row${extra}"><div class="set-text"><div class="set-label">${label}</div>${note ? `<div class="set-note">${note}</div>` : ''}</div><div class="set-control">${control}</div></div>`;
+  // Grouped sections (a heading, tiles, and a note under them), as in the Round 9 mockups.
+  const group = (title, sub, tiles, note) =>
+    `<section class="set-group"><h2>${title}${sub ? ` <span class="muted">${sub}</span>` : ''}</h2>
+      <div class="set-tiles">${tiles}</div>${note ? `<p class="set-foot">${note}</p>` : ''}</section>`;
+  const tile = (label, body, { wide = false, pending = false } = {}) =>
+    `<div class="set-tile${wide ? ' is-wide' : ''}${pending ? ' is-pending' : ''}"><div class="set-label">${label}</div>${body}</div>`;
 
   const kbOs = s?.kbOption?.system;
-  const followLabel = `Follow keyboard${kbOs ? ` (${OS_NAMES[keyboardOs()]})` : ''}`;
   const osPicker = `<div class="segmented segmented-sm" role="group" aria-label="Fn layer shown">
-      ${[['auto', followLabel], ['win', 'Windows'], ['mac', 'Mac']].map(([v, t]) =>
+      ${[['auto', `Follow keyboard${kbOs ? ` (${OS_NAMES[keyboardOs()]})` : ''}`], ['win', 'Windows'], ['mac', 'Mac']].map(([v, t]) =>
         `<button type="button" id="os-${v}" data-os="${v}" aria-pressed="${state.osPref === v}">${t}</button>`).join('')}
     </div>`;
-  const studioCard = `<section class="set-card">
-      <h2>RT75 Studio <span class="muted">this browser</span></h2>
-      ${setRow('Fn layer shown', state.osPref === 'auto'
-        ? (kbOs ? `Showing the ${OS_NAMES[currentOs()]} Fn layer, from the keyboard’s Win/Mac switch.` : `The keyboard’s Win/Mac switch isn’t known here, so this follows your computer (${OS_NAMES[currentOs()]}).`)
-        : 'Pinned. Key map and Macros show only this Fn layer; the keyboard keeps both.', osPicker)}
-    </section>`;
+  const studio = group('RT75 Studio', 'this browser',
+    tile('Fn layer shown', osPicker, { wide: true }),
+    state.osPref === 'auto'
+      ? (kbOs ? `Showing the ${OS_NAMES[currentOs()]} Fn layer in Key map and Macros, from the keyboard’s Win/Mac switch. The keyboard keeps both.` : `The keyboard’s Win/Mac switch isn’t known here, so this follows your computer (${OS_NAMES[currentOs()]}).`)
+      : `Pinned to ${OS_NAMES[state.osPref]}: Key map and Macros show only that Fn layer. The keyboard keeps both.`);
 
   if (!s) {
-    el.innerHTML = `<div class="set-stack">${studioCard}<p class="set-empty">Connect the keyboard (or open a dump) to see its settings.</p></div>`;
+    el.innerHTML = `<div class="set-stack">${studio}<p class="set-foot">Connect the keyboard (or open a dump) to see its settings.</p></div>`;
   } else {
     const rate = state.pendingKb.reportRateHz ?? s.reportRateHz;
     const ratePending = kbChanges().some(c => c.field === 'reportRateHz');
-    const rateSelect = `<select id="rateSelect" class="${ratePending ? 'is-pending' : ''}" ${can ? '' : 'disabled'} aria-label="Polling rate">
-        ${RATE_OPTIONS.map(hz => `<option value="${hz}" ${hz === rate ? 'selected' : ''}>${fmtHz(hz)}${hz === s.reportRateHz ? ' (current)' : ''}</option>`).join('')}
-      </select>`;
-    el.innerHTML = `<div class="set-stack">
-      <section class="set-card">
-        <h2>Keyboard <span class="muted">every profile</span></h2>
-        ${setRow('Polling rate', 'How often the keyboard reports to the computer.', rateSelect, ratePending ? ' is-pending' : '')}
-        ${setRow('Win/Mac switch', 'Set with the switch on the keyboard.', `<span class="set-value">${kbOs ? OS_NAMES[kbOs] : '—'}</span>`)}
-        ${setRow('Debounce', 'Not adjustable: qmk.top doesn’t offer it here, and magnetic switches don’t bounce.', `<span class="set-value">${s.debounce ?? '?'}</span>`)}
-      </section>
-      ${s.sleep ? `<section class="set-card">
-        <h2>Wireless power saving <span class="muted">minutes, 0 = never</span></h2>
-        ${sleepRow(setRow, 'time_bt', 'Bluetooth backlight off', 'Lights go off after this long idle.', can)}
-        ${sleepRow(setRow, 'deepTime_bt', 'Bluetooth deep sleep', 'The keyboard sleeps; press a key to wake it.', can)}
-        ${sleepRow(setRow, 'time_24', '2.4G backlight off', 'Lights go off after this long idle on the dongle.', can)}
-      </section>` : ''}
-      ${studioCard}
-      ${s.source !== 'device' ? '<p class="set-empty">Viewing a file. Connect the keyboard to change these.</p>' : ''}
-    </div>`;
-    el.querySelectorAll('[data-sleep]').forEach(inp => inp.onchange = () => {
-      const field = inp.dataset.sleep, [lo, hi] = uiSleepLimits(field);
-      if (inp.value === '') return;
-      const sec = Math.min(hi, Math.max(lo, Math.round(Number(inp.value) * 60)));
+    const rateChips = `<div class="set-value">${fmtHz(rate)}</div>
+      <div class="set-chips" role="group" aria-label="Polling rate">
+        ${RATE_OPTIONS.map(hz => `<button type="button" id="rate-${hz}" data-rate="${hz}" aria-pressed="${hz === rate}" ${can ? '' : 'disabled'} title="${fmtHz(hz)}${hz === s.reportRateHz ? ' (current)' : ''}">${hz >= 1000 ? `${hz / 1000}k` : hz}</button>`).join('')}
+      </div>
+      <div class="set-note">${ratePending ? `Now ${fmtHz(s.reportRateHz)} · written when you review` : 'How often the keyboard reports to the computer.'}</div>`;
+    const kb = group('Keyboard', 'every profile',
+      tile('Polling rate', rateChips, { wide: true, pending: ratePending }) +
+      tile('Win/Mac switch', `<div class="set-value">${kbOs ? OS_NAMES[kbOs] : '—'}</div><div class="set-note">Read from the switch on the keyboard.</div>`) +
+      tile('Debounce', `<div class="set-value is-muted">${s.debounce ?? '?'}</div><div class="set-note">Fixed.</div>`),
+      'Debounce can’t be changed here: qmk.top doesn’t offer it for this keyboard, and magnetic switches don’t bounce.');
+    const power = s.sleep ? group('Wireless power saving', 'minutes, 0 = never',
+      sleepTile(tile, 'time_bt', 'Bluetooth backlight off', can) +
+      sleepTile(tile, 'deepTime_bt', 'Bluetooth deep sleep', can) +
+      sleepTile(tile, 'time_24', '2.4G backlight off', can),
+      'Backlight off: the lights go off after this long idle. Deep sleep: the keyboard sleeps until you press a key.') : '';
+    el.innerHTML = `<div class="set-stack">${kb}${power}${studio}
+      ${s.source !== 'device' ? '<p class="set-foot">Viewing a file. Connect the keyboard to change these.</p>' : ''}</div>`;
+
+    const setSleep = (field, minutes) => {
+      const [lo, hi] = uiSleepLimits(field);
+      const sec = Math.min(hi, Math.max(lo, Math.round(minutes * 60)));
       if (sec === s.sleep[field]) delete state.pendingKb[field]; else state.pendingKb[field] = sec;
       refresh();
+    };
+    el.querySelectorAll('[data-sleep]').forEach(inp => inp.onchange = () => { if (inp.value !== '') setSleep(inp.dataset.sleep, Number(inp.value)); });
+    el.querySelectorAll('[data-step]').forEach(b => b.onclick = () => {
+      const field = b.dataset.step, cur = (state.pendingKb[field] ?? s.sleep[field]) / 60;
+      setSleep(field, Math.max(0, Math.round(cur) + Number(b.dataset.dir)));
     });
-    $('rateSelect').onchange = e => {
-      const hz = Number(e.target.value);
+    el.querySelectorAll('[data-rate]').forEach(b => b.onclick = () => {
+      const hz = Number(b.dataset.rate);
       if (hz === s.reportRateHz) delete state.pendingKb.reportRateHz; else state.pendingKb.reportRateHz = hz;
       refresh();
-    };
+    });
   }
   el.querySelectorAll('[data-os]').forEach(b => b.onclick = () => setOsPref(b.dataset.os));
   if (focusId) el.querySelector(`#${CSS.escape(focusId)}`)?.focus({ preventScroll: true });
 }
 
-function sleepRow(setRow, field, label, note, can) {
+function sleepTile(tile, field, label, can) {
   const s = state.settings, sec = state.pendingKb[field] ?? s.sleep[field];
   const [lo, hi] = uiSleepLimits(field);
   const pending = state.pendingKb[field] !== undefined && state.pendingKb[field] !== s.sleep[field];
-  return setRow(label, note, `<span class="set-minutes"><input type="number" id="sleep-${field}" data-sleep="${field}" min="${lo / 60}" max="${hi / 60}" step="1" value="${+(sec / 60).toFixed(2)}" aria-label="${label}, minutes" ${can ? '' : 'disabled'}><span class="muted">${fmtSecs(sec)}</span></span>`, pending ? ' is-pending' : '');
+  const dis = can ? '' : 'disabled';
+  return tile(label, `<div class="set-stepper">
+      <button type="button" class="btn" id="step-${field}-dn" data-step="${field}" data-dir="-1" aria-label="${label}: one minute less" ${dis}>−</button>
+      <span class="set-minutes"><input type="number" id="sleep-${field}" data-sleep="${field}" min="${lo / 60}" max="${hi / 60}" step="1" value="${+(sec / 60).toFixed(2)}" aria-label="${label}, minutes" ${dis}><span class="muted">min</span></span>
+      <button type="button" class="btn" id="step-${field}-up" data-step="${field}" data-dir="1" aria-label="${label}: one minute more" ${dis}>+</button>
+    </div>
+    <div class="set-note">${pending ? `Now ${fmtSecs(s.sleep[field])} · written when you review` : fmtSecs(sec)}</div>`, { pending });
 }
 
 // The inputs work in whole minutes, so deep sleep starts at 1 minute (the keyboard allows 10 s;

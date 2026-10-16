@@ -46,7 +46,8 @@ Actuation and release use vertical sliders: 0 mm (key up) at the top, the deepes
 bottom, so moving the handle down is like pressing the key further. Drag the handle, use the arrow
 keys (Shift for 0.1 mm), or type a value in the bubble next to it. Untick **Release at the same
 point** to get a second slider for the release point. Dead zones are hatched at the ends. On the
-board, each key's bar on its right edge fills from the top down to its actuation point.
+board, each key has two thin bars on its right edge, filled from the top down: amber to the press
+(actuation) point and cyan to the release point. They're equal when the key releases where it fires.
 
 For Snap Tap, select a key and choose **Pair with another key…**, then click its partner.
 You can also select exactly two keys and choose **Pair these two keys**. Pairing a key that
