@@ -33,7 +33,8 @@ touching device code.
 | `src/library.js` | Macro library in this browser: storage, export/import, out-of-date check |
 | `src/lighting.js` | Lighting effects table (from qmk.top's RT75 entry), packet encode/decode, diffs |
 | `src/demo.js` | Simulated keyboard (per-profile settings, polling rate, sleep timers, lighting, live reports) |
-| `src/styles.css` | Theme tokens with light and dark modes |
+| `src/dropdown.js` | Styled dropdowns (M1 design) layered over every native `<select>`; the select stays the source of truth |
+| `src/styles.css` | Theme tokens (dark only) and all styles |
 
 ## Rules that must not be broken
 

@@ -9,6 +9,7 @@ import {
 import { EFFECTS, effectById, isOffered, normalizeLighting, lightingDiff, lightingFields, hex, MAX_LEVEL } from './lighting.js';
 import { MACRO_MODES, MOUSE_BUTTONS, MAX_DELAY, MAX_REPEAT, MACRO_BYTES, stepLabel, macroSummary, macroProblem, macroSize, heldAtEnd } from './macros.js';
 import { loadLibrary, saveLibrary, newId, isOutdated, uniqueName, exportLibrary, parseLibraryFile, validSlot } from './library.js';
+import { enhanceSelects } from './dropdown.js';
 
 // ---------- Key naming ----------
 const HID = {
@@ -2604,6 +2605,17 @@ const KEY_GROUPS = {
   modifiers: k => /^(Shift|Control|Alt|Meta)(Left|Right)$/.test(k.code),
   arrows: k => k.code.startsWith('Arrow'),
 };
+// The "Select…" menu shows how many keys each group picks.
+for (const o of $('selectPreset').options) if (KEY_GROUPS[o.value]) o.dataset.meta = `${MAGNETIC.filter(KEY_GROUPS[o.value]).length} keys`;
+// Every <select> in the app gets the styled dropdown (dropdown.js), including ones that panels and
+// dialogs render later.
+let ddQueued = false;
+new MutationObserver(() => {
+  if (ddQueued) return;
+  ddQueued = true;
+  queueMicrotask(() => { ddQueued = false; enhanceSelects(document); });
+}).observe(document.body, { childList: true, subtree: true });
+enhanceSelects(document);
 $('selectPreset').onchange = e => {
   const pick = KEY_GROUPS[e.target.value];
   e.target.value = '';

@@ -875,3 +875,41 @@ button.km-row:hover { background: var(--surface-2); }
 /* The side panel keeps room for its scrollbar, so turning on Rapid Trigger (a taller panel) doesn't
    shift everything sideways; the scrollbar itself is thin and dark. */
 .inspector { scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+/* Styled dropdowns (dropdown.js, M1 design): the native select stays hidden underneath. */
+select.dd-native { display: none !important; }
+.dd-trigger {
+  display: inline-flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 34px; max-width: 100%;
+  padding: 0 10px 0 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2);
+  color: var(--text); font: 500 13px var(--sans); cursor: pointer; text-align: left;
+}
+.dd-trigger.dd-small { min-height: 30px; font: 600 12px var(--sans); background: var(--surface); }
+.dd-trigger:hover:not(:disabled) { border-color: var(--surface-3); background: var(--surface-3); }
+.dd-trigger[aria-expanded="true"] { border-color: var(--accent); background: #1d1a12; }
+.dd-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dd-trigger:disabled { opacity: 0.55; cursor: default; }
+.dd-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.dd-chevron { flex: none; fill: none; stroke: var(--muted); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.dd-pop {
+  position: fixed; z-index: 1000; display: flex; flex-direction: column; gap: 4px; max-width: min(360px, calc(100vw - 16px));
+  padding: 6px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--surface-3);
+  box-shadow: 0 16px 36px rgb(0 0 0 / 0.55); color: var(--text);
+}
+.dd-list { overflow-y: auto; min-height: 0; flex: 1; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+.dd-search { margin: 2px 2px 4px; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: 500 13px var(--sans); }
+.dd-search:focus { outline: 1px solid var(--accent); }
+.dd-group { padding: 8px 10px 4px; font: 500 10px var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.dd-item {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 34px; padding: 0 10px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--text); font: 500 13px var(--sans); text-align: left; cursor: pointer;
+}
+.dd-item.is-active { background: var(--line-soft); }
+.dd-item.is-on { background: #1d1a12; color: var(--accent); }
+.dd-item:focus { outline: none; }
+.dd-item:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+.dd-item:disabled { opacity: 0.45; cursor: default; }
+.dd-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd-meta { flex: none; font: 500 11px var(--mono); color: var(--muted); }
+.dd-empty { padding: 10px; font-size: 12px; color: var(--muted); }
+.km-key-row .dd-trigger { flex: 1; min-width: 0; }
+.km-edit > .dd-trigger { width: 100%; }
+.mc-toolbar .dd-trigger { max-width: 190px; }
