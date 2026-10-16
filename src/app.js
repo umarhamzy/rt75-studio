@@ -235,7 +235,8 @@ function renderBoard() {
           const pair = [...pairs.values()].find(p => p.keys.some(k => k.slot === key.slot));
           el.classList.add('hl-snap');
           el.style.setProperty('--pair', `var(--pair-${pair.index % 4})`);
-          value.textContent = `↔ ${d.partner.label}`;
+          // A drawn two-way arrow: the ↔ character renders poorly in the mono font at this size.
+          value.innerHTML = `<svg class="snap-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h15l-4-4M20 15H5l4 4"/></svg>${escapeHtml(d.partner.label)}`;
         } else el.classList.add('dim');
       } else if (state.view === 'live') {
         el.classList.add('live-key');
@@ -615,7 +616,7 @@ function renderInspectorBody() {
   const single = keys.length === 1 ? datas[0] : null;
   const title = single ? keys[0].label : `${keys.length} keys`;
   const subtitle = single
-    ? `${single.action === null ? '' : single.remapped ? `Remapped to <strong>${single.action}</strong> · ` : `Sends ${single.action} · `}${single.mode}`
+    ? `${single.action === null ? '' : single.remapped ? `Remapped to <strong>${single.action}</strong> · ` : `Sends ${single.action} · `}${single.mode}${single.rt ? ' + RT' : ''}`
     : keys.map(k => k.label).join(', ');
 
   // Revert sits in the title row so showing it never moves the controls below.
@@ -2242,7 +2243,7 @@ function renderLightingPanel() {
   const revert = can && change ? '<button class="revert-chip" id="btnRevertLight" type="button" title="Discard the unsaved lighting change">Unsaved · Revert</button>' : '';
   // Brightness 0 turns the backlight fully off (verified on the keyboard), so it's labelled Off.
   const levels = (attr, value, on) => `<div class="segmented segmented-sm level-picker" role="group">
-      ${Array.from({ length: MAX_LEVEL + 1 }, (_, i) => `<button type="button" data-${attr}="${i}" aria-pressed="${on && value === i}" ${can && on ? '' : 'disabled'}>${attr === 'bright' && i === 0 ? 'Off' : i}</button>`).join('')}
+      ${Array.from({ length: MAX_LEVEL + 1 }, (_, i) => `<button type="button" data-${attr}="${i}" aria-pressed="${on && value === i}" ${can && on ? '' : 'disabled'}>${i}</button>`).join('')}
     </div>`;
   const offered = EFFECTS.filter(isOffered);
   const effects = (isOffered(e) ? offered : [e ?? { id: l.effect, name: `Effect ${l.effect}`, motion: 'none' }, ...offered])

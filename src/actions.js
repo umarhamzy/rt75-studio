@@ -55,8 +55,8 @@ export const FUNCTIONS = [
   ['Connection', 'Bluetooth 1', [14, 0, 0, 0]], ['Connection', 'Bluetooth 2', [14, 0, 1, 0]], ['Connection', 'Bluetooth 3', [14, 0, 2, 0]],
   ['Connection', '2.4G', [14, 0, 5, 0]], ['Connection', 'Wired', [14, 0, 6, 0]], ['Connection', 'Cycle connection', [14, 0, 255, 0]],
   ['Lighting', 'Lighting on/off', [13, 0, 0, 0]], ['Lighting', 'Next effect', [13, 1, 0, 0]], ['Lighting', 'Previous effect', [13, 1, 2, 0]],
-  ['Lighting', 'Brightness up', [13, 2, 1, 0]], ['Lighting', 'Brightness down', [13, 2, 2, 0]], ['Lighting', 'Speed up', [13, 3, 1, 0]],
-  ['Lighting', 'Speed down', [13, 3, 2, 0]], ['Lighting', 'Next colour', [13, 5, 1, 0]], ['Lighting', 'Direction', [13, 5, 0, 0]],
+  ['Lighting', 'Brightness up', [13, 2, 1, 0]], ['Lighting', 'Brightness down', [13, 2, 2, 0]], ['Lighting', 'Speed down', [13, 3, 1, 0]],
+  ['Lighting', 'Speed up', [13, 3, 2, 0]], ['Lighting', 'Next colour', [13, 5, 1, 0]], ['Lighting', 'Direction', [13, 5, 0, 0]],
   ['Lighting', 'Side light effect', [13, 8, 0, 0]],
 ];
 // Keycap-sized names (the full name stays in tooltips and the side panel).

@@ -600,6 +600,10 @@ changes mode by holding the knob down.
     a label only.
   - The knob's extra slots 94–97 (`13,2,1/2,0` and `13,3,1/2,0`) decode as lighting brightness and
     speed up/down, presumably the actions for the knob's lighting modes; not confirmed.
+  - **Speed names are swapped from qmk.top's.** On the RT75 the factory Fn+← is `13,3,1,0` and
+    Fn+→ is `13,3,2,0`. The user reported (2026-10-16) that ← should read speed − and → speed +.
+    That fits the lighting read, which stores speed inverted (`0x87` byte 2 = 4 − speed), so a raw
+    "+1" is slower. RT75 Studio names `13,3,1,0` "Speed down" and `13,3,2,0` "Speed up".
 - **Unidentified actions:** qmk.top shows anything it can't identify (`ConfigUnknown`) as a red,
   non-selectable "System Key" (系统按键). It also applies that label to keys it locks
   (`needDisableKeys`). The RT75's Fn+Tab `10,4,0,0` is one of these; RT75 Studio labels it

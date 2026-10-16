@@ -823,3 +823,8 @@ button.km-row:hover { background: var(--surface-2); }
 .set-row.is-pending select, .set-row.is-pending .set-minutes input { outline: 2px dashed var(--pending); outline-offset: 1px; }
 .set-empty { margin: 0; color: var(--muted); }
 .set-stack .segmented-sm button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+/* Live test: the reset link sits inline with the peak value (no extra row height). */
+.inspector .row .link.small { margin-top: 0; }
+.inspector .row dd { display: flex; align-items: baseline; gap: 6px; }
+/* Snap Tap partner on the keycap: drawn two-way arrow + partner name. */
+.snap-ico { width: 1.2em; height: 1.2em; margin-right: 3px; vertical-align: -0.25em; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
