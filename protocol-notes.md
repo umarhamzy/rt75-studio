@@ -604,8 +604,12 @@ changes mode by holding the knob down.
     table (h5) has `2,0,130,0` (wake `2,0,131,0`, power `2,0,129,0`). qmk.top's RT75 UI doesn't
     offer sleep at all. RT75 Studio used K0's `2,130,0,0`. On Fn+] it works over USB but not over
     2.4G (user, 2026-10-16), even though the dongle exposes a HID system controller in Device
-    Manager. The menu has a test entry, "System sleep (test: 02 00 82 00)", to try h5's encoding
-    on both links. Not yet tested.
+    Manager.
+  - **Tested on the real keyboard (2026-10-16):** h5's `2,0,130,0` on Fn+] didn't sleep the PC
+    even over USB, so K0's `2,130,0,0` is the encoding the RT75 uses, and the test entry was
+    removed. That sleep doesn't work over 2.4G is a firmware or dongle limitation that RT75 Studio
+    can't change. Workaround: a macro of Win+X, U, S (Windows' sleep shortcut), which is plain key
+    presses and works on every link.
   - **Speed names are swapped from qmk.top's.** On the RT75 the factory Fn+← is `13,3,1,0` and
     Fn+→ is `13,3,2,0`. The user reported (2026-10-16) that ← should read speed − and → speed +.
     That fits the lighting read, which stores speed inverted (`0x87` byte 2 = 4 − speed), so a raw

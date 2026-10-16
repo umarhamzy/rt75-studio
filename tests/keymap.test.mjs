@@ -75,18 +75,13 @@ const s6 = await readSettings(dev5);
 check('profile 3 reads Fn layer 0 only', s6.profile === 2 && fnReads.length === 16 && fnReads.every(v => v === 0), fnReads.join());
 check('Fn layer is the same on every profile', s6.fnWin.join() === s5.fnWin.join());
 
-// Test encoding for System sleep (qmk.top's RT75 table): accepted, written as 02 00 82 00, read back.
+
+// System sleep stays qmk.top's K0 encoding (2,130,0,0). The RT75-table encoding (2,0,130,0) didn't
+// work over USB on the real keyboard (2026-10-16), so it isn't offered.
 {
   const { isWritableAction } = await import(new URL('../src/device.js', import.meta.url).href);
-  const { decodeAction } = await import(new URL('../src/actions.js', import.meta.url).href);
-  check('alt sleep encoding is writable on Fn+]', isWritableAction([2, 0, 130, 0], 'fnWin', 74));
-  check('alt sleep encoding has a name', /test: 02 00 82 00/.test(decodeAction([2, 0, 130, 0]).label), decodeAction([2, 0, 130, 0]).label);
-  const d2 = createDemoDevice(dump);
-  const s2 = await readSettings(d2);
-  const pk2 = buildKeymapPackets([{ layer: 'fnWin', slot: 74, action: [2, 0, 130, 0] }], 0);
-  check('alt sleep packet bytes', hex(pk2[0].pkt).endsWith('02 00 82 00'), hex(pk2[0].pkt));
-  const r2 = await writeKeymap(d2, s2, [{ layer: 'fnWin', slot: 74, action: [2, 0, 130, 0] }]);
-  check('alt sleep reads back on Fn+]', at(r2.layers.fnWin, 74) === '2,0,130,0' && !r2.mismatches.length, at(r2.layers.fnWin, 74));
+  check('System sleep 2,130,0,0 is writable', isWritableAction([2, 130, 0, 0], 'fnWin', 74));
+  check('the 2,0,130,0 test encoding is no longer accepted', !isWritableAction([2, 0, 130, 0], 'fnWin', 74));
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nall passed');
