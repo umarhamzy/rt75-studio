@@ -11,12 +11,12 @@ const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${n}${x 
 
 const full = await readSettings(createDemoDevice(dump));
 
-// Startup without the key map: 24 fewer reads, nothing else missing.
+// Startup without the key map: 32 fewer reads (base, mod-tap tap layer, two Fn layers), nothing else missing.
 const dev = createDemoDevice(dump);
 const labels = [];
 const s = await readSettings(dev, (f, label) => labels.push([f, label]), { keymaps: false });
 check('startup skips the key map and Fn layers', s.keymap === undefined && s.fnWin === undefined && s.fnMac === undefined);
-check('startup reads 24 fewer times', s.loadStats.reads === full.loadStats.reads - 24, `${s.loadStats.reads} vs ${full.loadStats.reads}`);
+check('startup reads 32 fewer times', s.loadStats.reads === full.loadStats.reads - 32, `${s.loadStats.reads} vs ${full.loadStats.reads}`);
 check('everything else is read', JSON.stringify(s.magnet) === JSON.stringify(full.magnet) && s.lighting?.effect === full.lighting.effect && s.sleep && s.profile === full.profile);
 check('progress names what is being read now, in order', labels[0][1] === 'Device ID' && labels.some(l => l[1] === 'Debounce and sleep timers') && labels.at(-1)[1] === 'Done');
 check('progress only goes up and ends at 1', labels.every((l, i) => i === 0 || l[0] >= labels[i - 1][0]) && labels.at(-1)[0] === 1);

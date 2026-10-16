@@ -44,12 +44,13 @@ export const WRITABLE = {
   rtRelease: 3,
   topDeadZone: 251,
   snapPartner: 9,
+  mtTime: 5,
 };
 // One byte per key; the rest are uint16 LE.
-const NARROW_PARAMS = new Set([WRITABLE.mode, WRITABLE.topDeadZone, WRITABLE.snapPartner]);
-// Order qmk.top/v4 uses within one key: mode first, then 0, 1, 6, 2, 3, 251
+const NARROW_PARAMS = new Set([WRITABLE.mode, WRITABLE.topDeadZone, WRITABLE.snapPartner, WRITABLE.mtTime]);
+// Order qmk.top/v4 uses within one key: mode first, then 0, 1, 6, 2, 3, 5, 251
 // (setMagnetismInfoSimple); Snap partners (9) are sent last (setMultiMagnetismInfo).
-const WRITE_ORDER = ['mode', 'actuation', 'release', 'bottomDeadZone', 'rtPress', 'rtRelease', 'topDeadZone', 'snapPartner'];
+const WRITE_ORDER = ['mode', 'actuation', 'release', 'bottomDeadZone', 'rtPress', 'rtRelease', 'mtTime', 'topDeadZone', 'snapPartner'];
 
 // Setting ranges in mm, from qmk.top/v4 for this device: actuation/release 0.1 to 3.3,
 // Rapid Trigger sensitivity one step (0.005) to 2.0, top and bottom dead zone 0 to 1.
@@ -57,6 +58,7 @@ export const LIMITS = {
   travel: { min: 0.1, max: 3.3 },
   rt: { max: 2.0 },
   deadZone: { min: 0, max: 1 },
+  mtTime: { min: 10, max: 1000, default: 200 }, // mod-tap hold time in ms, stored ÷ 10 (qmk.top's 按键时间)
 };
 
 // Magnet parameters: [param, name, pages, 16-bit values]
@@ -69,6 +71,7 @@ const MAGNET_PARAMS = [
   [3, 'rtRelease', 4, true],
   [251, 'topDeadZone', 2, false],
   [9, 'snapPartner', 2, false],
+  [5, 'mtTime', 2, false],
   [252, 'switchType', 2, false],
 ];
 
@@ -157,8 +160,10 @@ class Transport {
     if (!READ_COMMANDS.has(cmd[0])) throw new Error(`Blocked non-read command 0x${cmd[0].toString(16)}`);
     // Reads stay inside the ranges qmk.top uses: firmware doesn't bounds-check them (a macro read at
     // index 254/255 hung the keyboard until it was power-cycled, 2026-10-15).
-    if (cmd[0] === CMD.GET_KEYMATRIX && !(cmd[1] < PROFILE_COUNT && cmd[3] < 8)) {
-      throw new Error(`Blocked key-map read outside profiles 1–${PROFILE_COUNT} (profile ${cmd[1]}, page ${cmd[3]})`);
+    // Sub-layer (byte 4): 0 is the base layer, 1 holds mod-tap tap actions. qmk.top reads 0–3; this
+    // app only needs 0–1.
+    if (cmd[0] === CMD.GET_KEYMATRIX && !(cmd[1] < PROFILE_COUNT && cmd[3] < 8 && (cmd[4] ?? 0) <= TAP_SUB)) {
+      throw new Error(`Blocked key-map read outside profiles 1–${PROFILE_COUNT} (profile ${cmd[1]}, page ${cmd[3]}, sub ${cmd[4]})`);
     }
     // Only Fn layer 0 exists on this keyboard (see FN_LAYER); OS 0/1, pages 0–7.
     if (cmd[0] === CMD.GET_FN && !(cmd[1] <= 1 && cmd[2] === 0 && cmd[4] < 8)) {
@@ -260,7 +265,7 @@ function decodeKbOption(r) {
 export function readKbOption(dev, settings) {
   return withDevice(dev, settings, async t => decodeKbOption(await t.query([CMD.GET_KBOPTION])));
 }
-const KEYMAP_READS = 8 + 16; // base layer + two Fn layers
+const KEYMAP_READS = 8 + 8 + 16; // base layer + mod-tap tap layer + two Fn layers
 
 // Reads everything the keyboard view needs. onProgress(fraction, label) is optional; the label
 // names what is being read now. With { keymaps: false } the base layer and Fn layers (24 reads)
@@ -324,14 +329,16 @@ export function readSettings(dev, onProgress = () => {}, { keymaps = true } = {}
   });
 }
 
-// Base layer of the profile, then the shared Fn layers ([0x90, os, Fn layer 0, 0xFF, page]).
+// Base layer of the profile, its mod-tap tap layer (sub 1), then the shared Fn layers
+// ([0x90, os, Fn layer 0, 0xFF, page]).
 async function readLayers(t, profile, reading = () => {}) {
   reading('Key map');
   const keymap = await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, 0], 8);
+  const tapLayer = await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, TAP_SUB], 8);
   reading('Fn layers');
   const fnWin = await readFnLayer(t, 0);
   const fnMac = await readFnLayer(t, 1);
-  return { keymap, fnWin, fnMac };
+  return { keymap, tapLayer, fnWin, fnMac };
 }
 
 // Reads the key map and Fn layers on their own (24 reads), for loading them when they're needed.
@@ -419,6 +426,9 @@ function assertAllowedWrite(p, bounds) {
     case WRITABLE.bottomDeadZone:
     case WRITABLE.topDeadZone:
       range(bounds.dzMin, bounds.dzMax);
+      break;
+    case WRITABLE.mtTime:
+      range(LIMITS.mtTime.min / 10, LIMITS.mtTime.max / 10);
       break;
   }
 }
@@ -721,8 +731,12 @@ async function readFnLayer(t, os) {
 // The base save flag goes only on the batch's final base packet, as with magnet writes.
 const SET_KEYMATRIX = 0x0a;
 const SET_FN = 0x10;
+// Mod-tap: the hold action is the base layer (sub 0) and the tap action is sub-layer 1 of the same
+// profile's key matrix, all zeros from the factory (protocol-notes.md, "Mod-tap").
+const TAP_SUB = 1;
 export const KEYMAP_LAYERS = {
-  base: { factory: DEFAULT_MATRIX },
+  base: { sub: 0, factory: DEFAULT_MATRIX },
+  tap: { sub: TAP_SUB, factory: new Array(DEFAULT_MATRIX.length).fill(0) },
   fnWin: { os: 0, factory: DEFAULT_FN_MATRIX },
   fnMac: { os: 1, factory: DEFAULT_FN_MAC_MATRIX },
 };
@@ -738,12 +752,24 @@ export function isWritableAction(a, layer, slot) {
   const factory = KEYMAP_LAYERS[layer].factory.slice(slot * 4, slot * 4 + 4);
   if (a.join() === factory.join()) return true;
   if (a.join() === '0,0,0,0') return true;
+  if (layer === 'tap') return isModTapKeys(a); // tap actions are keys only, as in qmk.top
   if (FUNCTION_BYTES.has(a.join())) return true;
   if (a[0] === 9) return MACRO_MODE_IDS.has(a[1]) && a[2] < MAX_MACROS && a[3] === 0; // run macro slot
   if (a[0] !== 0) return false;
   const codes = a.slice(1).filter(Boolean);
   if (!codes.length || codes.some(c => !VALID_HID.has(c))) return false;
   return codes.filter(c => !MODIFIERS.includes(c)).length <= 1 && codes.length <= 3;
+}
+
+// One side of a mod-tap key in qmk.top's layout: up to three keys from byte 1, packed left, at most
+// one of them not a modifier ([0, k1, k2, k3]; protocol-notes.md, "Mod-tap").
+export function isModTapKeys(a) {
+  if (a.length !== 4 || a[0] !== 0 || !a[1]) return false;
+  const codes = a.slice(1);
+  const gap = codes.indexOf(0);
+  if (gap !== -1 && codes.slice(gap).some(Boolean)) return false;
+  const used = codes.filter(Boolean);
+  return used.every(c => VALID_HID.has(c)) && new Set(used).size === used.length && used.filter(c => !MODIFIERS.includes(c)).length <= 1;
 }
 
 function assertAllowedKeymapWrite(p, ctx) {
@@ -753,8 +779,8 @@ function assertAllowedKeymapWrite(p, ctx) {
   if (p.slice(12).some(b => b !== 0)) fail('trailing bytes');
   let layer, slot;
   if (p[0] === SET_KEYMATRIX) {
-    if (p[1] !== ctx.profile || p[3] !== 0 || p[4] !== 0 || (p[5] !== 0 && p[5] !== 1) || p[6] !== 0) fail('header');
-    layer = 'base'; slot = p[2];
+    if (p[1] !== ctx.profile || p[3] !== 0 || p[4] !== 0 || (p[5] !== 0 && p[5] !== 1) || (p[6] !== 0 && p[6] !== TAP_SUB)) fail('header');
+    layer = p[6] === TAP_SUB ? 'tap' : 'base'; slot = p[2];
   } else if (p[0] === SET_FN) {
     if ((p[1] !== 0 && p[1] !== 1) || p[2] !== FN_LAYER || p[4] !== 0 || p[5] !== 0 || p[6] !== 0) fail('header');
     layer = p[1] === 0 ? 'fnWin' : 'fnMac'; slot = p[3];
@@ -766,13 +792,23 @@ function assertAllowedKeymapWrite(p, ctx) {
   if (!isWritableAction([...p.slice(8, 12)], layer, slot)) fail('action not allowed');
 }
 
-// edits: [{ layer: 'base'|'fnWin'|'fnMac', slot, action: [4 bytes] }]
+// edits: [{ layer: 'base'|'tap'|'fnWin'|'fnMac', slot, action: [4 bytes] }]
+// Base and tap-layer edits are the profile's key matrix (sub 0 and 1); the save flag goes only on
+// the last of those. A key's tap edit follows its base (hold) edit, as in qmk.top.
 export function buildKeymapPackets(edits, profile) {
   if (!(profile >= 0 && profile < PROFILE_COUNT)) throw new Error('Unknown profile');
-  const lastBase = edits.map(e => e.layer).lastIndexOf('base');
-  return edits.map((e, i) => {
-    const pkt = e.layer === 'base'
-      ? encode([SET_KEYMATRIX, profile, e.slot, 0, 0, i === lastBase ? 1 : 0, 0, 0, ...e.action])
+  const ordered = [];
+  for (const e of edits) {
+    if (e.layer === 'tap') continue;
+    ordered.push(e);
+    if (e.layer === 'base') ordered.push(...edits.filter(x => x.layer === 'tap' && x.slot === e.slot));
+  }
+  ordered.push(...edits.filter(x => x.layer === 'tap' && !ordered.includes(x)));
+  const lastMatrix = ordered.map(e => KEYMAP_LAYERS[e.layer].sub !== undefined).lastIndexOf(true);
+  return ordered.map((e, i) => {
+    const sub = KEYMAP_LAYERS[e.layer].sub;
+    const pkt = sub !== undefined
+      ? encode([SET_KEYMATRIX, profile, e.slot, 0, 0, i === lastMatrix ? 1 : 0, sub, 0, ...e.action])
       : encode([SET_FN, KEYMAP_LAYERS[e.layer].os, FN_LAYER, e.slot, 0, 0, 0, 0, ...e.action]);
     assertAllowedKeymapWrite(pkt, { profile });
     return { ...e, pkt };
@@ -786,8 +822,8 @@ export async function writeKeymap(dev, settings, edits, onProgress = () => {}) {
   if (!packets.length) return { layers: {}, mismatches: [], retried: 0 };
   const check = p => assertAllowedKeymapWrite(p, { profile: settings.profile });
   return withDevice(dev, settings, async t => {
-    const readLayer = layer => layer === 'base'
-      ? t.readPages([CMD.GET_KEYMATRIX, settings.profile, 0xff, 0, 0], 8)
+    const readLayer = layer => KEYMAP_LAYERS[layer].sub !== undefined
+      ? t.readPages([CMD.GET_KEYMATRIX, settings.profile, 0xff, 0, KEYMAP_LAYERS[layer].sub], 8)
       : readFnLayer(t, KEYMAP_LAYERS[layer].os);
     const sendAll = async (pkts, label) => {
       for (const [i, p] of pkts.entries()) { await t.send(p.pkt, null, check); onProgress((i + 1) / pkts.length, label); }

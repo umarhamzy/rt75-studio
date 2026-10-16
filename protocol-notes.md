@@ -564,7 +564,8 @@ changes mode by holding the knob down.
 
 ## Key map and Fn layers
 
-- **Base layer:** `[0x8A, profile, 0xFF, page 0–7, sub]`, 4 bytes per slot (sub = 0).
+- **Base layer:** `[0x8A, profile, 0xFF, page 0–7, sub]`, 4 bytes per slot (sub = 0; sub 1 holds
+  mod-tap tap actions, see "Mod-tap").
 - **Fn layers:** `[0x90, os, fnLayer, 0xFF, page]`, where os is 0 = Windows and 1 = Mac. The page
   is in **byte 4** here, unlike the base read, which has it in byte 3.
   - **Byte 2 is the Fn layer ("Fn profile" in qmk.top), not the profile.** Fn layers are separate
@@ -622,6 +623,37 @@ changes mode by holding the knob down.
 - **Verified on the real keyboard (2026-10-15):** RT75 Studio's Key map (base and Windows Fn layer)
   matched qmk.top's Custom Keys and Fn Layer pages. The user's Fn layer has a qmk.top macro on
   Fn+F (`9,0,0,0` → Macro 1).
+
+## Mod-tap (feature/mod-tap)
+
+qmk.top's "Hold / tap (MT)" advanced key (按住单击). On a magnetic keyboard it's a **key mode**, not
+a key-map action. The key-map action `24, tap, hold, time/10` (`ConfigMT`) is only used when the
+device declares `noMagneticSwitch`; the RT75 doesn't, so RT75 Studio never writes action 24.
+
+- **Sub-layers.** Each profile's key matrix has 4 "son profiles" (`sonProfile` 0–3 when the device
+  has magnet settings). Sub 0 is the ordinary base layer. qmk.top reads all four per profile
+  (`getKeyConfig(profile, sub)` → `[0x8A, profile, 0xFF, page 0–7, sub]`) and writes with
+  `setKeyConfigSimple(config, profile, sub, save)` → `[0x0A, profile, slot, 0, 0, save, sub, cs, a0..a3]`.
+  Factory content of subs 1–3 is all zeros (`matrixToConfigs(matrix, zeros)` on reset).
+- **A mod-tap key** (`option: "mt"`):
+  - mode param 7 = **3** (`| 0x80` keeps Rapid Trigger)
+  - **hold** action in **sub 0** (the base layer), **tap** action in **sub 1**
+    (`configs: [按住_改键, 单击_改键]`, written in that order, `save` only on the last)
+  - **hold time** in magnet param **5**, one byte, ms ÷ 10 (`mt_time / 10`). UI range 10–1000 ms,
+    default 200 ms (`按键时间最小值:10, 按键时间最大值:1e3`, `按键时间=200`).
+  - qmk.top reads param 5 (2 pages) only when some key is mod-tap. RT75 Studio always reads it.
+- **Action encoding** (`同步到设备_高级键_按住单击`): up to three keys in click order,
+  `[0, k1, k2, k3]` (`skey = k1, key = k2, key2 = k3`). An empty side becomes the key itself,
+  `[0, original, 0, 0]`. So a lone Ctrl hold is `[0, 0xE0, 0, 0]`, not the `[0, 0, 0xE0, 0]` an
+  ordinary remap uses. RT75 Studio lists modifiers first, then the main key.
+- **Write order** (single key, `磁轴修改` path): the sub-layer keys first (sub 0, then sub 1 with save),
+  then `setMagnetismInfoSimple`: mode, then the changed travels in the order 0, 1, 6, 2, 3, 4, 8, **5**, 251.
+- **Leaving mod-tap.** When a mod-tap (or DKS / toggle) key is made part of a Snap pair, qmk.top first
+  writes subs 0–3 as `[factory key, 0, 0, 0]` (save on sub 3), then the new mode. RT75 Studio clears
+  sub 1 to zeros and writes the base layer back to the **tap** action (so the key keeps doing what a
+  tap did), then sets the mode to Normal. It never writes subs 2–3: only DKS and toggle use them.
+- **Reads stay in range:** `query()` allows sub 0–1 only on `0x8A`.
+- Demo-tested only so far.
 
 ## Lighting (main backlight)
 

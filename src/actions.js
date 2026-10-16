@@ -124,6 +124,15 @@ export function encodeKey(main, mods = []) {
   return [0, m[0], m[1], main];
 }
 
+// One side (tap or hold) of a mod-tap key, in qmk.top's mod-tap layout: up to three keys packed
+// from byte 1, modifiers first, then the main key: [0,k,0,0] · [0,mod,k,0] · [0,mod1,mod2,k].
+// A lone modifier (a typical hold) is [0,mod,0,0].
+export function encodeModTap(main, mods = []) {
+  const m = [...new Set(mods)].filter(x => MODIFIERS.includes(x) && x !== main).slice(0, 2);
+  const codes = [...m, main];
+  return [0, ...codes, ...new Array(3 - codes.length).fill(0)];
+}
+
 // Splits a key/combo action back into { main, mods } for the editor.
 export function splitKey(b) {
   const codes = b.slice(1).filter(Boolean);

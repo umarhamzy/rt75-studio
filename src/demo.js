@@ -5,7 +5,7 @@ import { DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX } from './layout.js';
 // so the whole read / edit / write / verify flow can be tried without hardware.
 // Profiles 1-4 each keep their own key settings; profile 2 starts with every key at 1.00 mm.
 
-const PARAMS = { 7: 'mode', 0: 'actuation', 1: 'release', 6: 'bottomDeadZone', 2: 'rtPress', 3: 'rtRelease', 251: 'topDeadZone', 9: 'snapPartner', 252: 'switchType' };
+const PARAMS = { 7: 'mode', 0: 'actuation', 1: 'release', 6: 'bottomDeadZone', 2: 'rtPress', 3: 'rtRelease', 251: 'topDeadZone', 9: 'snapPartner', 5: 'mtTime', 252: 'switchType' };
 const WIDE = new Set([0, 1, 6, 2, 3]);
 
 // options.ignore: [{ slot, param }] writes the simulated keyboard silently drops, to reproduce
@@ -15,6 +15,7 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
   profiles[1].actuation = profiles[1].actuation.map(v => (v ? 200 : 0));
   profiles[1].release = profiles[1].release.map(v => (v ? 200 : 0));
   profiles[1].mode = profiles[1].mode.map(() => 0);
+  for (const p of profiles) p.mtTime ??= new Array(p.mode.length).fill(0);
   let profile = 0, rateCode = 3; // 1000 Hz
   // Sleep timers (seconds, uint16 LE): BT backlight 120, 2.4G backlight 120, BT deep 1680, 2.4G deep 1680
   let sleepBytes = Uint8Array.from([120, 0, 120, 0, 0x90, 0x06, 0x90, 0x06]);
@@ -50,7 +51,9 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
       input.dispatchEvent(e);
     }, 16);
   };
-  const keymaps = Array.from({ length: 4 }, () => [...dump.keymap['0']]);
+  // Each profile's key matrix has four sub-layers: 0 is the base layer, 1 holds mod-tap tap
+  // actions; 1–3 are all zeros from the factory.
+  const keymaps = Array.from({ length: 4 }, () => [[...dump.keymap['0']], ...Array.from({ length: 3 }, () => new Array(dump.keymap['0'].length).fill(0))]);
   // Fn layers per profile: [windows, mac]
   // One Fn layer (index 0) shared by every profile, like the real keyboard: [windows, mac].
   const fnLayers = [[[...(dump.fnWin ?? DEFAULT_FN_MATRIX)], [...(dump.fnMac ?? DEFAULT_FN_MAC_MATRIX)]]];
@@ -85,7 +88,7 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
         macros.set(last[1], b);
         return;
       }
-      if (last[0] === 0x0a) { keymaps[last[1]].splice(last[2] * 4, 4, ...last.slice(8, 12)); return; }
+      if (last[0] === 0x0a) { keymaps[last[1]][last[6]].splice(last[2] * 4, 4, ...last.slice(8, 12)); return; }
       if (last[0] === 0x10) { fnLayers[last[2]][last[1]].splice(last[3] * 4, 4, ...last.slice(8, 12)); return; }
       if (last[0] === 0x65 && ignore.some(x => x.slot === last[3] && x.param === last[1])) return;
       if (last[0] === 0x65 && last[2] === 0) {
@@ -106,7 +109,7 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
         case 0x89: r.set([0x89, this.demoOs ?? 0, 0]); break; // KB options: Windows, Fn layer 0
         case 0x83: r.set([0x83, 0, rateCode]); break;
         case 0x86: r.set([0x86, 0]); break;
-        case 0x8a: r.set(keymaps[last[1]].slice(last[3] * 64, last[3] * 64 + 64)); break;
+        case 0x8a: r.set(keymaps[last[1]][last[4]].slice(last[3] * 64, last[3] * 64 + 64)); break;
         case 0x90: r.set(fnLayers[last[2]][last[1]].slice(last[4] * 64, last[4] * 64 + 64)); break;
         case 0xe5: {
           const name = PARAMS[last[1]];
