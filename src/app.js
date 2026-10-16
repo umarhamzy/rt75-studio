@@ -210,7 +210,7 @@ function renderBoard() {
       value.className = 'key-value';
       if (state.view === 'actuation') {
         value.textContent = mm(d.actuation);
-        const t = hi > lo ? (hi - d.actuation) / (hi - lo) : 0;   // shorter travel = stronger color
+        const t = heatOf(d.actuation); // fixed scale, so editing one key never re-shades the others
         el.style.setProperty('--heat-t', t.toFixed(3));
         el.classList.add('heat');
         // Bar on the right edge, filled from the top down to the actuation point, like a key press.
@@ -435,11 +435,18 @@ function clickKey(slot, additive) {
   refresh();
 }
 
+// Shorter travel = stronger amber, on a fixed 0.1–3.3 mm scale (not the board's own min and max).
+// Cubed, so 0.8 vs 1.3 mm still reads clearly and deep settings stay near plain.
+const heatOf = a => {
+  const lin = (MAX_TRAVEL_MM - a) / (MAX_TRAVEL_MM - LIMITS.travel.min);
+  return Math.min(1, Math.max(0, lin)) ** 3;
+};
+
 function renderLegend(lo, hi) {
   const el = $('legend');
   if (!state.settings) { el.innerHTML = ''; return; }
   if (state.view === 'actuation') {
-    el.innerHTML = `<span>${mm(lo)} mm</span><span class="ramp" aria-hidden="true"></span><span>${mm(hi)} mm</span><span class="muted">stronger color = shorter travel</span>`;
+    el.innerHTML = `<span>${mm(LIMITS.travel.min)} mm</span><span class="ramp" aria-hidden="true"></span><span>${MAX_TRAVEL_MM} mm</span><span class="muted">stronger color = shorter travel · this board ${mm(lo)}–${mm(hi)} mm</span>`;
   } else if (state.view === 'rt') {
     el.innerHTML = '<span class="swatch swatch-rt"></span><span>Rapid Trigger on · sensitivity in mm (↓ press, ↑ release when they differ)</span>';
   } else if (state.view === 'live') {

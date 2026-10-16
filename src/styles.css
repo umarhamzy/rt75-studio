@@ -227,8 +227,8 @@ button, input, select { font: inherit; color: inherit; }
 
 /* Actuation view: amber by how short the travel is, plus a top-to-bottom bar on the right. */
 .key.heat {
-  --cap-bg: color-mix(in oklab, var(--accent) calc(var(--heat-t, 0) * 14%), var(--cap));
-  --key-border: color-mix(in oklab, var(--accent) calc(var(--heat-t, 0) * 50%), var(--cap-edge));
+  --cap-bg: color-mix(in oklab, var(--accent) calc(var(--heat-t, 0) * 24%), var(--cap));
+  --key-border: color-mix(in oklab, var(--accent) calc(var(--heat-t, 0) * 80%), var(--cap-edge));
   padding-right: 8px;
 }
 .key.heat.is-selected { --key-border: var(--accent); }
