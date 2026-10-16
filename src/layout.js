@@ -36,7 +36,7 @@ export const KEYS = [
   { code: "Digit0", slot: 61, x: 461, y: 66, w: 40, h: 40, label: "0)" },
   { code: "Minus", slot: 67, x: 507, y: 66, w: 40, h: 40, label: "-_" },
   { code: "Equal", slot: 73, x: 553, y: 66, w: 40, h: 40, label: "=+" },
-  { code: "Backspace", slot: 79, x: 599, y: 66, w: 90, h: 40, label: "BackSpace" },
+  { code: "Backspace", slot: 79, x: 599, y: 66, w: 90, h: 40, label: "Backspace" },
   { code: "Delete", slot: 85, x: 727, y: 66, w: 40, h: 40, label: "Del" },
   { code: "Tab", slot: 2, x: 1, y: 112, w: 66, h: 40, label: "Tab" },
   { code: "KeyQ", slot: 8, x: 73, y: 112, w: 40, h: 40, label: "Q" },
