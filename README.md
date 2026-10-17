@@ -54,7 +54,15 @@ You can also select exactly two keys and choose **Pair these two keys**. Pairing
 already has a partner releases the old partner, and **Remove pair** releases both keys. Rapid
 Trigger is kept either way. Keys using DKS or toggle modes aren't changed by this app.
 
-For **mod-tap** (the **Mod-tap** tab), select keys and turn Mod-tap on: a quick tap sends the tap
+Each key has a **Key mode** in the side panel: Normal, Mod-tap, DKS (not editable yet) or Toggle.
+The **Key modes** tab shows mod-tap (green) and toggle (orange) keys on the board. Travel and dead
+zones stay as they are on mod-tap and toggle keys, as in qmk.top.
+
+For **toggle**, a tap on the key switches its action on or off, and holding the key works normally.
+**Long press** keeps the action held after a tap; **Rapid fire** repeats it (at the keyboard's own
+speed). The action is any key or combo; **Try it** previews what the computer would see.
+
+For **mod-tap**, set Key mode to Mod-tap: a quick tap sends the tap
 key, and holding past the hold time (10–1000 ms, 200 ms by default) sends the hold key. Tap starts
 as what the key sends now, and Hold as Left Ctrl. Pick either from the list, or use **Press keys**
 to record a combo such as Ctrl + C. Turning it off makes the key send its tap key again. A Snap Tap

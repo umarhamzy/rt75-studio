@@ -24,6 +24,8 @@
   --snap: #9b7bff;
   --mt: #51cf66;
   --mt-ink: #06210d;
+  --tg: #ff922b;
+  --tg-ink: #2b1400;
   --pair-0: #9b7bff;
   --pair-1: #4cc9f0;
   --pair-2: #f06595;
@@ -185,6 +187,7 @@ button, input, select { font: inherit; color: inherit; }
 .swatch-rt { background: var(--rt); }
 .swatch-snap { background: var(--snap); }
 .swatch-mt { background: var(--mt); }
+.swatch-tg { background: var(--tg); }
 
 /* ---------- Keyboard ---------- */
 .board-wrap {
@@ -231,6 +234,7 @@ button, input, select { font: inherit; color: inherit; }
 .mark-rt { background: var(--rt); }
 .mark-snap { background: var(--snap); }
 .mark-mt { background: var(--mt); }
+.mark-tg { background: var(--tg); }
 .mark-remap { background: var(--muted); }
 
 /* Actuation view: amber by how short the travel is, plus a top-to-bottom bar on the right. */
@@ -253,6 +257,8 @@ button, input, select { font: inherit; color: inherit; }
 .key.hl-snap .key-value { color: #fff; }
 .key.hl-mt { --cap-bg: color-mix(in oklab, var(--mt) 70%, var(--cap)); color: var(--mt-ink); }
 .key.hl-mt .key-value { color: var(--mt-ink); font-weight: 700; }
+.key.hl-tg { --cap-bg: color-mix(in oklab, var(--tg) 72%, var(--cap)); color: var(--tg-ink); }
+.key.hl-tg .key-value { color: var(--tg-ink); font-weight: 700; }
 .key.dim { opacity: 0.45; }
 .board.inert-board .key, .board.inert-board .knob { cursor: default; }
 .board.inert-board .key:hover { transform: none; }
@@ -935,3 +941,27 @@ select.dd-native { display: none !important; }
 /* External link button (Keyboard settings › qmk.top). */
 .set-ext { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; margin-top: auto; }
 .set-ext svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+/* Key mode switch (Normal · Mod-tap · DKS · Toggle) and the Toggle editor. */
+.key-mode { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.key-mode button { padding: 5px 4px; font: 500 12px var(--mono); }
+.key-mode button[aria-pressed="true"] { font-weight: 600; }
+.key-mode button:disabled { color: color-mix(in oklab, var(--muted) 45%, transparent); cursor: not-allowed; }
+.tg-types { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+.tg-types button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--text); text-align: left; cursor: pointer; }
+.tg-types button strong { font-size: 13px; font-weight: 600; }
+.tg-types button span { font-size: 11px; color: var(--muted); }
+.tg-types button[aria-pressed="true"] { border-color: var(--tg); background: color-mix(in oklab, var(--tg) 12%, var(--surface-2)); }
+.tg-types button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tg-try { display: grid; gap: 8px; margin-top: 4px; padding: 10px; border-radius: 9px; background: var(--bg); border: 1px solid var(--line-soft); }
+.tg-try-head { display: flex; justify-content: space-between; gap: 8px; font: 500 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.tg-status { font: 600 12px var(--mono); letter-spacing: 0; text-transform: none; text-align: right; }
+.tg-status.is-on { color: var(--tg); }
+.tg-try .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.tg-try .btn[aria-pressed="true"] { border-color: var(--tg); color: var(--tg); }
+.tg-wave { display: flex; gap: 3px; height: 14px; align-items: flex-end; }
+.tg-wave i { flex: 1; height: 3px; border-radius: 2px; background: var(--surface-3); }
+.tg-wave i.on { height: 14px; background: var(--tg); }
+.tg-caption { font-size: 11px; color: var(--muted); }
+/* Values never run past the keycap, so fitKeyLabels can shrink or wrap them. */
+.key .key-value { max-width: 100%; }

@@ -43,7 +43,7 @@ function switchName(byte) {
   return SWITCHES[byte] ?? (byte === 0xff ? 'Outemu (default)' : `Type ${byte}`);
 }
 
-const MODES = { 0: 'Normal', 2: 'Dynamic keystroke (DKS)', 3: 'Mod-tap', 4: 'Toggle (hold)', 5: 'Toggle', 7: 'Snap Tap' };
+const MODES = { 0: 'Normal', 2: 'Dynamic keystroke (DKS)', 3: 'Mod-tap', 4: 'Toggle · Long press', 5: 'Toggle · Rapid fire', 7: 'Snap Tap' };
 const FIELD_LABELS = {
   mode: 'Key mode', actuation: 'Actuation point', release: 'Release point',
   rtPress: 'RT press sensitivity', rtRelease: 'RT release sensitivity',
@@ -52,6 +52,10 @@ const FIELD_LABELS = {
 };
 const SNAP = 7;
 const MT = 3;            // mod-tap key mode
+const TG_HOLD = 4, TG_FIRE = 5; // toggle key modes: Long press (stays held) and Rapid fire (repeats)
+const DKS = 2;
+// Modes whose travel and dead zones qmk.top doesn't edit (getIsTravelAndDeadZoneDisabled).
+const ADVANCED = new Set([DKS, MT, TG_HOLD, TG_FIRE]);
 const MT_DEFAULT_HOLD = 224; // L Ctrl: what a newly made mod-tap key sends when held, until changed
 const RT_DEFAULT_MM = 0.2; // qmk.top/v4's default RT sensitivity, used when a key has none set
 
@@ -248,7 +252,11 @@ function renderBoard() {
           value.innerHTML = `<svg class="snap-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h15l-4-4M20 15H5l4 4"/></svg>${escapeHtml(d.partner.label)}`;
         } else el.classList.add('dim');
       } else if (state.view === 'mt') {
-        if (isMt(key.slot)) {
+        if (isToggle(key.slot)) {
+          el.classList.add('hl-tg');
+          value.textContent = mtShort(layerBytes('base', key.slot)); // the orange cap says toggle; the title says which
+          el.title = `${key.label}: ${MODES[raw(key.slot, 'mode') & 0x7f]} · ${mtLabel(layerBytes('base', key.slot))}`;
+        } else if (isMt(key.slot)) {
           const m = mtInfo(key.slot);
           el.classList.add('hl-mt');
           value.innerHTML = `<span class="mt-cap-hold">${escapeHtml(mtShort(m.hold))}</span>`;
@@ -265,7 +273,10 @@ function renderBoard() {
         value.textContent = a.none ? '·' : a.short.replaceAll('+', '+​');
         value.title = a.label;
         // A mod-tap key's base layer is its hold action: show tap/hold instead.
-        if (state.layer === 'base' && isMt(key.slot)) {
+        if (state.layer === 'base' && isToggle(key.slot)) {
+          value.textContent = `TGL ${mtShort(layerBytes('base', key.slot))}`;
+          value.title = `${MODES[raw(key.slot, 'mode') & 0x7f]}: ${mtLabel(layerBytes('base', key.slot))}`;
+        } else if (state.layer === 'base' && isMt(key.slot)) {
           const m = mtInfo(key.slot);
           value.textContent = `${mtShort(m.tap)}/${mtShort(m.hold)}`;
           value.title = `Mod-tap: tap ${mtLabel(m.tap)}, hold ${mtLabel(m.hold)}`;
@@ -296,6 +307,7 @@ function renderBoard() {
       if (d.rt) marks.insertAdjacentHTML('beforeend', '<i class="mark mark-rt" title="Rapid Trigger"></i>');
       if (d.partner) marks.insertAdjacentHTML('beforeend', '<i class="mark mark-snap" title="Snap Tap"></i>');
       if (d.modeId === MT) marks.insertAdjacentHTML('beforeend', '<i class="mark mark-mt" title="Mod-tap"></i>');
+      if (d.modeId === TG_HOLD || d.modeId === TG_FIRE) marks.insertAdjacentHTML('beforeend', '<i class="mark mark-tg" title="Toggle"></i>');
       if (d.remapped) marks.insertAdjacentHTML('beforeend', '<i class="mark mark-remap" title="Remapped"></i>');
       el.appendChild(marks);
 
@@ -502,7 +514,7 @@ function renderLegend(lo, hi) {
       </div><span class="swatch swatch-mc"></span><span>library macro</span><span class="muted">(click to edit)</span><span class="swatch swatch-mc-elsewhere"></span><span>made elsewhere</span>`;
     el.querySelectorAll('[data-layer]').forEach(b => b.onclick = () => { state.layer = b.dataset.layer; refresh(); });
   } else if (state.view === 'mt') {
-    el.innerHTML = '<span class="swatch swatch-mt"></span><span class="legend-fit">Mod-tap: tap for the key, hold for another (shown on the key)</span>';
+    el.innerHTML = '<span class="swatch swatch-mt"></span><span>Mod-tap</span><span class="swatch swatch-tg"></span><span>Toggle</span><span class="muted legend-fit">the key shows what it sends · change it under Key mode</span>';
   } else if (state.view === 'device') {
     el.innerHTML = '<span class="muted">For the whole keyboard (every profile), plus how RT75 Studio shows it.</span>';
   } else if (state.view === 'lighting') {
@@ -642,7 +654,10 @@ function renderInspectorBody() {
   const single = keys.length === 1 ? datas[0] : null;
   const title = single ? keys[0].label : `${keys.length} keys`;
   const singleMt = single && single.modeId === MT && state.settings.tapLayer ? mtInfo(keys[0].slot) : null;
-  const subtitle = singleMt
+  const singleTg = single && (single.modeId === TG_HOLD || single.modeId === TG_FIRE) && state.settings.tapLayer ? layerBytes('base', keys[0].slot) : null;
+  const subtitle = singleTg
+    ? `${single.mode} · <strong>${escapeHtml(mtLabel(singleTg))}</strong>${single.rt ? ' + RT' : ''}`
+    : singleMt
     ? `Tap <strong>${escapeHtml(mtLabel(singleMt.tap))}</strong> · hold <strong>${escapeHtml(mtLabel(singleMt.hold))}</strong> · Mod-tap${single.rt ? ' + RT' : ''}`
     : single
     ? `${single.action === null ? '' : single.remapped ? `Remapped to <strong>${single.action}</strong> · ` : `Sends ${single.action} · `}${single.mode}${single.rt ? ' + RT' : ''}`
@@ -745,13 +760,21 @@ function editorHtml(datas) {
   const tdz = common(datas, d => d.topDeadZone), bdz = common(datas, d => d.bottomDeadZone);
 
   const dz = { dzTop: tdz ?? 0, dzBottom: bdz ?? 0 };
+  // Like qmk.top, travel and dead zones aren't edited on mod-tap, toggle or DKS keys: they keep
+  // the values they had. With a mixed selection the sliders apply to the other keys only.
+  const allAdvanced = datas.every(d => ADVANCED.has(d.modeId));
+  const fixedNote = '<p class="note">In this key mode the travel and dead zones stay as they are; qmk.top doesn’t change them either. Set the key back to Normal to edit them.</p>';
   return `
+    <h3>Key mode</h3>
+    ${keyModeHtml(datas)}
+
     <h3>Travel</h3>
+    ${allAdvanced ? `<dl>${row('Actuation point', act === null ? 'Mixed' : `${mm3(act)} mm`)}${row('Release point', rel === null ? 'Mixed' : `${mm3(rel)} mm`)}</dl>${fixedNote}` : `
     <div class="ts-row">
       ${travelSlider('act', linked ? 'Press & release' : 'Press (actuation)', act, T.min, T.max, dz)}
       ${linked ? '' : travelSlider('rel', 'Release', rel, T.min, T.max, { ...dz, tone: 'rel' })}
     </div>
-    <label class="check"><input type="checkbox" id="relLink" ${linked ? 'checked' : ''}> Release at the same point</label>
+    <label class="check"><input type="checkbox" id="relLink" ${linked ? 'checked' : ''}> Release at the same point</label>`}
 
     <h3>Rapid Trigger</h3>
     <label class="switch"><input type="checkbox" id="rtToggle" ${rt ? 'checked' : ''}><span class="switch-track"></span>
@@ -764,13 +787,11 @@ function editorHtml(datas) {
     <h3>Snap Tap</h3>
     ${snapHtml(datas)}
 
-    <h3>Mod-tap</h3>
-    ${modTapHtml(datas)}
-
     <h3>Dead zones</h3>
+    ${allAdvanced ? `<dl>${row('Top dead zone', tdz === null ? 'Mixed' : `${mm3(tdz)} mm`)}${row('Bottom dead zone', bdz === null ? 'Mixed' : `${mm3(bdz)} mm`)}</dl>` : `
     ${slider('tdz', 'Top dead zone', tdz, DZ.min, DZ.max, datas.some(d => d.topDeadZone === 0)
       ? '<span class="warn-badge" title="A top dead zone of 0 can cause accidental presses. qmk.top shows the same warning.">⚠ 0 may misfire</span>' : '')}
-    ${slider('bdz', 'Bottom dead zone', bdz, DZ.min, DZ.max)}`;
+    ${slider('bdz', 'Bottom dead zone', bdz, DZ.min, DZ.max)}`}`;
 }
 
 // Snap Tap only replaces Normal mode here; keys using DKS, mod-tap or toggle are left alone.
@@ -788,14 +809,14 @@ function snapHtml(datas) {
     const paired = keyData(keyBySlot(a)).partner?.slot === b && keyData(keyBySlot(b)).partner?.slot === a;
     if (paired) return `<p class="snap-line">These two keys are a pair.</p><button class="btn btn-small" id="btnUnpair" type="button">Remove pair</button>`;
     if (!snapEligible(a) || !snapEligible(b)) {
-      return [a, b].some(isMt) ? '<p class="note">One of these keys is mod-tap. Turn mod-tap off to pair them.</p>'
-        : '<p class="note">One of these keys uses another advanced mode (DKS or toggle), which this app can’t change yet.</p>';
+      return [a, b].some(s => [MT, TG_HOLD, TG_FIRE].includes(raw(s, 'mode') & 0x7f)) ? '<p class="note">One of these keys has another key mode. Set both to Normal to pair them.</p>'
+        : '<p class="note">One of these keys uses DKS, which this app can’t change yet.</p>';
     }
     return '<p class="snap-line">The last of the two pressed wins.</p><button class="btn btn-small" id="btnPairTwo" type="button">Pair these two keys</button>';
   }
   if (slots.length !== 1) return '<p class="note">Select one key, or exactly two keys to pair them.</p>';
   const d = datas[0];
-  if (!snapEligible(slots[0])) return `<p class="note">${d.modeId === MT ? 'This key is mod-tap. Turn mod-tap off to pair it.' : `This key uses ${d.mode}, which this app can’t change yet.`}</p>`;
+  if (!snapEligible(slots[0])) return `<p class="note">${d.modeId === DKS ? `This key uses ${d.mode}, which this app can’t change yet.` : `This key is ${d.mode}. Set its key mode to Normal to pair it.`}</p>`;
   if (d.partner && keyData(d.partner).partner?.slot !== slots[0]) {
     return `<p class="snap-line">Points at <button class="link" data-jump="${d.partner.slot}">${d.partner.label}</button>, but ${d.partner.label} isn’t paired back.</p>
       <div class="btn-row"><button class="btn btn-small" id="btnFixPair" type="button">Complete the pair</button>
@@ -845,88 +866,125 @@ const toModTap = bytes => { const k = mtKeys(bytes); return k ? encodeModTap(k.m
 const toKeyAction = bytes => { const k = mtKeys(bytes); return k ? encodeKey(k.main, k.mods) : null; };
 const mtLabel = bytes => (mtKeys(bytes) ? decodeAction(bytes, { mac: macNames('base') }).label : 'Nothing');
 const mtShort = bytes => (mtKeys(bytes) ? decodeAction(bytes, { mac: macNames('base') }).short : '·');
-// Normal and mod-tap keys qualify; Snap Tap, DKS and toggle keys don't, nor does the Fn key.
-const mtEligible = slot => !LOCKED_SLOTS.has(slot) && [0, MT].includes(raw(slot, 'mode') & 0x7f) &&
-  (isMt(slot) || !!toModTap(layerBytes('base', slot)) || !!toModTap(factoryBytes('base', slot)));
+// ---------- Key modes (Normal, Mod-tap, Toggle) ----------
+// Toggle (modes 4 and 5): a tap switches the key's "continuous" action on or off, holding it works
+// normally. Long press keeps the action held; Rapid fire repeats it. The action is the base layer, in
+// the mod-tap key layout (protocol-notes.md, "Toggle"). DKS is shown but not editable yet.
+const isToggle = slot => [TG_HOLD, TG_FIRE].includes(raw(slot, 'mode') & 0x7f);
+const keyModeOf = slot => {
+  const m = raw(slot, 'mode') & 0x7f;
+  return m === MT ? 'mt' : m === TG_HOLD || m === TG_FIRE ? 'toggle' : m === DKS ? 'dks' : m === SNAP ? 'snap' : m === 0 ? 'normal' : 'other';
+};
+// What the key sends now as a plain key or combo: the tap key of a mod-tap key, the action of a
+// toggle key, the base layer of a normal one; the factory key if that isn't a key.
+function plainKey(slot) {
+  const mode = keyModeOf(slot);
+  const b = mode === 'mt' ? layerBytes('tap', slot) : layerBytes('base', slot);
+  return toKeyAction(b) ?? toKeyAction(factoryBytes('base', slot));
+}
+// Normal, mod-tap and toggle keys can switch between those modes; Snap Tap, DKS and the Fn key can't.
+const modeEligible = slot => !LOCKED_SLOTS.has(slot) && ['normal', 'mt', 'toggle'].includes(keyModeOf(slot)) && !!plainKey(slot);
 
 function mtInfo(slot) {
   return { tap: layerBytes('tap', slot), hold: layerBytes('base', slot), ms: (raw(slot, 'mtTime') || 0) * 10 };
 }
 
-// Turns mod-tap on (tap = what the key sends now, hold = L Ctrl) or off (the key goes back to
-// sending its tap action, and the tap layer is cleared). Undoing an unsaved change this way drops it.
-function setModTap(slot, on) {
-  if (on === isMt(slot)) return;
-  if (on) {
-    setKeyPending('tap', slot, toModTap(layerBytes('base', slot)) ?? toModTap(factoryBytes('base', slot)));
+// Moves a key to another key mode. Leaving mod-tap clears the tap layer and its hold time; the key
+// keeps sending what it sent (mod-tap's tap key, toggle's action). Entering mod-tap holds L Ctrl;
+// entering toggle starts as Long press. Going back to what the keyboard has drops the edits.
+function setKeyMode(slot, target, toggleMode = TG_HOLD) {
+  const cur = keyModeOf(slot);
+  if (cur === target || !modeEligible(slot)) return;
+  const key = plainKey(slot);
+  if (cur === 'mt') {
+    setKeyPending('tap', slot, DISABLED);
+    setPending(slot, 'mtTime', state.settings.magnet.mtTime[slot]);
+  }
+  if (target === 'normal') {
+    setKeyPending('base', slot, key);
+    setMode(slot, 0);
+  } else if (target === 'mt') {
+    setKeyPending('tap', slot, encodeModTap(splitKey(key).main, splitKey(key).mods));
     setKeyPending('base', slot, encodeModTap(MT_DEFAULT_HOLD));
     setMode(slot, MT);
     const ms = raw(slot, 'mtTime') * 10;
     if (!(ms >= LIMITS.mtTime.min && ms <= LIMITS.mtTime.max)) setPending(slot, 'mtTime', LIMITS.mtTime.default / 10);
-  } else {
-    setKeyPending('base', slot, toKeyAction(layerBytes('tap', slot)) ?? factoryBytes('base', slot));
-    setKeyPending('tap', slot, DISABLED);
-    setMode(slot, 0);
-    setPending(slot, 'mtTime', state.settings.magnet.mtTime[slot]);
+  } else if (target === 'toggle') {
+    setKeyPending('base', slot, encodeModTap(splitKey(key).main, splitKey(key).mods));
+    setMode(slot, toggleMode);
   }
 }
 
-// Sets the tap or hold side of mod-tap keys.
+// Sets the tap or hold side of mod-tap keys, or the action of toggle keys.
 function setModTapSide(slots, side, bytes) {
-  if (!isModTapBytes(bytes)) { showError('That key can’t be used for mod-tap.'); return false; }
+  if (!isModTapBytes(bytes)) { showError(`That key can’t be used for ${side === 'toggle' ? 'toggle' : 'mod-tap'}.`); return false; }
   showError(null);
-  for (const s of slots) if (isMt(s)) setKeyPending(side === 'tap' ? 'tap' : 'base', s, bytes);
+  for (const s of slots) {
+    if (side === 'toggle' ? isToggle(s) : isMt(s)) setKeyPending(side === 'tap' ? 'tap' : 'base', s, bytes);
+  }
   return true;
 }
 const isModTapBytes = b => isWritableAction(b, 'tap', 0) && !b.every(x => !x);
 
-// Drops unsaved edits on these keys, including the key-map halves of a mod-tap change.
+// Drops unsaved edits on these keys, including the key-map halves of a key-mode change.
 function revertKeys(slots) {
   for (const s of slots) {
-    const mtChange = isMt(s) || (state.settings.magnet.mode[s] & 0x7f) === MT;
+    const modeChange = ['mt', 'toggle'].includes(keyModeOf(s)) || ADVANCED.has(state.settings.magnet.mode[s] & 0x7f);
     state.pending.delete(s);
-    if (mtChange) ['base', 'tap'].forEach(l => state.pendingKeys.delete(`${l}:${s}`));
+    if (modeChange) ['base', 'tap'].forEach(l => state.pendingKeys.delete(`${l}:${s}`));
   }
 }
 
-function modTapHtml(datas) {
+const MODE_CHOICES = [['normal', 'Normal'], ['mt', 'Mod-tap'], ['dks', 'DKS'], ['toggle', 'Toggle']];
+function keyModeHtml(datas) {
   const slots = [...state.selected];
-  if (!state.settings.tapLayer) {
-    return `<p class="note">${keymapsFailed ? 'The key map couldn’t be read, so mod-tap can’t be shown. Open Key map to try again.' : 'Loading the key map…'}</p>`;
-  }
-  const ok = slots.filter(mtEligible);
+  const modes = [...new Set(slots.map(keyModeOf))];
+  const current = modes.length === 1 ? modes[0] : null;
+  const ok = slots.filter(modeEligible);
+  const loading = !state.settings.tapLayer;
+  const seg = MODE_CHOICES.map(([id, label]) => {
+    const disabled = loading || id === 'dks' || !ok.length;
+    return `<button type="button" data-key-mode="${id}" aria-pressed="${current === id}" ${disabled ? 'disabled' : ''}
+      ${id === 'dks' ? 'title="DKS: coming later (the editor isn’t built yet)"' : ''}>${label}</button>`;
+  }).join('');
+  let html = `<div class="segmented segmented-sm key-mode" role="group" aria-label="Key mode">${seg}</div>`;
+  if (loading) return html + `<p class="note">${keymapsFailed ? 'The key map couldn’t be read, so key modes can’t be shown. Open Key map to try again.' : 'Loading the key map…'}</p>`;
+  const skipped = slots.length - ok.length;
+  const skipNote = skipped && ok.length ? ` ${skipped} selected key${skipped === 1 ? '' : 's'} can’t change mode (Snap Tap, DKS or the Fn key) and ${skipped === 1 ? 'is' : 'are'} skipped.` : '';
   if (!ok.length) {
     const d = datas[0];
-    return `<p class="note">${slots.length === 1
-      ? (LOCKED_SLOTS.has(slots[0]) ? 'The Fn key can’t be mod-tap.' : d.modeId === SNAP ? 'This key is in a Snap Tap pair. Remove the pair to use mod-tap.' : `This key uses ${d.mode}, which this app can’t change yet.`)
-      : 'None of these keys can be mod-tap (Snap Tap pairs, the Fn key or other advanced modes).'}</p>`;
+    return html + `<p class="note">${slots.length === 1
+      ? (LOCKED_SLOTS.has(slots[0]) ? 'The Fn key always stays Normal.' : d.modeId === SNAP ? 'This key is in a Snap Tap pair. Remove the pair to change its key mode.' : `This key uses ${d.mode}, set in qmk.top. RT75 Studio can’t edit it yet.`)
+      : 'None of these keys can change mode (Snap Tap pairs, DKS or the Fn key).'}</p>`;
   }
-  const on = ok.filter(isMt);
-  const all = on.length === ok.length;
-  const skipped = slots.length - ok.length;
-  let html = `<label class="switch"><input type="checkbox" id="mtToggle" ${all ? 'checked' : ''}><span class="switch-track"></span>
-      <span>${all ? 'On' : on.length ? 'On for some keys' : 'Off'}</span></label>`;
-  if (!all) {
-    return html + `<p class="note">Tap for the key, hold for another, like Caps on tap and Ctrl on hold.${skipped ? ` ${skipped} selected key${skipped === 1 ? '' : 's'} can’t be mod-tap and ${skipped === 1 ? 'is' : 'are'} skipped.` : ''}</p>`;
-  }
+  if (current === 'mt') return html + modTapHtml(ok) + (skipNote ? `<p class="note">${skipNote.trim()}</p>` : '');
+  if (current === 'toggle') return html + toggleHtml(ok) + (skipNote ? `<p class="note">${skipNote.trim()}</p>` : '');
+  if (current === null) return html + `<p class="note">These keys have different key modes; pick one to set them all.${skipNote}</p>`;
+  return html + (skipNote ? `<p class="note">${skipNote.trim()}</p>` : '');
+}
+
+function keyPickerHtml(id, cur, label) {
+  const capturing = state.capture?.mt === id;
+  return `
+      <div class="mt-row">
+        <span class="mt-side">${label}</span>
+        <select id="mt${id}Select" aria-label="${label} sends">
+          <option value="">${cur ? escapeHtml(mtLabel(cur)) : 'Mixed'}</option>
+          ${KEY_CHOICES.map(c => `<option value="${c}">${keyName(c)}</option>`).join('')}
+        </select>
+        <button class="btn btn-small${capturing ? ' is-capturing' : ''}" id="mt${id}Capture" type="button">${capturing ? 'Press… (Esc)' : 'Press keys'}</button>
+      </div>`;
+}
+
+function modTapHtml(ok) {
   const infos = ok.map(mtInfo);
   const same = f => (infos.every(i => i[f].join() === infos[0][f].join()) ? infos[0][f] : null);
   const tap = same('tap'), hold = same('hold');
   const ms = infos.every(i => i.ms === infos[0].ms) ? infos[0].ms : null;
   const L = LIMITS.mtTime;
-  const capturing = side => state.capture?.mt === side;
-  const picker = (side, cur, label) => `
-      <div class="mt-row">
-        <span class="mt-side">${label}</span>
-        <select id="mt${side}Select" aria-label="${label} sends">
-          <option value="">${cur ? escapeHtml(mtLabel(cur)) : 'Mixed'}</option>
-          ${KEY_CHOICES.map(c => `<option value="${c}">${keyName(c)}</option>`).join('')}
-        </select>
-        <button class="btn btn-small${capturing(side) ? ' is-capturing' : ''}" id="mt${side}Capture" type="button">${capturing(side) ? 'Press… (Esc)' : 'Press keys'}</button>
-      </div>`;
-  html += `<div class="mt-edit">
-      ${picker('tap', tap, 'Tap')}
-      ${picker('hold', hold, 'Hold')}
+  return `<div class="mt-edit">
+      ${keyPickerHtml('tap', tap, 'Tap')}
+      ${keyPickerHtml('hold', hold, 'Hold')}
       <div class="field">
         <div class="field-label"><label for="mtTimeNum">Hold time</label></div>
         <div class="field-row">
@@ -936,18 +994,53 @@ function modTapHtml(datas) {
       </div>
     </div>
     <p class="note">${tap && hold && ms !== null ? `A quick tap sends ${escapeHtml(mtLabel(tap))}; holding longer than ${ms} ms sends ${escapeHtml(mtLabel(hold))}.` : 'A quick tap sends the tap key; holding past the hold time sends the hold key.'}
-      Press keys records a combo, like Ctrl + C.${skipped ? ` ${skipped} selected key${skipped === 1 ? '' : 's'} can’t be mod-tap and ${skipped === 1 ? 'is' : 'are'} skipped.` : ''}</p>`;
-  return html;
+      Press keys records a combo, like Ctrl + C.</p>`;
+}
+
+// What the computer sees over about a second, for the Toggle "Try it" strip.
+let toggleTry = { on: false, holding: false, key: '' };
+function toggleHtml(ok) {
+  const modeIds = [...new Set(ok.map(s => raw(s, 'mode') & 0x7f))];
+  const type = modeIds.length === 1 ? modeIds[0] : null;
+  const actions = ok.map(s => layerBytes('base', s));
+  const act = actions.every(a => a.join() === actions[0].join()) ? actions[0] : null;
+  const name = act ? escapeHtml(mtLabel(act)) : 'the key';
+  const trigger = ok.length === 1 ? escapeHtml(keyBySlot(ok[0]).label) : 'the key';
+  const tryKey = ok.join();
+  if (toggleTry.key !== tryKey) toggleTry = { on: false, holding: false, key: tryKey };
+  const active = toggleTry.on || toggleTry.holding;
+  const fire = type === TG_FIRE && !toggleTry.holding;
+  const wave = Array.from({ length: 24 }, (_, i) => `<i class="${active && (!fire || i % 2 === 0) ? 'on' : ''}"></i>`).join('');
+  const status = toggleTry.holding ? `${name} held (normal while you hold)` : toggleTry.on ? (type === TG_FIRE ? `${name} is repeating` : `${name} is held down`) : 'Off';
+  return `<div class="tg-types" role="group" aria-label="Toggle type">
+      <button type="button" data-tg-type="${TG_HOLD}" aria-pressed="${type === TG_HOLD}"><strong>Long press</strong><span>tap: stays held</span></button>
+      <button type="button" data-tg-type="${TG_FIRE}" aria-pressed="${type === TG_FIRE}"><strong>Rapid fire</strong><span>tap: keeps repeating</span></button>
+    </div>
+    <div class="mt-edit">${keyPickerHtml('toggle', act, 'Key')}</div>
+    <p class="note">${type === TG_FIRE
+      ? `Tap ${trigger} once and the keyboard keeps pressing ${name} over and over; tap again to stop. Holding ${trigger} works like a normal key. The repeat speed is set by the keyboard.`
+      : type === TG_HOLD ? `Tap ${trigger} once and the keyboard holds ${name} down for you; tap again to let go. Holding ${trigger} works like a normal key.`
+      : 'Pick Long press or Rapid fire for all of these keys.'}</p>
+    <div class="tg-try">
+      <div class="tg-try-head"><span>Try it</span><span class="tg-status${active ? ' is-on' : ''}">${status}</span></div>
+      <div class="btn-row"><button class="btn btn-small" id="tgTryTap" type="button">Tap ${trigger}</button><button class="btn btn-small" id="tgTryHold" type="button" aria-pressed="${toggleTry.holding}">Hold ${trigger}</button></div>
+      <div class="tg-wave" aria-hidden="true">${wave}</div>
+      <span class="tg-caption">A preview of what the computer sees over the next second. Nothing is sent.</span>
+    </div>`;
 }
 
 function wireModTap(el, slots) {
-  const ok = () => slots.filter(mtEligible);
-  el.querySelector('#mtToggle')?.addEventListener('change', e => {
+  const ok = () => slots.filter(modeEligible);
+  el.querySelectorAll('[data-key-mode]').forEach(b => b.addEventListener('click', () => {
     state.capture = null;
-    ok().forEach(s => setModTap(s, e.target.checked));
+    ok().forEach(s => setKeyMode(s, b.dataset.keyMode));
     refresh();
-  });
-  for (const side of ['tap', 'hold']) {
+  }));
+  el.querySelectorAll('[data-tg-type]').forEach(b => b.addEventListener('click', () => {
+    ok().filter(isToggle).forEach(s => setMode(s, Number(b.dataset.tgType)));
+    refresh();
+  }));
+  for (const side of ['tap', 'hold', 'toggle']) {
     el.querySelector(`#mt${side}Select`)?.addEventListener('change', e => {
       if (!e.target.value) return;
       if (setModTapSide(ok(), side, encodeModTap(Number(e.target.value)))) refresh();
@@ -957,6 +1050,8 @@ function wireModTap(el, slots) {
       refresh();
     });
   }
+  el.querySelector('#tgTryTap')?.addEventListener('click', () => { toggleTry.on = !toggleTry.on; toggleTry.holding = false; renderInspector(); });
+  el.querySelector('#tgTryHold')?.addEventListener('click', () => { toggleTry.holding = !toggleTry.holding; toggleTry.on = false; renderInspector(); });
   const L = LIMITS.mtTime;
   const setMs = v => {
     const ms = Math.min(L.max, Math.max(L.min, Math.round(v / 10) * 10));
@@ -1183,7 +1278,7 @@ const actionLabel = (layer, bytes) => {
   return decodeAction(bytes, { mac: macNames(layer) }).label;
 };
 // A mod-tap key's base layer is its hold action.
-const kmLayerLabel = c => (c.layer === 'base' && isMt(c.slot) ? 'Mod-tap hold' : LAYERS[c.layer].label);
+const kmLayerLabel = c => (c.layer === 'base' && isMt(c.slot) ? 'Mod-tap hold' : c.layer === 'base' && isToggle(c.slot) ? 'Toggle key' : LAYERS[c.layer].label);
 const kmRows = changes => changes.map(c => `<tr><td>${keyBySlot(c.slot).label}</td><td>${kmLayerLabel(c)}</td><td>${escapeHtml(actionLabel(c.layer, c.from))}</td><td><strong>${escapeHtml(actionLabel(c.layer, c.to))}</strong></td></tr>`).join('');
 
 function layerAction(layer, slot) {
@@ -1635,8 +1730,17 @@ function renderKeymapPanel() {
 
   const key = keys[0];
   const mt = isMt(key.slot) && state.settings.tapLayer ? mtInfo(key.slot) : null;
+  const tg = isToggle(key.slot) ? layerBytes('base', key.slot) : null;
   const rows = shownLayers().map(id => {
     const a = layerAction(id, key.slot);
+    if (id === 'base' && tg) {
+      const pending = state.pendingKeys.has(`base:${key.slot}`) || state.pending.has(key.slot);
+      return `<button type="button" class="km-row${id === layer ? ' is-current' : ''}${pending ? ' is-pending' : ''}" data-layer-row="${id}">
+      <span class="km-layer">${layerName(id)}</span>
+      <span class="km-now">${MODES[raw(key.slot, 'mode') & 0x7f]} · ${escapeHtml(mtLabel(tg))}${pending ? ' <span class="km-badge km-badge-pending">unsaved</span>' : ''}</span>
+      <span class="km-factory muted">Factory: ${factoryLabel(id, key.slot)}</span>
+    </button>`;
+    }
     if (id === 'base' && mt) {
       const pending = ['base', 'tap'].some(l => state.pendingKeys.has(`${l}:${key.slot}`));
       return `<button type="button" class="km-row${id === layer ? ' is-current' : ''}${pending ? ' is-pending' : ''}" data-layer-row="${id}">
@@ -1678,7 +1782,8 @@ const factoryBytes = (layer, slot) => LAYERS[layer].defaults.slice(slot * 4, slo
 // Why a key can't be edited on a layer, or null if it can.
 function keyEditBlock(layer, slot) {
   if (LOCKED_SLOTS.has(slot)) return 'The Fn key is locked, so you can’t lose access to the Fn layers.';
-  if (layer === 'base' && isMt(slot)) return 'This key is mod-tap: its base layer is the hold action. Change its tap and hold keys under Configuration › Mod-tap.';
+  if (layer === 'base' && isMt(slot)) return 'This key is mod-tap: its base layer is the hold action. Change its tap and hold keys under Configuration › Key mode.';
+  if (layer === 'base' && isToggle(slot)) return 'This key is a toggle key: its base layer is the action it holds or repeats. Change it under Configuration › Key mode.';
   if (decodeAction(deviceBytes(layer, slot) ?? DISABLED).kind === 'unknown') return 'This is a built-in system key, so it’s left untouched (qmk.top locks it too).';
   return null;
 }
@@ -2169,6 +2274,7 @@ function sendable(e, modeOf) {
   if (!(mode & 0x80)) { delete e.rtPress; delete e.rtRelease; }
   if ((mode & 0x7f) !== SNAP) delete e.snapPartner;
   if ((mode & 0x7f) !== MT) delete e.mtTime;
+  if (ADVANCED.has(mode & 0x7f)) ['actuation', 'release', 'topDeadZone', 'bottomDeadZone'].forEach(f => delete e[f]);
   return e;
 }
 
@@ -2236,9 +2342,9 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
       result.retried += km.retried;
       for (const m of km.mismatches) result.mismatches.push({ kb: true, label: `${keyBySlot(m.slot).label} (${kmLayerLabel(m)})`, expected: actionLabel(m.layer, m.expected), actual: actionLabel(m.layer, m.actual) });
     };
-    // Mod-tap changes write the key's hold and tap keys before its mode, as qmk.top does; otherwise
-    // the key map follows the magnet settings, as before.
-    const keysFirst = keys.some(c => c.layer === 'tap');
+    // Key-mode changes (mod-tap, toggle) write the key's key-map entries before its mode, as qmk.top
+    // does; otherwise the key map follows the magnet settings, as before.
+    const keysFirst = keys.some(c => c.layer === 'tap' || (c.layer === 'base' && edits.some(e => e.slot === c.slot && e.mode !== undefined)));
     if (keys.length && keysFirst) await writeKeys();
     if (edits.length) {
       const mg = await writeKeySettings(state.dev, state.settings, edits, (f, label) => { status.textContent = `${label}… ${Math.round(f * 100)}%`; });

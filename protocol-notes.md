@@ -655,6 +655,27 @@ device declares `noMagneticSwitch`; the RT75 doesn't, so RT75 Studio never write
 - **Reads stay in range:** `query()` allows sub 0–1 only on `0x8A`.
 - Demo-tested only so far (write, read-back and Undo; Undo writes the keys, then the mode).
 
+## Toggle (feature/toggle)
+
+qmk.top's "Toggle Switch (TGL)" advanced key (切换开关). Its help text: a tap switches the key's
+continuous triggering on or off; holding the key works normally.
+- **Two types, two modes** (param 7, `| 0x80` keeps RT): **4** = Long press (长按, `tgl_hold`): after
+  a tap the action stays held; **5** = Rapid fire (连点, `tgl_dots`): after a tap it repeats. qmk.top
+  sends no speed setting, so the firmware sets the repeat rate.
+- **The action** is the base layer (sub 0) only (`configs: [改键]`), up to three keys in the mod-tap
+  layout `[0, k1, k2, k3]` (`同步到设备_高级键_长按连点_TGL`: `skey = k1, key = k2, key2 = k3`).
+- **Write order:** the key-map entry (save), then the mode, as for mod-tap. Leaving toggle, RT75
+  Studio writes the base layer back as a plain key and the mode as Normal (qmk.top also clears
+  subs 1–3 there; toggle doesn't use them).
+- **Travel and dead zones aren't edited on mod-tap, toggle or DKS keys** (qmk.top's
+  `getIsTravelAndDeadZoneDisabled`: true when every selected key's settings type isn't
+  行程设置, and its advanced-key objects carry no travel). RT75 Studio shows them read-only for
+  such keys and drops travel and dead-zone edits on them from mixed selections. RT stays editable
+  (`fire` is kept).
+- **UI:** Configuration › Key modes tab; the side panel's Key mode switch (Normal · Mod-tap · DKS ·
+  Toggle) replaces mod-tap's own on/off switch. DKS is shown but disabled until its editor exists.
+- Demo-tested only so far.
+
 ## Lighting (main backlight)
 
 Source: RY5088 base `setLightSetting` / `getLightSetting`, and the RT75PRO device entry in the v4

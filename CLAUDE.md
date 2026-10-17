@@ -132,6 +132,12 @@ tabs spin until it's in). Startup over 2.4G: 24.7 s → 3.0 s, verified on the r
 Mod-tap. Mode 3 + hold key on the base layer + tap key on key-matrix sub-layer 1 + hold time
 (param 5), mirroring qmk.top (protocol-notes.md, "Mod-tap"). The tap layer loads with the key map.
 
+**Toggle (feature/toggle, branched from feature/mod-tap, demo-tested, not yet verified on the
+keyboard):** modes 4 (Long press) and 5 (Rapid fire) + the action on the base layer
+(protocol-notes.md, "Toggle"). The side panel's Key mode switch (Normal · Mod-tap · DKS · Toggle)
+replaces mod-tap's on/off switch; the Configuration tab is now "Key modes". Travel and dead zones are
+read-only on mod-tap and toggle keys, as in qmk.top.
+
 **Next, in the user's order:** custom lighting patterns (`0x0C`/`0x8C`).
 
 **Branches:** `feature/macros` holds the abandoned read-back approach and the full investigation
