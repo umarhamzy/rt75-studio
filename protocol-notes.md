@@ -748,6 +748,20 @@ qmk.top's "Dynamic Keystroke (DKS)" advanced key (动态键程). Mode param 7 = 
   - Clicking a bar clears it, and clears the continuation it started.
 - Demo-tested only so far.
 
+## Gamepad mode (not supported, 2026-10-17)
+
+The user asked for a Wootility / Keychron style gamepad (key depth as analog controller input).
+- qmk.top (v4 and GearHub) has no gamepad UI. The shared tables only decode key action **21**
+  (`ConfigGamepad`: X/Y/Z axes, throttle, rudder, hat directions, numbered buttons), a generic
+  joystick, not an analog Xbox controller.
+- The RY5088 base enables gamepad mode only from feature-list byte 3 (`getSupportsGamepadMode`);
+  the RT75 has no feature list, so qmk.top never treats it as supported.
+- **Checked by the user (2026-10-17):** with the RT75 on USB, it doesn't appear in `joy.cpl`, and
+  Device Manager shows no HID game controller for it. The firmware has no joystick interface, so
+  no configurator can add gamepad mode. A host-side virtual controller isn't possible either:
+  live depth (`0x1B`) reports only the key being moved.
+- RT75 Studio never writes action 21 (the key-map validator refuses it).
+
 ## Lighting (main backlight)
 
 Source: RY5088 base `setLightSetting` / `getLightSetting`, and the RT75PRO device entry in the v4
