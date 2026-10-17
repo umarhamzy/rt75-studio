@@ -2,7 +2,7 @@
 // key-matrix sub-layers, read ranges, against the demo's simulated keyboard.
 import { readFileSync } from 'node:fs';
 globalThis.setTimeout = f => (f(), 0);
-const { buildWritePackets, writeKeySettings, readSettings, readDksSettings, buildKeymapPackets, writeKeymap, writeBounds, isWritableAction } =
+const { isDksAction, buildWritePackets, writeKeySettings, readSettings, readDksSettings, buildKeymapPackets, writeKeymap, writeBounds, isWritableAction } =
   await import(new URL('../src/device.js', import.meta.url).href);
 const { createDemoDevice } = await import(new URL('../src/demo.js', import.meta.url).href);
 const dump = JSON.parse(readFileSync(new URL('../fixtures/sample-dump.json', import.meta.url), 'utf8'));
@@ -16,13 +16,19 @@ const W = 14; // slot of W
 const bounds = writeBounds(200);
 
 // Packets: mode, then trigger point, then trigger table (qmk.top's order 7, 4, 8).
-const triggers = (0x0f | (0x03 << 8) | (0xc0 << 16)) >>> 0;
+const triggers = (0x41 | (0x2c << 8) | (0x02 << 16)) >>> 0; // tap at both ends · hold bottom→release · hold trigger→bottom
 const pk = buildWritePackets([{ slot: W, mode: 2, dksTravel: 140, dksTriggers: triggers }], bounds);
 check('order: mode, trigger point, trigger table', pk.map(p => p.field).join() === 'mode,dksTravel,dksTriggers', pk.map(p => p.field).join());
 check('trigger point is param 4, uint16', hex(pk[1].pkt).startsWith('65 04 00 0e 00 00 00') && pk[1].pkt[8] === 140 && pk[1].pkt[9] === 0, hex(pk[1].pkt));
-check('trigger table is param 8, four bytes, save on it', hex(pk[2].pkt).startsWith('65 08 00 0e 01') && [...pk[2].pkt.slice(8, 13)].join() === '15,3,192,0,0', hex(pk[2].pkt));
+check('trigger table is param 8, four bytes, save on it', hex(pk[2].pkt).startsWith('65 08 00 0e 01') && [...pk[2].pkt.slice(8, 13)].join() === '65,44,2,0,0', hex(pk[2].pkt));
 blocked('trigger point under 0.5 mm refused', () => buildWritePackets([{ slot: W, dksTravel: 99 }], bounds));
 blocked('trigger point over 2.5 mm refused', () => buildWritePackets([{ slot: W, dksTravel: 501 }], bounds));
+
+// Trigger patterns: only what qmk.top's editor can make.
+const pat = c => c[0] | (c[1] << 2) | (c[2] << 4) | (c[3] << 6);
+check('allowed patterns', [[1, 0, 0, 1], [2, 0, 0, 0], [3, 2, 0, 0], [3, 3, 2, 0], [0, 3, 2, 1], [2, 2, 2, 1], [0, 0, 0, 0]].every(c => isDksAction(pat(c))));
+check('refused patterns', [[0, 0, 0, 2], [0, 0, 3, 0], [3, 0, 0, 0], [3, 1, 0, 0], [3, 3, 0, 0], [0, 0, 0, 3]].every(c => !isDksAction(pat(c))));
+blocked('a trigger table with a bad pattern is refused', () => buildWritePackets([{ slot: W, dksTriggers: pat([0, 0, 0, 2]) }], bounds));
 
 // Actions on sub-layers 2–3: keys only, like the tap layer.
 check('sub-layer actions: keys or clear', isWritableAction([0, 225, 26, 0], 'sub3', W) && isWritableAction([0, 0, 0, 0], 'sub2', W) && !isWritableAction([3, 0, 205, 0], 'sub2', W));

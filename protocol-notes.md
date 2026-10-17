@@ -712,6 +712,42 @@ continuous triggering on or off; holding the key works normally.
   back and behave as described, and set back to Normal cleanly (the side panel then names the key
   correctly; see the label fix on feature/toggle).
 
+## DKS (feature/dks)
+
+qmk.top's "Dynamic Keystroke (DKS)" advanced key (动态键程). Mode param 7 = **2** (`| 0x80` keeps RT).
+
+- **Two depths.** A trigger point, param **4** (`dynamicTravel`, uint16 × step), and the bottom of the
+  travel. qmk.top's editor: trigger point 0.5–2.5 mm, default 0.7 mm (`触发行程最小值:.5,
+  触发行程最大值:2.5, _触发行程:.7`); the bottom is drawn at 3.2 mm (`最大行程:3.2`).
+- **Four actions**, one per key-matrix sub-layer: action 1 = sub 0 (the base layer), actions 2–4 =
+  subs 1–3 (`修改按键` ↔ `o[0..3].configs`). Each is a combo of up to three keys in the mod-tap layout
+  `[0, k1, k2, k3]`; an empty action is `[0, 0, 0, 0]` (unlike mod-tap, not the key itself).
+- **Trigger table.** For each action, one byte of four 2-bit values, one per moment
+  (`动态行程`, `s[l] = c[3]<<6 | c[2]<<4 | c[1]<<2 | c[0]`):
+  - written per key as param **8** with four data bytes, action 1 first
+    (`_sendMagnetismInfoSimpleCMD(8, key, last, triggerModes)`)
+  - **read** for all keys as param **10**, **8 pages**: four 128-byte tables, action by action
+    (`_getMulitMagnetismCMD(10, 8)`, `B[g] = l.slice(g*128, (g+1)*128)[pos]`). This is the only
+    magnet read past page 3; `query()` allows pages 0–7 for param 10 only.
+  - qmk.top reads params 4 and 10 only when some key is DKS. RT75 Studio does the same at startup,
+    and reads them on demand (`readDksSettings`, 12 reads) before DKS is first edited.
+- **Write order** (single key): sub-layers 0–3 (save on the last), then mode, then 4, then 8, in
+  `setMagnetismInfoSimple`'s order (… 2, 3, **4**, **8**, 5, 251).
+- **Moments**, in bit order (qmk.top's DKS editor header, `data-cell-index` 0–3): 0 = pressing past
+  the trigger point, 1 = reaching the bottom (3.2 mm), 2 = leaving the bottom, 3 = releasing past
+  the trigger point.
+- **Values** (the editor's row component `Kt`, lazily loaded chunk `c6c48962.js`, fetched with
+  `reference/qmk/fetch-lazy.mjs`):
+  - 0: nothing (grey "+" circle; click makes it 1)
+  - 1: tap: press and release at that moment (a dot)
+  - 2: press at that moment, release at the next one (a bar to the next moment)
+  - 3: press, and stay held past the next moment; the following moment then holds 2 (or 3) to say
+    where it ends. Dragging a bar from moment 0 over two segments gives `[3, 2, …]`, over three
+    `[3, 3, 2, …]`; from moment 1 over two, `[…, 3, 2, …]`.
+  - Moment 3 can only be 0 or 1 (its bar has no next moment to stretch to).
+  - Clicking a bar clears it, and clears the continuation it started.
+- Demo-tested only so far.
+
 ## Lighting (main backlight)
 
 Source: RY5088 base `setLightSetting` / `getLightSetting`, and the RT75PRO device entry in the v4

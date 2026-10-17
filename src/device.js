@@ -100,6 +100,17 @@ async function readMagnetParam(t, field) {
 }
 const usesDks = magnet => magnet.mode.some(m => (m & 0x7f) === 2);
 
+// One DKS action's trigger byte: four 2-bit values for the moments press past the trigger point,
+// bottom, leave the bottom, release past the trigger point (0 nothing, 1 tap, 2 hold to the next
+// moment, 3 hold past it). Only what qmk.top's editor can make: a 3 continues into a 2 or 3, a hold
+// can't run past the last moment, and the last moment is a tap at most.
+export function isDksAction(byte) {
+  const c = [0, 2, 4, 6].map(s => (byte >> s) & 3);
+  if (c[3] > 1 || c[2] === 3) return false;
+  for (let i = 0; i < 2; i++) if (c[i] === 3 && c[i + 1] < 2) return false;
+  return true;
+}
+
 const REPORT_RATES = { 0: 8000, 1: 4000, 2: 2000, 3: 1000, 4: 500, 5: 250, 6: 125 };
 // The RT75 Pro's USB and dongle filters in qmk.top/v4 declare reportRate 8000, so every rate is offered.
 export const RATE_OPTIONS = [8000, 4000, 2000, 1000, 500, 250, 125];
@@ -481,7 +492,9 @@ function assertAllowedWrite(p, bounds) {
     case WRITABLE.dksTravel:
       range(bounds.dksMin, bounds.dksMax);
       break;
-    // dksTriggers: every 2-bit value is a valid trigger setting, so any four bytes are allowed.
+    case WRITABLE.dksTriggers:
+      for (let i = 0; i < 4; i++) if (!isDksAction((v >>> (i * 8)) & 0xff)) fail(`DKS action ${i + 1} has a trigger pattern qmk.top can't make`);
+      break;
   }
 }
 
