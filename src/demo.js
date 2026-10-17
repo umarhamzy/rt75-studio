@@ -5,8 +5,8 @@ import { DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX } from './layout.js';
 // so the whole read / edit / write / verify flow can be tried without hardware.
 // Profiles 1-4 each keep their own key settings; profile 2 starts with every key at 1.00 mm.
 
-const PARAMS = { 7: 'mode', 0: 'actuation', 1: 'release', 6: 'bottomDeadZone', 2: 'rtPress', 3: 'rtRelease', 251: 'topDeadZone', 9: 'snapPartner', 5: 'mtTime', 252: 'switchType' };
-const WIDE = new Set([0, 1, 6, 2, 3]);
+const PARAMS = { 7: 'mode', 0: 'actuation', 1: 'release', 6: 'bottomDeadZone', 2: 'rtPress', 3: 'rtRelease', 251: 'topDeadZone', 9: 'snapPartner', 5: 'mtTime', 4: 'dksTravel', 252: 'switchType' };
+const WIDE = new Set([0, 1, 6, 2, 3, 4]);
 
 // options.ignore: [{ slot, param }] writes the simulated keyboard silently drops, to reproduce
 // failed writes (e.g. ?demo&ignore=15:7 drops mode writes to S).
@@ -15,7 +15,11 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
   profiles[1].actuation = profiles[1].actuation.map(v => (v ? 200 : 0));
   profiles[1].release = profiles[1].release.map(v => (v ? 200 : 0));
   profiles[1].mode = profiles[1].mode.map(() => 0);
-  for (const p of profiles) p.mtTime ??= new Array(p.mode.length).fill(0);
+  for (const p of profiles) {
+    p.mtTime ??= new Array(p.mode.length).fill(0);
+    p.dksTravel ??= p.dksStart ?? new Array(p.mode.length).fill(0);
+    p.dksTriggers = new Array(p.mode.length).fill(0); // DKS trigger table, 4 bytes per key (packed)
+  }
   let profile = 0, rateCode = 3; // 1000 Hz
   // Sleep timers (seconds, uint16 LE): BT backlight 120, 2.4G backlight 120, BT deep 1680, 2.4G deep 1680
   let sleepBytes = Uint8Array.from([120, 0, 120, 0, 0x90, 0x06, 0x90, 0x06]);
@@ -96,6 +100,10 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
       if (last[0] === 0x0a) { keymaps[last[1]][last[6]].splice(last[2] * 4, 4, ...last.slice(8, 12)); return; }
       if (last[0] === 0x10) { fnLayers[last[2]][last[1]].splice(last[3] * 4, 4, ...last.slice(8, 12)); return; }
       if (last[0] === 0x65 && ignore.some(x => x.slot === last[3] && x.param === last[1])) return;
+      if (last[0] === 0x65 && last[2] === 0 && last[1] === 8) {
+        store().dksTriggers[last[3]] = (last[8] | (last[9] << 8) | (last[10] << 16) | (last[11] << 24)) >>> 0;
+        return;
+      }
       if (last[0] === 0x65 && last[2] === 0) {
         const name = PARAMS[last[1]];
         if (name) store()[name][last[3]] = WIDE.has(last[1]) ? last[8] | (last[9] << 8) : last[8];
@@ -118,6 +126,11 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
         case 0x8a: r.set(keymaps[last[1]][last[4]].slice(last[3] * 64, last[3] * 64 + 64)); break;
         case 0x90: r.set(fnLayers[last[2]][last[1]].slice(last[4] * 64, last[4] * 64 + 64)); break;
         case 0xe5: {
+          if (last[1] === 10) { // DKS trigger table: action-major, 128 bytes per action
+            const all = [0, 8, 16, 24].flatMap(s => store().dksTriggers.map(v => (v >>> s) & 0xff));
+            r.set(all.slice(last[3] * 64, last[3] * 64 + 64));
+            break;
+          }
           const name = PARAMS[last[1]];
           const bytes = WIDE.has(last[1]) ? store()[name].flatMap(v => [v & 255, v >> 8]) : store()[name];
           r.set(bytes.slice(last[3] * 64, last[3] * 64 + 64));

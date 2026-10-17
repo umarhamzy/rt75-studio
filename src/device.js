@@ -46,12 +46,16 @@ export const WRITABLE = {
   topDeadZone: 251,
   snapPartner: 9,
   mtTime: 5,
+  dksTravel: 4,   // DKS trigger point (qmk.top's 触发行程 / dynamicTravel)
+  dksTriggers: 8, // DKS trigger table: four bytes per key (read back as param 10)
 };
 // One byte per key; the rest are uint16 LE.
 const NARROW_PARAMS = new Set([WRITABLE.mode, WRITABLE.topDeadZone, WRITABLE.snapPartner, WRITABLE.mtTime]);
-// Order qmk.top/v4 uses within one key: mode first, then 0, 1, 6, 2, 3, 5, 251
+// Four bytes per key (kept as one packed number, byte 0 lowest): the DKS trigger table.
+const QUAD_PARAMS = new Set([WRITABLE.dksTriggers]);
+// Order qmk.top/v4 uses within one key: mode first, then 0, 1, 6, 2, 3, 4, 8, 5, 251
 // (setMagnetismInfoSimple); Snap partners (9) are sent last (setMultiMagnetismInfo).
-const WRITE_ORDER = ['mode', 'actuation', 'release', 'bottomDeadZone', 'rtPress', 'rtRelease', 'mtTime', 'topDeadZone', 'snapPartner'];
+const WRITE_ORDER = ['mode', 'actuation', 'release', 'bottomDeadZone', 'rtPress', 'rtRelease', 'dksTravel', 'dksTriggers', 'mtTime', 'topDeadZone', 'snapPartner'];
 
 // Setting ranges in mm, from qmk.top/v4 for this device: actuation/release 0.1 to 3.3,
 // Rapid Trigger sensitivity one step (0.005) to 2.0, top and bottom dead zone 0 to 1.
@@ -60,6 +64,7 @@ export const LIMITS = {
   rt: { max: 2.0 },
   deadZone: { min: 0, max: 1 },
   mtTime: { min: 10, max: 1000, default: 200 }, // mod-tap hold time in ms, stored ÷ 10 (qmk.top's 按键时间)
+  dks: { min: 0.5, max: 2.5, default: 0.7, bottom: 3.2 }, // DKS trigger point in mm (qmk.top's 触发行程, 最大行程)
 };
 
 // Magnet parameters: [param, name, pages, 16-bit values]
@@ -75,6 +80,25 @@ const MAGNET_PARAMS = [
   [5, 'mtTime', 2, false],
   [252, 'switchType', 2, false],
 ];
+
+// DKS settings, read only when a key uses DKS (as qmk.top does) or when the DKS editor needs them.
+// The trigger table is written per key as param 8 but read for all keys as param 10: 4 × 128 bytes,
+// action by action (qmk.top getMultiMagnetismInfo).
+const DKS_TRIGGER_READ = 10;
+const DKS_FIELDS = ['dksTravel', 'dksTriggers'];
+const DKS_READS = 4 + 8;
+
+async function readMagnetParam(t, field) {
+  if (field === 'dksTriggers') {
+    const b = await t.readPages([CMD.GET_MAGNETISM, DKS_TRIGGER_READ, 1, 0], 8);
+    return Array.from({ length: 128 }, (_, k) => (b[k] | (b[128 + k] << 8) | (b[256 + k] << 16) | (b[384 + k] << 24)) >>> 0);
+  }
+  if (field === 'dksTravel') return u16(await t.readPages([CMD.GET_MAGNETISM, WRITABLE.dksTravel, 1, 0], 4));
+  const [param, , pages, wide] = MAGNET_PARAMS.find(m => m[1] === field);
+  const bytes = await t.readPages([CMD.GET_MAGNETISM, param, 1, 0], pages);
+  return wide ? u16(bytes) : bytes;
+}
+const usesDks = magnet => magnet.mode.some(m => (m & 0x7f) === 2);
 
 const REPORT_RATES = { 0: 8000, 1: 4000, 2: 2000, 3: 1000, 4: 500, 5: 250, 6: 125 };
 // The RT75 Pro's USB and dongle filters in qmk.top/v4 declare reportRate 8000, so every rate is offered.
@@ -161,16 +185,16 @@ class Transport {
     if (!READ_COMMANDS.has(cmd[0])) throw new Error(`Blocked non-read command 0x${cmd[0].toString(16)}`);
     // Reads stay inside the ranges qmk.top uses: firmware doesn't bounds-check them (a macro read at
     // index 254/255 hung the keyboard until it was power-cycled, 2026-10-15).
-    // Sub-layer (byte 4): 0 is the base layer, 1 holds mod-tap tap actions. qmk.top reads 0–3; this
-    // app only needs 0–1.
-    if (cmd[0] === CMD.GET_KEYMATRIX && !(cmd[1] < PROFILE_COUNT && cmd[3] < 8 && (cmd[4] ?? 0) <= TAP_SUB)) {
+    // Sub-layer (byte 4): 0 is the base layer; 1–3 hold mod-tap and DKS actions (qmk.top reads 0–3).
+    if (cmd[0] === CMD.GET_KEYMATRIX && !(cmd[1] < PROFILE_COUNT && cmd[3] < 8 && (cmd[4] ?? 0) <= 3)) {
       throw new Error(`Blocked key-map read outside profiles 1–${PROFILE_COUNT} (profile ${cmd[1]}, page ${cmd[3]}, sub ${cmd[4]})`);
     }
     // Only Fn layer 0 exists on this keyboard (see FN_LAYER); OS 0/1, pages 0–7.
     if (cmd[0] === CMD.GET_FN && !(cmd[1] <= 1 && cmd[2] === 0 && cmd[4] < 8)) {
       throw new Error(`Blocked Fn-layer read outside layer 0 (os ${cmd[1]}, layer ${cmd[2]}, page ${cmd[4]})`);
     }
-    if (cmd[0] === CMD.GET_MAGNETISM && !(cmd[3] < 4)) throw new Error(`Blocked magnet read beyond page 3 (page ${cmd[3]})`);
+    // Magnet tables are 4 pages; the DKS trigger table (param 10) is 8, as qmk.top reads it.
+    if (cmd[0] === CMD.GET_MAGNETISM && !(cmd[3] < (cmd[1] === DKS_TRIGGER_READ ? 8 : 4))) throw new Error(`Blocked magnet read beyond its pages (param ${cmd[1]}, page ${cmd[3]})`);
     // Custom lighting patterns: the Custom effect's five patterns, 6 pages each (qmk.top getLightPic).
     if (cmd[0] === CMD.GET_USERPIC && !(cmd[1] < USERPIC_LAYERS && cmd[2] === 0xff && cmd[3] < 6)) {
       throw new Error(`Blocked custom-pattern read outside patterns 1–${USERPIC_LAYERS} (pattern ${cmd[1]}, page ${cmd[3]})`);
@@ -270,7 +294,7 @@ function decodeKbOption(r) {
 export function readKbOption(dev, settings) {
   return withDevice(dev, settings, async t => decodeKbOption(await t.query([CMD.GET_KBOPTION])));
 }
-const KEYMAP_READS = 8 + 8 + 16; // base layer + mod-tap tap layer + two Fn layers
+const KEYMAP_READS = 8 * 4 + 16; // the key matrix's four sub-layers + two Fn layers
 
 // Reads everything the keyboard view needs. onProgress(fraction, label) is optional; the label
 // names what is being read now. With { keymaps: false } the base layer and Fn layers (24 reads)
@@ -324,6 +348,10 @@ export function readSettings(dev, onProgress = () => {}, { keymaps = true } = {}
         const bytes = await t.readPages([CMD.GET_MAGNETISM, param, 1, 0], pages);
         s.magnet[name] = wide ? u16(bytes) : bytes;
       }
+      if (usesDks(s.magnet)) {
+        reading('DKS');
+        for (const f of DKS_FIELDS) s.magnet[f] = await readMagnetParam(t, f);
+      }
       onProgress(1, 'Done');
       s.source = 'device';
       s.loadStats = { ms: Date.now() - started, reads: t.reads, timing: t.viaDongle ? dongleTiming : 'usb' };
@@ -334,16 +362,27 @@ export function readSettings(dev, onProgress = () => {}, { keymaps = true } = {}
   });
 }
 
-// Base layer of the profile, its mod-tap tap layer (sub 1), then the shared Fn layers
-// ([0x90, os, Fn layer 0, 0xFF, page]).
+// The profile's key matrix: the base layer and sub-layers 1–3 (mod-tap's tap key, DKS actions
+// 2–4; qmk.top reads all four), then the shared Fn layers ([0x90, os, Fn layer 0, 0xFF, page]).
 async function readLayers(t, profile, reading = () => {}) {
   reading('Key map');
   const keymap = await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, 0], 8);
-  const tapLayer = await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, TAP_SUB], 8);
+  const tapLayer = await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, 1], 8);
+  const sub2Layer = await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, 2], 8);
+  const sub3Layer = await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, 3], 8);
   reading('Fn layers');
   const fnWin = await readFnLayer(t, 0);
   const fnMac = await readFnLayer(t, 1);
-  return { keymap, tapLayer, fnWin, fnMac };
+  return { keymap, tapLayer, sub2Layer, sub3Layer, fnWin, fnMac };
+}
+
+// Reads the DKS travel and trigger table (12 reads) for a keyboard where no key used DKS at
+// startup. Returns { dksTravel, dksTriggers } (per-slot arrays).
+export function readDksSettings(dev, settings) {
+  return withDevice(dev, settings, async t => ({
+    dksTravel: await readMagnetParam(t, 'dksTravel'),
+    dksTriggers: await readMagnetParam(t, 'dksTriggers'),
+  }));
 }
 
 // Reads the key map and Fn layers on their own (24 reads), for loading them when they're needed.
@@ -395,6 +434,8 @@ export function writeBounds(step) {
     rtMax: Math.round(LIMITS.rt.max * step),
     dzMin: Math.round(LIMITS.deadZone.min * step),
     dzMax: Math.min(255, Math.round(LIMITS.deadZone.max * step)), // top dead zone is one byte
+    dksMin: Math.round(LIMITS.dks.min * step),
+    dksMax: Math.round(LIMITS.dks.max * step),
   };
 }
 
@@ -410,9 +451,10 @@ function assertAllowedWrite(p, bounds) {
   if (p[4] !== 0 && p[4] !== 1) fail('bad last flag');
   if (p[5] !== 0 || p[6] !== 0) fail('reserved bytes');
   if (p[7] !== 255 - (p.slice(0, 7).reduce((a, b) => a + b, 0) & 0xff)) fail('checksum');
-  const wide = !NARROW_PARAMS.has(p[1]);
-  if (p.slice(wide ? 10 : 9).some(b => b !== 0)) fail('trailing bytes');
-  const v = wide ? p[8] | (p[9] << 8) : p[8];
+  const quad = QUAD_PARAMS.has(p[1]);
+  const wide = !NARROW_PARAMS.has(p[1]) && !quad;
+  if (p.slice(quad ? 12 : wide ? 10 : 9).some(b => b !== 0)) fail('trailing bytes');
+  const v = quad ? (p[8] | (p[9] << 8) | (p[10] << 16) | (p[11] << 24)) >>> 0 : wide ? p[8] | (p[9] << 8) : p[8];
   const range = (lo, hi) => { if (v < lo || v > hi) fail(`value ${v} outside ${lo}–${hi}`); };
   switch (p[1]) {
     case WRITABLE.mode:
@@ -436,6 +478,10 @@ function assertAllowedWrite(p, bounds) {
     case WRITABLE.mtTime:
       range(LIMITS.mtTime.min / 10, LIMITS.mtTime.max / 10);
       break;
+    case WRITABLE.dksTravel:
+      range(bounds.dksMin, bounds.dksMax);
+      break;
+    // dksTriggers: every 2-bit value is a valid trigger setting, so any four bytes are allowed.
   }
 }
 
@@ -447,7 +493,9 @@ function assertAllowedWrite(p, bounds) {
 export function buildWritePackets(edits, bounds) {
   const items = edits.flatMap(e => WRITE_ORDER.filter(f => e[f] !== undefined).map(f => ({ slot: e.slot, field: f, value: e[f] })));
   return items.map((it, i) => {
-    const data = NARROW_PARAMS.has(WRITABLE[it.field]) ? [it.value & 0xff] : [it.value & 0xff, (it.value >> 8) & 0xff];
+    const param = WRITABLE[it.field];
+    const data = QUAD_PARAMS.has(param) ? [0, 8, 16, 24].map(s => (it.value >>> s) & 0xff)
+      : NARROW_PARAMS.has(param) ? [it.value & 0xff] : [it.value & 0xff, (it.value >> 8) & 0xff];
     const head = [SET_MAGNETISM, WRITABLE[it.field], 0, it.slot, i === items.length - 1 ? 1 : 0, 0, 0];
     const pkt = encode([...head, 0, ...data]);
     assertAllowedWrite(pkt, bounds);
@@ -479,9 +527,7 @@ export async function writeKeySettings(dev, settings, edits, onProgress = () => 
   };
   const readBack = async (fields, magnet) => {
     for (const field of fields) {
-      const [param, name, pages, wide] = MAGNET_PARAMS.find(m => m[1] === field);
-      const bytes = await t.readPages([CMD.GET_MAGNETISM, param, 1, 0], pages);
-      magnet[name] = wide ? u16(bytes) : bytes;
+      magnet[field] = await readMagnetParam(t, field);
       onProgress(Math.min(1, ++done / total), 'Verifying');
     }
   };
@@ -744,12 +790,16 @@ async function readFnLayer(t, os) {
 // The base save flag goes only on the batch's final base packet, as with magnet writes.
 const SET_KEYMATRIX = 0x0a;
 const SET_FN = 0x10;
-// Mod-tap: the hold action is the base layer (sub 0) and the tap action is sub-layer 1 of the same
-// profile's key matrix, all zeros from the factory (protocol-notes.md, "Mod-tap").
-const TAP_SUB = 1;
+// The profile's key matrix has four sub-layers, all zeros from the factory except the base layer.
+// Mod-tap: hold = base (sub 0), tap = sub 1. DKS: actions 1–4 = subs 0–3 (protocol-notes.md,
+// "Mod-tap" and "DKS").
+const SUB_LAYERS = new Set(['tap', 'sub2', 'sub3']);
+const ZEROS = new Array(DEFAULT_MATRIX.length).fill(0);
 export const KEYMAP_LAYERS = {
   base: { sub: 0, factory: DEFAULT_MATRIX },
-  tap: { sub: TAP_SUB, factory: new Array(DEFAULT_MATRIX.length).fill(0) },
+  tap: { sub: 1, factory: ZEROS },
+  sub2: { sub: 2, factory: ZEROS },
+  sub3: { sub: 3, factory: ZEROS },
   fnWin: { os: 0, factory: DEFAULT_FN_MATRIX },
   fnMac: { os: 1, factory: DEFAULT_FN_MAC_MATRIX },
 };
@@ -765,7 +815,7 @@ export function isWritableAction(a, layer, slot) {
   const factory = KEYMAP_LAYERS[layer].factory.slice(slot * 4, slot * 4 + 4);
   if (a.join() === factory.join()) return true;
   if (a.join() === '0,0,0,0') return true;
-  if (layer === 'tap') return isModTapKeys(a); // tap actions are keys only, as in qmk.top
+  if (SUB_LAYERS.has(layer)) return isModTapKeys(a); // mod-tap and DKS actions are keys only, as in qmk.top
   if (FUNCTION_BYTES.has(a.join())) return true;
   if (a[0] === 9) return MACRO_MODE_IDS.has(a[1]) && a[2] < MAX_MACROS && a[3] === 0; // run macro slot
   if (a[0] !== 0) return false;
@@ -792,8 +842,8 @@ function assertAllowedKeymapWrite(p, ctx) {
   if (p.slice(12).some(b => b !== 0)) fail('trailing bytes');
   let layer, slot;
   if (p[0] === SET_KEYMATRIX) {
-    if (p[1] !== ctx.profile || p[3] !== 0 || p[4] !== 0 || (p[5] !== 0 && p[5] !== 1) || (p[6] !== 0 && p[6] !== TAP_SUB)) fail('header');
-    layer = p[6] === TAP_SUB ? 'tap' : 'base'; slot = p[2];
+    if (p[1] !== ctx.profile || p[3] !== 0 || p[4] !== 0 || (p[5] !== 0 && p[5] !== 1) || p[6] > 3) fail('header');
+    layer = ['base', 'tap', 'sub2', 'sub3'][p[6]]; slot = p[2];
   } else if (p[0] === SET_FN) {
     if ((p[1] !== 0 && p[1] !== 1) || p[2] !== FN_LAYER || p[4] !== 0 || p[5] !== 0 || p[6] !== 0) fail('header');
     layer = p[1] === 0 ? 'fnWin' : 'fnMac'; slot = p[3];
@@ -805,18 +855,19 @@ function assertAllowedKeymapWrite(p, ctx) {
   if (!isWritableAction([...p.slice(8, 12)], layer, slot)) fail('action not allowed');
 }
 
-// edits: [{ layer: 'base'|'tap'|'fnWin'|'fnMac', slot, action: [4 bytes] }]
-// Base and tap-layer edits are the profile's key matrix (sub 0 and 1); the save flag goes only on
-// the last of those. A key's tap edit follows its base (hold) edit, as in qmk.top.
+// edits: [{ layer: 'base'|'tap'|'sub2'|'sub3'|'fnWin'|'fnMac', slot, action: [4 bytes] }]
+// Base and sub-layer edits are the profile's key matrix; the save flag goes only on the last of
+// those. A key's key-matrix edits go together, sub-layer 0 first, as qmk.top writes them.
 export function buildKeymapPackets(edits, profile) {
   if (!(profile >= 0 && profile < PROFILE_COUNT)) throw new Error('Unknown profile');
-  const ordered = [];
+  const matrix = e => KEYMAP_LAYERS[e.layer].sub !== undefined;
+  const ordered = [], slots = new Set();
   for (const e of edits) {
-    if (e.layer === 'tap') continue;
-    ordered.push(e);
-    if (e.layer === 'base') ordered.push(...edits.filter(x => x.layer === 'tap' && x.slot === e.slot));
+    if (!matrix(e)) { ordered.push(e); continue; }
+    if (slots.has(e.slot)) continue;
+    slots.add(e.slot);
+    ordered.push(...edits.filter(x => matrix(x) && x.slot === e.slot).sort((a, b) => KEYMAP_LAYERS[a.layer].sub - KEYMAP_LAYERS[b.layer].sub));
   }
-  ordered.push(...edits.filter(x => x.layer === 'tap' && !ordered.includes(x)));
   const lastMatrix = ordered.map(e => KEYMAP_LAYERS[e.layer].sub !== undefined).lastIndexOf(true);
   return ordered.map((e, i) => {
     const sub = KEYMAP_LAYERS[e.layer].sub;

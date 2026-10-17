@@ -31,8 +31,8 @@ const pk = buildKeymapPackets([
   { layer: 'base', slot: CAPS, action: [0, 224, 0, 0] },
 ], 1);
 const order = pk.map(p => p.layer).join();
-check('tap follows its hold; other edits keep their place', order === 'fnWin,base,tap', order);
-const [fnP, holdP, tapP] = pk;
+check('key-matrix edits for one key go together, hold first', order === 'base,tap,fnWin', order);
+const [holdP, tapP, fnP] = pk;
 check('hold is the base layer (sub 0), no save', hex(holdP.pkt).startsWith('0a 01 03 00 00 00 00') && holdP.pkt.slice(8, 12).join() === '0,224,0,0', hex(holdP.pkt));
 check('tap is sub 1 with the save flag', tapP.pkt[6] === 1 && tapP.pkt[5] === 1, hex(tapP.pkt));
 check('Fn edits keep no save byte', fnP.pkt[0] === 0x10 && fnP.pkt[5] === 0);
@@ -60,7 +60,7 @@ check('hold times read', s.magnet.mtTime?.length === 128);
   const subs = [];
   dev3.sendFeatureReport = async (id, b) => { if (b[0] === 0x8a) subs.push(b[4]); return send(id, b); };
   await readSettings(dev3);
-  check('key-matrix reads use sub 0 and 1 only', subs.length === 16 && subs.every(v => v === 0 || v === 1), subs.join());
+  check('key-matrix reads cover subs 0–3, 8 pages each', subs.length === 32 && [0, 1, 2, 3].every(n => subs.filter(v => v === n).length === 8), subs.join());
   void s3;
 }
 
