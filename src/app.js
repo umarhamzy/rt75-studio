@@ -2547,11 +2547,15 @@ function renderKeyboardSettings() {
       ${[['auto', `Follow keyboard${kbOs ? ` (${OS_NAMES[keyboardOs()]})` : ''}`], ['win', 'Windows'], ['mac', 'Mac']].map(([v, t]) =>
         `<button type="button" id="os-${v}" data-os="${v}" aria-pressed="${state.osPref === v}">${t}</button>`).join('')}
     </div>`;
+  const osNote = state.osPref === 'auto'
+    ? (kbOs ? `Showing the ${OS_NAMES[currentOs()]} Fn layer in Key map and Macros, from the keyboard’s Win/Mac switch. The keyboard keeps both.` : `The keyboard’s Win/Mac switch isn’t known here, so this follows your computer (${OS_NAMES[currentOs()]}).`)
+    : `Pinned to ${OS_NAMES[state.osPref]}: Key map and Macros show only that Fn layer. The keyboard keeps both.`;
+  // qmk.top/v4 is the official configurator this app mirrors; it has what RT75 Studio doesn't
+  // change (calibration, firmware, factory reset, toggle keys).
+  const qmkTile = tile('qmk.top', `<p class="set-note">The official configurator, for calibration, firmware updates and factory reset. Close RT75 Studio first: only one page can use the keyboard at a time.</p>
+      <a class="btn btn-small set-ext" href="https://qmk.top/v4/" target="_blank" rel="noopener noreferrer">Open qmk.top<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M18 14v5H5V6h5"/></svg></a>`);
   const studio = group('RT75 Studio', 'this browser',
-    tile('Fn layer shown', osPicker, { wide: true }),
-    state.osPref === 'auto'
-      ? (kbOs ? `Showing the ${OS_NAMES[currentOs()]} Fn layer in Key map and Macros, from the keyboard’s Win/Mac switch. The keyboard keeps both.` : `The keyboard’s Win/Mac switch isn’t known here, so this follows your computer (${OS_NAMES[currentOs()]}).`)
-      : `Pinned to ${OS_NAMES[state.osPref]}: Key map and Macros show only that Fn layer. The keyboard keeps both.`);
+    tile('Fn layer shown', `${osPicker}<p class="set-note">${osNote}</p>`, { wide: true }) + qmkTile);
 
   if (!s) {
     el.innerHTML = `<div class="set-stack">${studio}<p class="set-foot">Connect the keyboard (or open a dump) to see its settings.</p></div>`;
