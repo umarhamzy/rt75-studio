@@ -54,7 +54,7 @@ const state = {
   pendingLight: null,        // lighting setting to write, or null
   // Custom lighting patterns (the Custom effect's Pattern 1–5): what the keyboard has (read on
   // demand), unsaved edits, and the editor's colours. mode: which Lighting editor is open.
-  pt: { mode: 'effect', layer: 0, saved: {}, edits: {}, loading: null, error: null, a: '#0a2a55', b: '#ff9500', fill: null,
+  pt: { mode: 'effect', layer: 0, saved: {}, edits: {}, loading: new Set(), error: null, a: '#0a2a55', b: '#ff9500', fill: null,
     picture: null, fit: 'cover', vivid: true }, // picture: { bitmap, name, url } in memory only
   patternLibrary: [],        // saved designs in this browser: [{ id, name, colors }]
   library: [],               // macro library (this browser): [{ id, name, repeat, steps, slot?, written? }]
@@ -2631,11 +2631,11 @@ function ledPreview() {
       default: return 0;
     }
   };
-  const pic = e.key === 'LightUserPicture' ? patternColors(l.option) : null;
-  if (pic) {
+  if (e.key === 'LightUserPicture') {
+    const pic = patternColors(l.option);
     return { paint(el, key) {
       el.classList.add('led-key');
-      if (level === 0) { el.classList.add('led-dark'); return; }
+      if (level === 0 || !pic) { el.classList.add('led-dark'); return; } // dark until the pattern is read
       el.style.setProperty('--led', keyColor(pic, key.slot));
       el.style.setProperty('--led-mix', `${Math.round(level * 70)}%`);
       el.style.setProperty('--led-glow', `${Math.round(level * 55)}%`);
@@ -2676,7 +2676,7 @@ function renderLightingPanel() {
   if (state.pt.mode === 'patterns') { renderPatternPanel(); return; }
   const can = editable();
   const e = effectById(l.effect);
-  if (e?.key === 'LightUserPicture') ensurePattern(l.option); // so the preview shows the real pattern
+  if (e?.key === 'LightUserPicture') ensureAllPatterns(l.option); // so the preview shows the real patterns
   const change = lightChange();
   const dis = can ? '' : 'disabled';
   const changed = f => (change?.fields.includes(f) ? ' is-changed' : '');
@@ -2713,8 +2713,8 @@ function renderLightingPanel() {
     <h3 class="lt-head${changed('rainbow') || changed('color')}">Colour ${hasColor ? '' : '<span class="muted">set by the effect</span>'}</h3>
     <div class="sw-row${hasColor ? '' : ' is-off'}" role="group" aria-label="Colour">${swatches}</div>
     ${e?.options ? `<h3 class="lt-head${changed('option')}">${optionHeading(e)}</h3>
-      <div class="segmented segmented-sm opt-picker" role="group" aria-label="${optionHeading(e)}">
-        ${e.options.map((o, i) => `<button type="button" data-opt="${i}" aria-pressed="${l.option === i}" ${can && isOffered(e) ? '' : 'disabled'}>${o}</button>`).join('')}
+      <div class="segmented segmented-sm opt-picker${e.key === 'LightUserPicture' ? ' opt-numbers' : ''}" role="group" aria-label="${optionHeading(e)}">
+        ${e.options.map((o, i) => `<button type="button" data-opt="${i}" aria-pressed="${l.option === i}" ${can && isOffered(e) ? '' : 'disabled'} ${e.key === 'LightUserPicture' ? `aria-label="${o}"` : ''}>${e.key === 'LightUserPicture' ? i + 1 : o}</button>`).join('')}
       </div>` : ''}
     ${notes.map(n => `<p class="note">${n}</p>`).join('')}`;
 
@@ -2750,8 +2750,8 @@ const patternRows = changes => changes.map(c => `<tr><td>Lighting</td><td>Custom
 
 async function ensurePattern(layer) {
   const s = state.settings;
-  if (!s || s.source !== 'device' || !state.dev || state.pt.saved[layer] || state.pt.loading === layer) return;
-  state.pt.loading = layer;
+  if (!s || s.source !== 'device' || !state.dev || state.pt.saved[layer] || state.pt.loading.has(layer)) return;
+  state.pt.loading.add(layer);
   state.pt.error = null;
   try {
     const colors = await readUserPic(state.dev, s, layer);
@@ -2759,9 +2759,13 @@ async function ensurePattern(layer) {
   } catch (e) {
     if (state.settings === s) state.pt.error = `Couldn’t read pattern ${layer + 1}: ${e.message}`;
   } finally {
-    if (state.pt.loading === layer) state.pt.loading = null;
+    state.pt.loading.delete(layer);
     if (state.view === 'lighting' && !state.busy) refresh();
   }
+}
+// All five patterns, the shown one first, so switching between them needs no wait.
+function ensureAllPatterns(first = 0) {
+  [first, ...[0, 1, 2, 3, 4].filter(i => i !== first)].forEach(i => ensurePattern(i));
 }
 
 // Applies fn to the current pattern. The first change also switches the lighting to Custom with this
@@ -2800,11 +2804,11 @@ function wireLightModeSwitch(el) {
 function renderPatternPanel() {
   const el = $('inspector');
   const s = state.settings, pt = state.pt, layer = pt.layer;
-  if (s.source === 'device') ensurePattern(layer);
+  if (s.source === 'device') ensureAllPatterns(layer);
   const colors = patternColors(layer), saved = pt.saved[layer];
   const changed = colors && saved ? keysChanged(colors, saved) : 0;
   const status = s.source !== 'device' ? 'Connect the keyboard to read and edit its patterns.'
-    : pt.loading === layer ? `Reading pattern ${layer + 1}…`
+    : pt.loading.has(layer) ? `Reading pattern ${layer + 1}…`
     : pt.error ? escapeHtml(pt.error)
     : changed ? `${changed} key${changed === 1 ? '' : 's'} recoloured · unsaved` : `Pattern ${layer + 1} as on the keyboard.`;
   const thumb = c => `<span class="pt-thumb" aria-hidden="true">${MAGNETIC.map(k => `<i style="left:${(k.x / LAYOUT_WIDTH * 100).toFixed(2)}%;top:${(k.y / LAYOUT_HEIGHT * 100).toFixed(2)}%;width:${(k.w / LAYOUT_WIDTH * 100 - 0.6).toFixed(2)}%;height:${(k.h / LAYOUT_HEIGHT * 100 - 2).toFixed(2)}%;background:${keyColor(c, k.slot)}"></i>`).join('')}</span>`;
@@ -3157,7 +3161,7 @@ function load(settings, dev = null) {
   state.pendingMacroWrites.clear();
   state.library = loadLibrary(!!settings.demo);
   state.patternLibrary = loadPatternLibrary(!!settings.demo);
-  state.pt = { ...state.pt, saved: {}, edits: {}, loading: null, error: null };
+  state.pt = { ...state.pt, saved: {}, edits: {}, loading: new Set(), error: null };
   state.capture = null;
   state.lastApplied = null;
   refresh();

@@ -1010,3 +1010,5 @@ select.dd-native { display: none !important; }
 .pt-pic .btn { flex: none; }
 .pt-fit { display: grid; grid-template-columns: 1fr 1fr; margin-bottom: 6px; }
 #board.is-drop { outline: 2px dashed var(--rt); outline-offset: 6px; }
+/* Custom effect: patterns 1–5 on one row. */
+.opt-picker.opt-numbers { display: grid; grid-template-columns: repeat(5, 1fr); }
