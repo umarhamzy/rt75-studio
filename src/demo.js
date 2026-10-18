@@ -61,6 +61,10 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
   fnLayers[0][0].splice(27 * 4, 4, 9, 1, 0, 0);
   // Macro slots as written (256-byte buffers). The demo, like RT75 Studio, never reads them back.
   const macros = new Map();
+  // Custom lighting patterns 1–5 (128 slots × R, G, B). Pattern 1 starts as a gradient, like a
+  // keyboard that has had one set; the rest are dark.
+  const userPics = Array.from({ length: 5 }, (_, n) => Array.from({ length: 384 }, (_, i) =>
+    n === 0 ? [(i / 3) * 2 % 256, 80, 255 - (i / 3) * 2 % 256][i % 3] | 0 : 0));
   let last = new Uint8Array(64);
 
   return {
@@ -82,6 +86,7 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
       if (last[0] === 0x04) { profile = last[1]; return; }
       if (last[0] === 0x11) { sleepBytes = last.slice(8, 16); return; }
       if (last[0] === 0x07) { ledBytes = last.slice(1, 8); return; }
+      if (last[0] === 0x0c) { userPics[last[1]].splice(last[3] * 56, last[4], ...last.slice(8, 8 + last[4])); return; }
       if (last[0] === 0x0b) {
         const b = macros.get(last[1]) ?? new Uint8Array(256);
         b.set(last.slice(8, 8 + Math.min(56, 256 - last[2] * 56)), last[2] * 56);
@@ -106,6 +111,7 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
         case 0x84: r.set([0x84, profile]); break;
         case 0x91: r.set([0x91]); r.set(sleepBytes, 8); break;
         case 0x87: r.set([0x87, ...ledBytes]); break;
+        case 0x8c: r.set(userPics[last[1]].slice(last[3] * 64, last[3] * 64 + 64)); break;
         case 0x89: r.set([0x89, this.demoOs ?? 0, 0]); break; // KB options: Windows, Fn layer 0
         case 0x83: r.set([0x83, 0, rateCode]); break;
         case 0x86: r.set([0x86, 0]); break;

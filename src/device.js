@@ -30,6 +30,7 @@ const CMD = {
   GET_FEATURE_LIST: 0xe6,
   GET_LEDPARAM: 0x87,
   GET_KBOPTION: 0x89,
+  GET_USERPIC: 0x8c,
 };
 const READ_COMMANDS = new Set(Object.values(CMD));
 const SET_MAGNETISM = 0x65;
@@ -170,6 +171,10 @@ class Transport {
       throw new Error(`Blocked Fn-layer read outside layer 0 (os ${cmd[1]}, layer ${cmd[2]}, page ${cmd[4]})`);
     }
     if (cmd[0] === CMD.GET_MAGNETISM && !(cmd[3] < 4)) throw new Error(`Blocked magnet read beyond page 3 (page ${cmd[3]})`);
+    // Custom lighting patterns: the Custom effect's five patterns, 6 pages each (qmk.top getLightPic).
+    if (cmd[0] === CMD.GET_USERPIC && !(cmd[1] < USERPIC_LAYERS && cmd[2] === 0xff && cmd[3] < 6)) {
+      throw new Error(`Blocked custom-pattern read outside patterns 1–${USERPIC_LAYERS} (pattern ${cmd[1]}, page ${cmd[3]})`);
+    }
     const pkt = encode(cmd);
     this.reads++;
     if (!this.viaDongle) {
@@ -902,6 +907,65 @@ export async function writeLighting(dev, settings, light) {
     const retried = bad.length ? 1 : 0;
     if (bad.length) { await sleep(500); got = await write(); bad = wrong(got); }
     return { lighting: got, mismatches: bad, retried };
+  });
+}
+
+// ---------- Custom lighting patterns ----------
+// The Custom effect (LightUserPicture) shows one of five per-key colour patterns stored on the
+// keyboard (protocol-notes.md, "Custom lighting"). A pattern is R, G, B per key-matrix slot.
+// Write (qmk.top _setLightPic): [0x0C, pattern, 0xFF, page 0–6, length, isLast, 0, Bit7 cs, data],
+// 56 bytes a page and 42 in the last (378 = 126 slots), then vendorSleep 100 ms.
+// Read (getLightPic): [0x8C, pattern, 0xFF, page 0–5], 6 × 64 bytes of data, no header.
+export const USERPIC_LAYERS = 5;
+export const USERPIC_BYTES = 378;
+const SET_USERPIC = 0x0c;
+const USERPIC_PAGE = 56;
+
+function assertAllowedUserPicWrite(p) {
+  const fail = why => { throw new Error(`Blocked custom-pattern write (${why}): ${[...p.slice(0, 8)].map(b => b.toString(16).padStart(2, '0')).join(' ')}`); };
+  if (p.length !== 64 || p[0] !== SET_USERPIC) fail('not the custom-pattern command');
+  if (p[1] >= USERPIC_LAYERS || p[2] !== 0xff || p[3] > 6) fail('header');
+  const len = p[3] === 6 ? USERPIC_BYTES - 6 * USERPIC_PAGE : USERPIC_PAGE;
+  if (p[4] !== len || p[5] !== (p[3] === 6 ? 1 : 0) || p[6] !== 0) fail('length or last flag');
+  if (p[7] !== 255 - (p.slice(0, 7).reduce((a, b) => a + b, 0) & 0xff)) fail('checksum');
+  if (p.slice(8 + len).some(b => b !== 0)) fail('trailing bytes');
+}
+
+// colors: at least 378 bytes (R, G, B per slot). Returns the 7 packets in send order.
+export function buildUserPicPackets(colors, layer) {
+  if (!(layer >= 0 && layer < USERPIC_LAYERS)) throw new Error('Unknown pattern');
+  if (colors.length < USERPIC_BYTES || colors.some(v => !Number.isInteger(v) || v < 0 || v > 255)) throw new Error('Bad pattern colours');
+  return Array.from({ length: 7 }, (_, page) => {
+    const len = page === 6 ? USERPIC_BYTES - 6 * USERPIC_PAGE : USERPIC_PAGE;
+    const pkt = encode([SET_USERPIC, layer, 0xff, page, len, page === 6 ? 1 : 0, 0, 0, ...colors.slice(page * USERPIC_PAGE, page * USERPIC_PAGE + len)]);
+    assertAllowedUserPicWrite(pkt);
+    return pkt;
+  });
+}
+
+// Reads one pattern: 384 bytes (128 slots × R, G, B; only the first 378 are written).
+export function readUserPic(dev, settings, layer) {
+  return withDevice(dev, settings, t => t.readPages([CMD.GET_USERPIC, layer, 0xff, 0], 6));
+}
+
+// Writes a pattern, reads it back and re-sends once if it differs.
+// Returns { colors (as read back), mismatches: number of bytes still different, retried }.
+export async function writeUserPic(dev, settings, layer, colors, onProgress = () => {}) {
+  const packets = buildUserPicPackets(colors, layer); // validates everything before sending
+  return withDevice(dev, settings, async t => {
+    const write = async label => {
+      for (const [i, pkt] of packets.entries()) { await t.send(pkt, null, assertAllowedUserPicWrite); onProgress((i + 1) / 8, label); }
+      await sleep(100); // qmk.top: vendorSleep
+      const got = await t.readPages([CMD.GET_USERPIC, layer, 0xff, 0], 6);
+      onProgress(1, 'Verifying');
+      return got;
+    };
+    const diff = got => colors.slice(0, USERPIC_BYTES).filter((v, i) => got[i] !== v).length;
+    let got = await write('Writing pattern');
+    let bad = diff(got);
+    const retried = bad ? 1 : 0;
+    if (bad) { await sleep(800); got = await write('Retrying'); bad = diff(got); }
+    return { colors: got, mismatches: bad, retried };
   });
 }
 
