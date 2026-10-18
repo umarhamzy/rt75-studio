@@ -758,7 +758,10 @@ qmk.top's "Dynamic Keystroke (DKS)" advanced key (动态键程). Mode param 7 = 
   Clearing an action's key clears its moments too.
 - If no key used DKS at startup, params 4 and 10 are read (12 reads) the first time a key is switched
   to DKS.
-- Demo-tested only so far.
+- **Verified on the real keyboard (2026-10-18):** the user reported the DKS test passing: switching a
+  key to DKS (it keeps typing its own key), a second action tapped and then held at the bottom, a
+  deeper trigger point, the same actions shown in qmk.top, back to Normal, and Undo. Whether it was
+  also tried over 2.4G wasn't reported.
 
 ## Gamepad mode (not supported, 2026-10-17)
 
