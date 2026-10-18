@@ -179,6 +179,14 @@ mapping task.
   simple path `o=[topDeadZone*n]`. Both range 0–1mm (`死区最小值/最大值`,
   `topDeadZoneMin/Max`), and 1mm = 200 units still fits a byte. qmk.top only sends 251 when
   `get支持顶部死区()` is true (USB or RF version ≥ 1024); 0x0512 qualifies.
+- **Travel limit from the bottom dead zone** (qmk.top's travel slider, chunk `cd3ec6e4.js`, reported
+  by the user 2026-10-18): actuation and release are clamped to `max − bottom dead zone`
+  (`f = Math.min(f, i - e.deadzone)`, `i` = 3.3 mm), and raising the bottom dead zone pulls a deeper
+  point back up (`travelDistance > i - deadzone → onChange(i - deadzone)`). RT75 Studio does the same
+  in its sliders.
+- **qmk.top's slider ignores the top dead zone:** it computes its position and throws it away, and
+  always draws `top_deadzone` empty; nothing clamps against it. The user saw changing it in qmk.top
+  make no visible difference (2026-10-18). Whether the firmware applies it is untested.
 - **Snap Tap pairs:** qmk.top builds each pair as two keys with `option:"snap"`, each binding the
   other, keeping each key's `fire` (RT) flag. On the wire that's mode 7 (`| 0x80` with RT) for both
   keys, plus a single-key param 9 write per key holding the partner's slot. These are sent last

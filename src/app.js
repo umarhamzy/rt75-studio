@@ -728,6 +728,10 @@ function unlinked() {
   return state.unlinked;
 }
 
+// Deepest actuation or release point for these keys: the bottom of the travel minus the bottom dead
+// zone, as qmk.top's travel slider clamps it (a point inside the dead zone would never trigger).
+const deepest = slots => Math.min(...slots.map(s => LIMITS.travel.max - raw(s, 'bottomDeadZone') / state.settings.travelStep));
+
 function editorHtml(datas) {
   const act = common(datas, d => d.actuation);
   const rel = common(datas, d => d.release);
@@ -753,8 +757,8 @@ function editorHtml(datas) {
     <h3>Travel</h3>
     ${allAdvanced ? `<dl>${row('Actuation point', act === null ? 'Mixed' : `${mm3(act)} mm`)}${row('Release point', rel === null ? 'Mixed' : `${mm3(rel)} mm`)}</dl>${fixedNote}` : `
     <div class="ts-row">
-      ${travelSlider('act', linked ? 'Press & release' : 'Press (actuation)', act, T.min, T.max, dz)}
-      ${linked ? '' : travelSlider('rel', 'Release', rel, T.min, T.max, { ...dz, tone: 'rel' })}
+      ${travelSlider('act', linked ? 'Press & release' : 'Press (actuation)', act, T.min, deepest([...state.selected]), dz)}
+      ${linked ? '' : travelSlider('rel', 'Release', rel, T.min, deepest([...state.selected]), { ...dz, tone: 'rel' })}
     </div>
     <label class="check"><input type="checkbox" id="relLink" ${linked ? 'checked' : ''}> Release at the same point</label>`}
 
@@ -1109,11 +1113,17 @@ function wireEditor(el) {
   bindTravel('act', (v, min, max) => slots.forEach(s => {
     setPending(s, 'actuation', toRaw(v, min, max));
     if (linked()) setPending(s, 'release', toRaw(v, min, max));
-  }), T.min, T.max);
-  bindTravel('rel', (v, min, max) => slots.forEach(s => setPending(s, 'release', toRaw(v, min, max))), T.min, T.max);
+  }), T.min, deepest(slots));
+  bindTravel('rel', (v, min, max) => slots.forEach(s => setPending(s, 'release', toRaw(v, min, max))), T.min, deepest(slots));
   const DZ = LIMITS.deadZone;
   bind('tdz', (v, min, max) => slots.forEach(s => setPending(s, 'topDeadZone', toRaw(v, min, max))), DZ.min, DZ.max);
-  bind('bdz', (v, min, max) => slots.forEach(s => setPending(s, 'bottomDeadZone', toRaw(v, min, max))), DZ.min, DZ.max);
+  // A deeper bottom dead zone pulls actuation and release points up out of it, as qmk.top does.
+  bind('bdz', (v, min, max) => slots.forEach(s => {
+    setPending(s, 'bottomDeadZone', toRaw(v, min, max));
+    if (ADVANCED.has(raw(s, 'mode') & 0x7f)) return;
+    const limit = toRaw(deepest([s]), T.min, T.max);
+    for (const f of ['actuation', 'release']) if (raw(s, f) > limit) setPending(s, f, limit);
+  }), DZ.min, DZ.max);
 
   el.querySelector('#relLink')?.addEventListener('change', e => {
     unlinked().release = !e.target.checked;
