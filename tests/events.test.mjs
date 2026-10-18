@@ -48,6 +48,11 @@ events.length = 0;
 
 push(5, [0x03, 0x01, 0x08]); // Fn-layer switch, not an OS change
 check('other 03 pushes are not OS changes', !events.some(e => e.type === 'os'), JSON.stringify(events));
+events.length = 0;
+
+push(5, [0x01, 0x01]); push(5, [0x0f, 1]); push(5, [0x0f, 0]); // profile changed on the keyboard
+check('01 pushes report a profile change, and their 0F pair is not a knob hold',
+  events.length === 1 && events[0].type === 'profile' && events[0].value === 1, JSON.stringify(events));
 
 await stop();
 check('listening sent nothing to the keyboard', sent.length === 0, sent.map(b => b.toString(16)).join(' '));

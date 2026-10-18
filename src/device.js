@@ -576,7 +576,8 @@ export async function startLiveTravel(featureDev, settings, onSample, inputDev =
 // 04 nn effect, then 0F 01 / 0F 00. A 0F 01 with no lighting push just before it is a knob hold,
 // which toggles the knob between volume and lighting mode. The same reports arrive through the
 // 2.4G dongle. onEvent gets { type: 'volume', action: 'up'|'down'|'mute' }, { type: 'brightness',
-// value }, { type: 'effect', value } or { type: 'toggle' }.
+// value }, { type: 'effect', value }, { type: 'toggle' } or { type: 'profile' } (01 nn: the profile
+// was changed on the keyboard; qmk.top's push decoder calls it 切配置 and re-reads 0x84).
 let watchedInput = null;
 const CONSUMER_ACTIONS = { 0xe9: 'up', 0xea: 'down', 0xe2: 'mute' };
 const PUSH_GAP_MS = 40;        // a 0F pair follows its lighting push within ~12 ms
@@ -600,7 +601,8 @@ export async function watchKeyboardEvents(featureDev, onEvent, inputDev = null) 
     if (d[0] === 0x03 && (d[2] === 0 || d[2] === 2)) { lastPush = performance.now(); onEvent({ type: 'os', os: d[1] & 2 ? 'mac' : 'win' }); }
     else if (d[0] === 0x06) { lastPush = performance.now(); onEvent({ type: 'brightness', value: d[1] }); }
     else if (d[0] === 0x04) { lastPush = performance.now(); onEvent({ type: 'effect', value: d[1] }); }
-    else if (d[0] >= 0x01 && d[0] <= 0x0e) lastPush = performance.now(); // other pushes (profile, rate, …) also end in 0F
+    else if (d[0] === 0x01) { lastPush = performance.now(); onEvent({ type: 'profile', value: d[1] }); }
+    else if (d[0] >= 0x02 && d[0] <= 0x0e) lastPush = performance.now(); // other pushes (rate, …) also end in 0F
     else if (d[0] === 0x0f && d[1] === 1 && performance.now() - lastPush > PUSH_GAP_MS && !ioActive(IO_GRACE_MS)) onEvent({ type: 'toggle' });
   };
   input.addEventListener('inputreport', onReport);
@@ -674,6 +676,11 @@ export async function switchProfile(dev, settings, index) {
     await sleep(300); // qmk.top waits 200 ms
     return (await t.query([CMD.GET_PROFILE]))[1];
   });
+}
+
+// The keyboard's active profile (0x84), for when it was changed on the keyboard itself.
+export function readCurrentProfile(dev, settings) {
+  return withDevice(dev, settings, async t => (await t.query([CMD.GET_PROFILE]))[1]);
 }
 
 // ---------- Sleep timers ----------

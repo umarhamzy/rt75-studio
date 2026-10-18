@@ -522,6 +522,19 @@ changes mode by holding the knob down.
     mode is unknown, since in volume mode it's an Fn key. A hold flips a known mode.
   - Brightness and effect pushes also update the lighting read.
 
+## Profile changed on the keyboard (push `01 nn`)
+
+- qmk.top's push decoder (`U4`) names a vendor report starting with **`01`** "切配置" (switch
+  profile). Its keyboard handler then waits (`vendorSleep`; its mouse handlers wait 1200–1500 ms on
+  wireless), re-reads the active profile with `0x84` and reloads that profile's settings.
+- RT75 Studio does the same from its listen-only watcher: on `01 nn` it waits 200 ms (1200 ms via
+  the dongle), reads `0x84`, and if the profile differs, reads that profile's settings (as its own
+  profile switch does). Unsaved edits are dropped with a notice: magnet writes go to whichever
+  profile is active, so they'd land on the new one. Byte 1 is probably the new profile; the app
+  trusts the `0x84` read, not the push.
+- The push ends with a `0F 01` / `0F 00` pair like other pushes, so it isn't mistaken for a knob hold.
+- Demo-tested only; the exact push bytes from the RT75 are unconfirmed.
+
 ## Win/Mac switch (KB options, 0x89)
 
 - **Read** `[0x89]` (Bit7), as qmk.top's `getKBOption` does on connect (`writeToAppState`). Reply:

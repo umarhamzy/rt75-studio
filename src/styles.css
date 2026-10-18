@@ -155,7 +155,7 @@ button, input, select { font: inherit; color: inherit; }
 /* ---------- Layout ---------- */
 .workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 100vw - 1060px, 380px); /* 380 at 1440+ wide, shrinking to 320 before the board does */
   gap: 20px;
   padding: 20px 24px 24px;
   width: 100%;

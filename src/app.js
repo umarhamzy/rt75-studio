@@ -3,7 +3,7 @@ import { decodeAction, encodeKey, encodeModTap, splitKey, FUNCTIONS, RISKY, KEY_
 import {
   isSupported, requestKeyboard, findGrantedKeyboard, readSettings, readKeymaps, settingsFromDump, setDongleTiming,
   writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, writeSleepTimes,
-  writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot, watchKeyboardEvents, readKbOption,
+  writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot, watchKeyboardEvents, readKbOption, readCurrentProfile,
   LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS,
 } from './device.js';
 import { EFFECTS, effectById, isOffered, normalizeLighting, lightingDiff, lightingFields, hex, MAX_LEVEL } from './lighting.js';
@@ -374,6 +374,9 @@ function onKeyboardEvent(ev) {
     if (l && l[field] !== ev.value) { l[field] = ev.value; lightingChanged = true; }
   } else if (ev.type === 'toggle' && state.knobMode !== 'unknown') {
     state.knobMode = state.knobMode === 'volume' ? 'lighting' : 'volume';
+  } else if (ev.type === 'profile') {
+    followProfile();
+    return;
   } else if (ev.type === 'os') {
     // The keyboard's Win/Mac switch moved. Use the reported side now, then re-read the KB options
     // to confirm, as qmk.top does.
@@ -395,6 +398,42 @@ function onKeyboardEvent(ev) {
     : ev.type === 'effect' ? 'press' : ev.type === 'brightness' ? (ev.value >= (ev.prev ?? 0) ? 'right' : 'left') : null;
   const fromKnob = ev.type === 'volume' ? state.knobMode === 'volume' : state.knobMode === 'lighting';
   if (zone && fromKnob) flashKnob(zone);
+}
+
+// The profile was changed on the keyboard (Fn + a profile key). As qmk.top does on its 切配置 push:
+// wait a moment (longer over 2.4G), re-read the active profile, and if it changed, read that
+// profile's settings. Unsaved edits belong to the old profile and would be written to the new one,
+// so they're dropped, and the notice says so. While a write is running, it waits for it to finish.
+let profileFollow = null;
+function followProfile() {
+  clearTimeout(profileFollow);
+  const s = state.settings;
+  if (!s || s.source !== 'device' || !state.dev) return;
+  profileFollow = setTimeout(async function check() {
+    if (state.settings !== s) return; // re-read meanwhile
+    if (state.busy) { profileFollow = setTimeout(check, 500); return; }
+    try {
+      const now = await readCurrentProfile(state.dev, s);
+      if (state.settings !== s || now === s.profile || !(now >= 0 && now < PROFILE_COUNT)) return;
+      const dropped = hasAnyPending();
+      const dev = state.dev;
+      if (state.live) stopLive();
+      state.busy = true;
+      refresh();
+      setBusy(0.05, `Profile ${now + 1} was selected on the keyboard. Reading it…`);
+      const settings = await readSettings(dev, (f, label) => setBusy(f, `Reading profile ${now + 1}: ${label}…`), { keymaps: false });
+      settings.demo = s.demo;
+      state.busy = false;
+      load(settings, dev);
+      showNotice(`Profile ${now + 1} was selected on the keyboard.${dropped ? ` Your unsaved changes for profile ${s.profile + 1} were discarded.` : ''}`);
+    } catch (e) {
+      showError('The profile changed on the keyboard, but reading it failed: ' + e.message + ' Refresh to try again.');
+    } finally {
+      state.busy = false;
+      setBusy(null);
+      refresh();
+    }
+  }, state.settings.viaDongle ? 1200 : 200);
 }
 
 // Listens (only) on the keyboard's report interface while it's connected.
