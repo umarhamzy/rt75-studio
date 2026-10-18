@@ -10,7 +10,7 @@ import { EFFECTS, effectById, isOffered, normalizeLighting, lightingDiff, lighti
 import { MACRO_MODES, MOUSE_BUTTONS, MAX_DELAY, MAX_REPEAT, MACRO_BYTES, stepLabel, macroSummary, macroProblem, macroSize, heldAtEnd } from './macros.js';
 import { loadLibrary, saveLibrary, newId, isOutdated, uniqueName, exportLibrary, parseLibraryFile, validSlot } from './library.js';
 import { enhanceSelects } from './dropdown.js';
-import { loadPatternLibrary, savePatternLibrary, keyColor, setKeyColor, keysChanged, applyFill, FILLS } from './patterns.js';
+import { loadPatternLibrary, savePatternLibrary, keyColor, setKeyColor, keysChanged, applyFill, FILLS, BUILT_IN_DESIGNS, colorsFromImage } from './patterns.js';
 
 // Switch-type byte (magnet param 252), from qmk.top/v4's switch enum. The RT75 Pro offers
 // these seven; qmk.top shows any other value (e.g. 0xFF, unset) as type 1, Outemu.
@@ -54,7 +54,8 @@ const state = {
   pendingLight: null,        // lighting setting to write, or null
   // Custom lighting patterns (the Custom effect's Pattern 1–5): what the keyboard has (read on
   // demand), unsaved edits, and the editor's colours. mode: which Lighting editor is open.
-  pt: { mode: 'effect', layer: 0, saved: {}, edits: {}, loading: null, error: null, a: '#0a2a55', b: '#ff9500', fill: null },
+  pt: { mode: 'effect', layer: 0, saved: {}, edits: {}, loading: null, error: null, a: '#0a2a55', b: '#ff9500', fill: null,
+    picture: null, fit: 'cover', vivid: true }, // picture: { bitmap, name, url } in memory only
   patternLibrary: [],        // saved designs in this browser: [{ id, name, colors }]
   library: [],               // macro library (this browser): [{ id, name, repeat, steps, slot?, written? }]
   pendingMacroWrites: new Map(), // macro slot -> library macro id to write there
@@ -2807,8 +2808,9 @@ function renderPatternPanel() {
     : pt.error ? escapeHtml(pt.error)
     : changed ? `${changed} key${changed === 1 ? '' : 's'} recoloured · unsaved` : `Pattern ${layer + 1} as on the keyboard.`;
   const thumb = c => `<span class="pt-thumb" aria-hidden="true">${MAGNETIC.map(k => `<i style="left:${(k.x / LAYOUT_WIDTH * 100).toFixed(2)}%;top:${(k.y / LAYOUT_HEIGHT * 100).toFixed(2)}%;width:${(k.w / LAYOUT_WIDTH * 100 - 0.6).toFixed(2)}%;height:${(k.h / LAYOUT_HEIGHT * 100 - 2).toFixed(2)}%;background:${keyColor(c, k.slot)}"></i>`).join('')}</span>`;
-  const lib = state.patternLibrary;
+  const lib = [...BUILT_IN_DESIGNS, ...state.patternLibrary];
   const can = editable();
+  const pic = pt.picture;
   el.innerHTML = `<div class="insp-head"><h2>Lighting</h2>${can && changed ? '<button class="revert-chip" id="btnRevertPattern" type="button">Unsaved · Revert</button>' : ''}</div>
     <p class="sub">Five per-key colour patterns stored on the keyboard; the Custom effect shows one.</p>
     ${lightModeSwitch()}
@@ -2819,10 +2821,23 @@ function renderPatternPanel() {
       <p class="note">${status}</p>
       <p class="note">Writing a pattern also switches the lighting to Custom · Pattern ${layer + 1}, so you see it (as qmk.top does).</p>
     </section>
+    <section class="insp-sec" style="--sec:var(--rt)"><h3>From a picture</h3>
+      <div class="pt-pic${pic ? ' has-pic' : ''}">
+        ${pic ? `<img src="${pic.url}" alt="" class="pt-pic-img"><span class="pt-pic-name" title="${escapeHtml(pic.name)}">${escapeHtml(pic.name)}</span>` : ''}
+        <button class="btn btn-small" id="btnPickPicture" type="button" ${can && colors ? '' : 'disabled'}>${pic ? 'Choose another…' : 'Choose a picture…'}</button>
+        <input type="file" id="ptPictureFile" accept="image/*" hidden>
+      </div>
+      <div class="segmented segmented-sm pt-fit" role="group" aria-label="How the picture fits">
+        <button type="button" data-pt-fit="cover" aria-pressed="${pt.fit === 'cover'}" ${can && colors ? '' : 'disabled'}>Fill the keyboard</button>
+        <button type="button" data-pt-fit="contain" aria-pressed="${pt.fit === 'contain'}" ${can && colors ? '' : 'disabled'}>Whole picture</button>
+      </div>
+      <label class="check"><input type="checkbox" id="ptVivid" ${pt.vivid ? 'checked' : ''} ${can && colors ? '' : 'disabled'}> Vivid colours <span class="muted">(LEDs wash pale colours out)</span></label>
+      <p class="note">Each key takes the colour of the part of the picture under it. You can also drop a picture on the keyboard, or paste one.</p>
+    </section>
     <section class="insp-sec" style="--sec:var(--muted)"><h3>Saved in this browser</h3>
       ${lib.length ? `<div class="pt-lib">${lib.map(d => `<div class="pt-item">
           <button type="button" class="pt-load" data-pt-load="${d.id}" title="Load “${escapeHtml(d.name)}” into pattern ${layer + 1}" ${can && colors ? '' : 'disabled'}>${thumb(d.colors)}<span>${escapeHtml(d.name)}</span></button>
-          <button type="button" class="pt-del" data-pt-del="${d.id}" aria-label="Delete ${escapeHtml(d.name)}" title="Delete">×</button></div>`).join('')}</div>`
+          ${d.builtIn ? '' : `<button type="button" class="pt-del" data-pt-del="${d.id}" aria-label="Delete ${escapeHtml(d.name)}" title="Delete">×</button>`}</div>`).join('')}</div>`
         : '<p class="note">No saved designs yet. Paint a pattern, then save it here to reuse it on any of the five patterns.</p>'}
       <button class="btn btn-small" id="btnSavePattern" type="button" ${colors ? '' : 'disabled'}>Save this design…</button>
     </section>`;
@@ -2833,18 +2848,71 @@ function renderPatternPanel() {
   el.querySelectorAll('[data-pt-del]').forEach(b => b.onclick = () => {
     const d = lib.find(x => x.id === b.dataset.ptDel);
     if (!d || !confirm(`Delete the saved design “${d.name}” from this browser?`)) return;
-    state.patternLibrary = lib.filter(x => x !== d);
+    state.patternLibrary = state.patternLibrary.filter(x => x !== d);
     if (!savePatternLibrary(state.patternLibrary, !!s.demo)) showError('Couldn’t save the design library in this browser (storage is blocked or full).');
     refresh();
   });
+  $('btnPickPicture')?.addEventListener('click', () => $('ptPictureFile').click());
+  $('ptPictureFile')?.addEventListener('change', e => { const f = e.target.files?.[0]; if (f) usePicture(f); });
+  el.querySelectorAll('[data-pt-fit]').forEach(b => b.onclick = () => { pt.fit = b.dataset.ptFit; applyPicture(); });
+  $('ptVivid')?.addEventListener('change', e => { pt.vivid = e.target.checked; applyPicture(); });
   $('btnSavePattern')?.addEventListener('click', () => {
     const name = prompt('Name this design:', `Pattern ${layer + 1}`)?.trim();
     if (!name) return;
-    state.patternLibrary = [...lib, { id: newId(), name, colors: [...colors] }];
+    state.patternLibrary = [...state.patternLibrary, { id: newId(), name, colors: [...colors] }];
     if (!savePatternLibrary(state.patternLibrary, !!s.demo)) showError('Couldn’t save the design library in this browser (storage is blocked or full).');
     refresh();
   });
 }
+
+// A picture becomes per-key colours: it's drawn at the keyboard's proportions (cropped to fill it,
+// or whole with dark bars) and each key takes the average colour under it (patterns.js). The picture
+// stays in memory only, so changing Fit or Vivid re-applies it.
+async function usePicture(file) {
+  if (!file?.type?.startsWith('image/')) { showError('That isn’t a picture. Choose a PNG, JPEG, GIF or WebP file.'); return; }
+  if (!editable() || !patternColors(state.pt.layer)) return;
+  try {
+    const bitmap = await createImageBitmap(file);
+    if (state.pt.picture) { URL.revokeObjectURL(state.pt.picture.url); state.pt.picture.bitmap.close?.(); }
+    state.pt.picture = { bitmap, name: file.name || 'Pasted picture', url: URL.createObjectURL(file) };
+    showError(null);
+    applyPicture();
+  } catch (e) {
+    showError('Couldn’t open that picture: ' + e.message);
+  }
+}
+
+function applyPicture() {
+  const pic = state.pt.picture;
+  if (!pic) { refresh(); return; }
+  const W = LAYOUT_WIDTH, H = LAYOUT_HEIGHT;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const { width: iw, height: ih } = pic.bitmap;
+  const scale = state.pt.fit === 'cover' ? Math.max(W / iw, H / ih) : Math.min(W / iw, H / ih);
+  const dw = iw * scale, dh = ih * scale;
+  ctx.drawImage(pic.bitmap, (W - dw) / 2, (H - dh) / 2, dw, dh);
+  const img = ctx.getImageData(0, 0, W, H);
+  editPattern(c => colorsFromImage(c, img, { vivid: state.pt.vivid }));
+}
+
+// Dropping or pasting a picture while the pattern editor is open.
+const pictureTarget = () => state.view === 'lighting' && state.pt.mode === 'patterns' && editable();
+document.addEventListener('dragover', e => { if (pictureTarget() && [...(e.dataTransfer?.items ?? [])].some(i => i.kind === 'file')) { e.preventDefault(); $('board').classList.add('is-drop'); } });
+document.addEventListener('dragleave', e => { if (!e.relatedTarget) $('board').classList.remove('is-drop'); });
+document.addEventListener('drop', e => {
+  $('board').classList.remove('is-drop');
+  if (!pictureTarget()) return;
+  const f = [...(e.dataTransfer?.files ?? [])].find(x => x.type.startsWith('image/'));
+  if (f) { e.preventDefault(); usePicture(f); }
+});
+document.addEventListener('paste', e => {
+  if (!pictureTarget() || e.target.closest?.('input, textarea')) return;
+  const f = [...(e.clipboardData?.files ?? [])].find(x => x.type.startsWith('image/'));
+  if (f) { e.preventDefault(); usePicture(f); }
+});
 
 // Board painter for the pattern editor: each key in its pattern colour, unanimated.
 function patternPainter() {

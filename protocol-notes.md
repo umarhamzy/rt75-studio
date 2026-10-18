@@ -787,7 +787,10 @@ apply to this keyboard).
   aren't keys keep what was read. As in qmk.top's writeSelectedCustomizationLayer, editing a pattern
   also queues the lighting switch to Custom with that pattern; the pattern is written first, then the
   effect. Undo writes the previous pattern back. Saved designs stay in this browser
-  (`rt75-studio-patterns-2865`). The Effect view's preview shows the real pattern for Custom.
+  (`rt75-studio-patterns-2865`); Sunset is built in. **From a picture** (RT75 Studio's own, not in
+  qmk.top): the image is drawn at the layout's proportions (cropped or whole) and each key takes the
+  average colour under it (`colorsFromImage`), optionally made more vivid; it only becomes an edit,
+  written through review like any other. The Effect view's preview shows the real pattern for Custom.
 - Demo-tested only so far.
 
 ## Read ranges (incident, 2026-10-15)

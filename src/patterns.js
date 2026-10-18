@@ -2,7 +2,7 @@
 // lighting"). A pattern is 384 bytes, R, G, B per key-matrix slot (the keyboard stores 378).
 // Saved designs live in this browser, like the macro library: { id, name, colors (384 numbers) }.
 
-import { KEYS, LAYOUT_WIDTH } from './layout.js';
+import { KEYS, LAYOUT_WIDTH, LAYOUT_HEIGHT } from './layout.js';
 
 export const PATTERN_BYTES = 384;
 const MAGNETIC = KEYS.filter(k => !k.knob);
@@ -52,4 +52,44 @@ export function applyFill(colors, fillId, a, b) {
   let next = [...colors];
   for (const k of MAGNETIC) next = setKeyColor(next, k.slot, fill.color(k)(a, b));
   return next;
+}
+
+// Designs that come with RT75 Studio: shown first in the library, and can't be deleted.
+const blank = () => new Array(PATTERN_BYTES).fill(0);
+export const BUILT_IN_DESIGNS = [
+  { id: 'builtin-sunset', name: 'Sunset', builtIn: true, colors: applyFill(blank(), 'gradient', '#ff3b30', '#bf5af2') },
+];
+
+// Per-key colours from a picture. img: { data (RGBA), width, height }, already scaled to the
+// keyboard's layout (LAYOUT_WIDTH × LAYOUT_HEIGHT pixels, or any size with the same proportions).
+// Each key takes the average colour of the pixels under it (a little inset from its edges, so the
+// gap between keys doesn't count). vivid: stronger, brighter colours, which LEDs need to look like
+// the picture. Slots that aren't keys keep their bytes.
+export function colorsFromImage(colors, img, { vivid = false } = {}) {
+  const sx = img.width / LAYOUT_WIDTH, sy = img.height / LAYOUT_HEIGHT;
+  let next = [...colors];
+  for (const k of MAGNETIC) {
+    const x0 = Math.floor((k.x + 3) * sx), x1 = Math.max(x0 + 1, Math.ceil((k.x + k.w - 3) * sx));
+    const y0 = Math.floor((k.y + 3) * sy), y1 = Math.max(y0 + 1, Math.ceil((k.y + k.h - 3) * sy));
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let y = Math.max(0, y0); y < Math.min(img.height, y1); y++) {
+      for (let x = Math.max(0, x0); x < Math.min(img.width, x1); x++) {
+        const i = (y * img.width + x) * 4, a = img.data[i + 3] / 255;
+        r += img.data[i] * a; g += img.data[i + 1] * a; b += img.data[i + 2] * a; n++;
+      }
+    }
+    let c = n ? [r / n, g / n, b / n] : [0, 0, 0];
+    if (vivid) c = vividColor(c);
+    next = setKeyColor(next, k.slot, toHex(...c.map(v => Math.round(Math.max(0, Math.min(255, v))))));
+  }
+  return next;
+}
+
+// More saturated and a little brighter: LEDs wash pastel and dark colours out.
+function vividColor([r, g, b]) {
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  if (max === 0) return [0, 0, 0];
+  const s = Math.min(1, ((max - min) / max) * 1.4), v = 255 * Math.pow(max / 255, 0.8);
+  const scale = c => v * (1 - s * (1 - (c - min) / ((max - min) || 1)));
+  return max === min ? [v, v, v] : [scale(r), scale(g), scale(b)];
 }

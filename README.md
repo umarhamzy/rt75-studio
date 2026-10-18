@@ -131,8 +131,10 @@ can't restore those actions.
 **Custom patterns** (Lighting › Custom patterns): the keyboard stores five per-key colour patterns,
 shown by the Custom effect. Pick a pattern (it's read from the keyboard), start from a fill (Solid,
 Gradient, Rainbow rows, Rainbow sweep, Highlight WASD) using the two colours in the toolbar, then
-click keys to paint them (right-click picks a key's colour up). Designs can be saved in this browser
-and loaded into any pattern. Writing a pattern also switches the lighting to Custom with that
+click keys to paint them (right-click picks a key's colour up). **From a picture**: choose, drop or
+paste an image and each key takes the colour of the part under it (fill the keyboard or fit the
+whole picture; Vivid strengthens colours for LEDs). Designs can be saved in this browser and loaded
+into any pattern; **Sunset** comes built in. Writing a pattern also switches the lighting to Custom with that
 pattern, and goes through Review changes with read-back and Undo. No helper program is needed
 (qmk.top asks for its "IoT" driver only for music/screen effects, its design library and wireless).
 
