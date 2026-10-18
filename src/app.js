@@ -11,27 +11,6 @@ import { MACRO_MODES, MOUSE_BUTTONS, MAX_DELAY, MAX_REPEAT, MACRO_BYTES, stepLab
 import { loadLibrary, saveLibrary, newId, isOutdated, uniqueName, exportLibrary, parseLibraryFile, validSlot } from './library.js';
 import { enhanceSelects } from './dropdown.js';
 
-// ---------- Key naming ----------
-const HID = {
-  40: 'Enter', 41: 'Esc', 42: 'Backspace', 43: 'Tab', 44: 'Space', 45: '-', 46: '=', 47: '[', 48: ']', 49: '\\',
-  51: ';', 52: "'", 53: '`', 54: ',', 55: '.', 56: '/', 57: 'Caps', 70: 'PrtSc', 71: 'ScrLk', 72: 'Pause', 73: 'Ins',
-  74: 'Home', 75: 'PgUp', 76: 'Del', 77: 'End', 78: 'PgDn', 79: '→', 80: '←', 81: '↓', 82: '↑',
-  224: 'L Ctrl', 225: 'L Shift', 226: 'L Alt', 227: 'L Win', 228: 'R Ctrl', 229: 'R Shift', 230: 'R Alt', 231: 'R Win',
-};
-for (let i = 0; i < 26; i++) HID[4 + i] = String.fromCharCode(65 + i);
-for (let i = 0; i < 9; i++) HID[30 + i] = String(i + 1);
-HID[39] = '0';
-for (let i = 0; i < 12; i++) HID[58 + i] = 'F' + (i + 1);
-const CONSUMER = { 226: 'Mute', 233: 'Volume up', 234: 'Volume down' };
-
-function actionName(q) {
-  if (q.every(b => b === 0)) return 'Disabled';
-  if (q[0] === 0 && q[1] === 0 && q[3] === 0) return HID[q[2]] ?? `HID 0x${q[2].toString(16)}`;
-  if (q[0] === 3) return CONSUMER[q[2] | (q[3] << 8)] ?? 'Media key';
-  if (q[0] === 10 && q[1] === 1) return 'Fn';
-  return 'Special (' + q.map(b => b.toString(16).padStart(2, '0')).join(' ') + ')';
-}
-
 // Switch-type byte (magnet param 252), from qmk.top/v4's switch enum. The RT75 Pro offers
 // these seven; qmk.top shows any other value (e.g. 0xFF, unset) as type 1, Outemu.
 const SWITCHES = {
@@ -110,7 +89,9 @@ function keyData(key) {
   const m = s.magnet, i = key.slot, step = s.travelStep;
   const modeByte = raw(i, 'mode') ?? 0;
   const modeId = modeByte & 0x7f;
-  const current = s.keymap?.slice(i * 4, i * 4 + 4); // undefined until the key map is loaded
+  // The base layer with any unsaved edit, decoded like Key map does (every key layout, Mac names);
+  // undefined until the key map is loaded.
+  const current = s.keymap ? layerBytes('base', i) : undefined;
   const factory = DEFAULT_MATRIX.slice(i * 4, i * 4 + 4);
   const partnerSlot = modeId === 7 ? raw(i, 'snapPartner') : undefined;
   return {
@@ -124,8 +105,8 @@ function keyData(key) {
     bottomDeadZone: raw(i, 'bottomDeadZone') / step,
     topDeadZone: (raw(i, 'topDeadZone') ?? 0) / step,
     switchType: switchName(m.switchType?.[i]),
-    action: current ? actionName(current) : null,
-    remapped: current ? current.join() !== factory.join() : null,
+    action: current ? actionLabel('base', current) : null,
+    remapped: current ? !sameAction(current, factory) : null,
     pending: hasPending(i),
     partner: partnerSlot !== undefined && partnerSlot !== 0xff ? keyBySlot(partnerSlot) : undefined,
   };
@@ -1281,11 +1262,15 @@ const actionLabel = (layer, bytes) => {
 const kmLayerLabel = c => (c.layer === 'base' && isMt(c.slot) ? 'Mod-tap hold' : c.layer === 'base' && isToggle(c.slot) ? 'Toggle key' : LAYERS[c.layer].label);
 const kmRows = changes => changes.map(c => `<tr><td>${keyBySlot(c.slot).label}</td><td>${kmLayerLabel(c)}</td><td>${escapeHtml(actionLabel(c.layer, c.from))}</td><td><strong>${escapeHtml(actionLabel(c.layer, c.to))}</strong></td></tr>`).join('');
 
+// The same action, allowing for the two layouts of a plain key or combo: [0,0,k,0] (remaps) and
+// [0,k,0,0] (what mod-tap and toggle keys hold, qmk.top's layout for them).
+const sameAction = (a, b) => a.join() === b.join() || (!!toKeyAction(a) && toKeyAction(a).join() === toKeyAction(b)?.join());
+
 function layerAction(layer, slot) {
   const b = layerBytes(layer, slot);
   if (!b) return { none: true, short: '·', label: state.settings?.source === 'device' ? 'Loading…' : 'Not in this file' };
   const factory = LAYERS[layer].defaults.slice(slot * 4, slot * 4 + 4);
-  const changed = b.join() !== factory.join();
+  const changed = !sameAction(b, factory);
   if (LAYERS[layer].fn && b.every(x => x === 0)) return { none: true, changed, short: '·', label: 'No Fn action', bytes: b, factory };
   return { ...decodeAction(b, { mac: macNames(layer) }), changed, bytes: b, factory };
 }
