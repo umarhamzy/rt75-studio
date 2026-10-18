@@ -533,7 +533,8 @@ changes mode by holding the knob down.
   profile is active, so they'd land on the new one. Byte 1 is probably the new profile; the app
   trusts the `0x84` read, not the push.
 - The push ends with a `0F 01` / `0F 00` pair like other pushes, so it isn't mistaken for a knob hold.
-- Demo-tested only; the exact push bytes from the RT75 are unconfirmed.
+- **Verified on the real keyboard (2026-10-18):** switching profile on the keyboard with the app
+  open made RT75 Studio show and load the new profile.
 
 ## Win/Mac switch (KB options, 0x89)
 
