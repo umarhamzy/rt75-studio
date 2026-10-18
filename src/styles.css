@@ -965,3 +965,10 @@ select.dd-native { display: none !important; }
 .tg-caption { font-size: 11px; color: var(--muted); }
 /* Values never run past the keycap, so fitKeyLabels can shrink or wrap them. */
 .key .key-value { max-width: 100%; }
+/* Where the key really triggers (actuation + top dead zone): a dashed line across the cap that
+   follows the handle, with its depth on the left. */
+.ts-eff { position: absolute; left: -4px; right: -4px; top: min(100%, calc(var(--p) + var(--dz))); height: 0;
+  border-top: 2px dashed var(--text); opacity: 0.8; pointer-events: none; z-index: 1; }
+.ts-eff span { position: absolute; right: calc(100% + 6px); top: -9px; padding: 1px 4px; border-radius: 4px;
+  background: var(--surface-2); font: 600 10px var(--mono); color: var(--text); white-space: nowrap; }
+.tslider.is-dragging .ts-eff span { visibility: hidden; }

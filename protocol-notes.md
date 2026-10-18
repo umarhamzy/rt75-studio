@@ -186,7 +186,13 @@ mapping task.
   in its sliders.
 - **qmk.top's slider ignores the top dead zone:** it computes its position and throws it away, and
   always draws `top_deadzone` empty; nothing clamps against it. The user saw changing it in qmk.top
-  make no visible difference (2026-10-18). Whether the firmware applies it is untested.
+  make no visible difference (2026-10-18).
+- **The RT75 adds the top dead zone to the actuation point (tested by the user, 2026-10-18):** top
+  dead zone 1.00 mm + actuation 1.00 mm triggered at about 2.00 mm, in RT75 Studio's live test,
+  qmk.top's, and by feel. So the top dead zone shifts where travel is counted from; it isn't a
+  separate zone the actuation point must clear. RT75 Studio's Press slider marks the real trigger
+  point (actuation + top dead zone) with a dashed line and says so under the slider. Whether the
+  release point and Rapid Trigger are shifted the same way is untested.
 - **Snap Tap pairs:** qmk.top builds each pair as two keys with `option:"snap"`, each binding the
   other, keeping each key's `fire` (RT) flag. On the wire that's mode 7 (`| 0x80` with RT) for both
   keys, plus a single-key param 9 write per key holding the partner's slot. These are sent last
@@ -682,8 +688,9 @@ continuous triggering on or off; holding the key works normally.
   (`fire` is kept).
 - **Tested on the real keyboard (2026-10-18):** a toggle key triggers very lightly, whatever its
   actuation point was set to before (the user set a deeper one first). The firmware doesn't use
-  the key's actuation point in toggle mode, which fits qmk.top not offering it. Whether mod-tap
-  keys use it is still untested.
+  the key's actuation point in toggle mode, which fits qmk.top not offering it. **It triggers at
+  about 0.5 mm, and ignores the top dead zone too** (user, 2026-10-18). Whether mod-tap keys use
+  their actuation point is still untested.
 - **UI:** Configuration › Key modes tab; the side panel's Key mode switch (Normal · Mod-tap · DKS ·
   Toggle) replaces mod-tap's own on/off switch. DKS is shown but disabled until its editor exists.
 - Demo-tested only so far.

@@ -698,7 +698,9 @@ function slider(id, label, value, min, max, badge = '') {
 // moving the handle down is like pressing the key further. Drag it, use the arrow keys (Shift for
 // 0.1 mm steps), or type in the bubble. Dead zones are hatched at the ends.
 const travelPct = v => `${((Math.min(Math.max(v, 0), MAX_TRAVEL_MM) / MAX_TRAVEL_MM) * 100).toFixed(2)}%`;
-function travelSlider(id, label, value, min, max, { tone = 'act', dzTop = 0, dzBottom = 0 } = {}) {
+// effective: also mark where the key really triggers. The RT75 adds the top dead zone to the
+// actuation point (tested 2026-10-18), so the marker follows the handle at +dzTop while dragging.
+function travelSlider(id, label, value, min, max, { tone = 'act', dzTop = 0, dzBottom = 0, effective = false } = {}) {
   const mixed = value === null;
   return `<div class="tslider tone-${tone}${mixed ? ' is-mixed' : ''}" id="${id}Slider" style="--p:${mixed ? '50%' : travelPct(value)}">
       <div class="ts-body">
@@ -711,6 +713,7 @@ function travelSlider(id, label, value, min, max, { tone = 'act', dzTop = 0, dzB
             ${dzBottom > 0 ? `<span class="ts-dz ts-dz-bottom" style="height:${travelPct(dzBottom)}"></span>` : ''}
           </span>
           <span class="ts-handle"></span>
+          ${effective && dzTop > 0 && !mixed ? `<span class="ts-eff" style="--dz:${travelPct(dzTop)}" title="Where the key really triggers: actuation + top dead zone"><span>${mm(dzTop + value)}</span></span>` : ''}
         </div>
         <span class="ts-ticks" aria-hidden="true"></span>
         <span class="ts-side">
@@ -749,7 +752,7 @@ function editorHtml(datas) {
   // the values they had. With a mixed selection the sliders apply to the other keys only.
   const allAdvanced = datas.every(d => ADVANCED.has(d.modeId));
   const anyToggle = datas.some(d => d.modeId === TG_HOLD || d.modeId === TG_FIRE);
-  const fixedNote = `<p class="note">${anyToggle ? 'Toggle keys trigger with a very light press: the keyboard doesn’t use these values in this mode (tested on the RT75). ' : ''}In this key mode the travel and dead zones can’t be changed, as in qmk.top; they’re kept for when the key goes back to Normal.</p>`;
+  const fixedNote = `<p class="note">${anyToggle ? 'Toggle keys trigger at about 0.5 mm, whatever these values are (tested on the RT75). ' : ''}In this key mode the travel and dead zones can’t be changed, as in qmk.top; they’re kept for when the key goes back to Normal.</p>`;
   return `
     <h3>Key mode</h3>
     ${keyModeHtml(datas)}
@@ -757,10 +760,11 @@ function editorHtml(datas) {
     <h3>Travel</h3>
     ${allAdvanced ? `<dl>${row('Actuation point', act === null ? 'Mixed' : `${mm3(act)} mm`)}${row('Release point', rel === null ? 'Mixed' : `${mm3(rel)} mm`)}</dl>${fixedNote}` : `
     <div class="ts-row">
-      ${travelSlider('act', linked ? 'Press & release' : 'Press (actuation)', act, T.min, deepest([...state.selected]), dz)}
+      ${travelSlider('act', linked ? 'Press & release' : 'Press (actuation)', act, T.min, deepest([...state.selected]), { ...dz, effective: true })}
       ${linked ? '' : travelSlider('rel', 'Release', rel, T.min, deepest([...state.selected]), { ...dz, tone: 'rel' })}
     </div>
-    <label class="check"><input type="checkbox" id="relLink" ${linked ? 'checked' : ''}> Release at the same point</label>`}
+    <label class="check"><input type="checkbox" id="relLink" ${linked ? 'checked' : ''}> Release at the same point</label>
+    ${tdz > 0 && act !== null ? `<p class="note">With the ${mm(tdz)} mm top dead zone, this key triggers at about <strong>${mm(act + tdz)} mm</strong> (dashed line): the keyboard adds the two together (tested on the RT75).${act + tdz > LIMITS.travel.max - (bdz ?? 0) ? ' That’s inside the bottom dead zone, so the key may never trigger.' : ''}</p>` : ''}`}
 
     <h3>Rapid Trigger</h3>
     <label class="switch"><input type="checkbox" id="rtToggle" ${rt ? 'checked' : ''}><span class="switch-track"></span>
