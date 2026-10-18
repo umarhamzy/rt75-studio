@@ -152,7 +152,8 @@ fills, paint/pick, colours from a picture (choose/drop/paste), designs saved in 
 built-in Sunset (`src/patterns.js`). Writing also queues the effect switch to Custom · that pattern.
 qmk.top's "IoT" desktop helper isn't needed (protocol-notes.md, "Custom lighting").
 
-**Next:** the user's choice; options offered: knob remapping, switch type, DKS editor (pinned, X1).
+**Next:** the user's choice; options offered: switch type, DKS editor (pinned, X1), mouse actions in
+the key map. Knob remapping isn't wanted.
 
 **Branches:** `feature/macros` holds the abandoned read-back approach and the full investigation
 log (probe pages). Don't merge it.
