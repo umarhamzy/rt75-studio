@@ -780,6 +780,15 @@ apply to this keyboard).
 - **For RT75 Studio:** none of this needs a helper program. Per-key patterns are ordinary feature
   reports (wired, and through the dongle relay), and saved designs can live in the browser like the
   macro library. Music and screen effects stay out of scope.
+- **RT75 Studio's editor (feature/custom-lighting, design C3):** Lighting › Custom patterns. A pattern is
+  read with `0x8C` the first time it's shown (in range: patterns 0–4, pages 0–5; `query()` refuses
+  others), painted on the board or filled (solid, gradient, rainbow rows/sweep, WASD highlight), and
+  written with `0x0C` through Review changes, then read back and compared (re-sent once). Slots that
+  aren't keys keep what was read. As in qmk.top's writeSelectedCustomizationLayer, editing a pattern
+  also queues the lighting switch to Custom with that pattern; the pattern is written first, then the
+  effect. Undo writes the previous pattern back. Saved designs stay in this browser
+  (`rt75-studio-patterns-2865`). The Effect view's preview shows the real pattern for Custom.
+- Demo-tested only so far.
 
 ## Read ranges (incident, 2026-10-15)
 

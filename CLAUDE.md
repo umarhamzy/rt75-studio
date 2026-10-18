@@ -32,6 +32,7 @@ touching device code.
 | `src/macros.js` | Macro buffer encoding (mirrors qmk.top), checks, modes, step labels |
 | `src/library.js` | Macro library in this browser: storage, export/import, out-of-date check |
 | `src/lighting.js` | Lighting effects table (from qmk.top's RT75 entry), packet encode/decode, diffs |
+| `src/patterns.js` | Custom lighting patterns: per-key colour helpers, quick fills, saved-design storage |
 | `src/demo.js` | Simulated keyboard (per-profile settings, polling rate, sleep timers, lighting, live reports) |
 | `src/dropdown.js` | Styled dropdowns (M1 design) layered over every native `<select>`; the select stays the source of truth |
 | `src/styles.css` | Theme tokens (dark only) and all styles |
@@ -143,7 +144,13 @@ marks that real trigger point. Travel stops at 3.3 mm minus the bottom dead zone
 Round 16), a 380 px side panel that narrows to 320 px before the board shrinks, the app following
 profile changes made on the keyboard (`01` push; verified), and a qmk.top link in Keyboard settings.
 
-**Next, in the user's order:** custom lighting patterns (`0x0C`/`0x8C`).
+**Custom lighting patterns (feature/custom-lighting, demo-tested, not yet verified on the keyboard):**
+Lighting › Custom patterns (design C3, canvas Round 17): per-key colours for the Custom effect's
+Pattern 1–5, read with `0x8C` on demand and written with `0x0C` (7 packets, validator
+`assertAllowedUserPicWrite`) with read-back; quick fills; designs saved in this browser
+(`src/patterns.js`). qmk.top's "IoT" desktop helper isn't needed (protocol-notes.md, "Custom lighting").
+
+**Next:** the user's choice; options offered: knob remapping, switch type, DKS editor (pinned, X1).
 
 **Branches:** `feature/macros` holds the abandoned read-back approach and the full investigation
 log (probe pages). Don't merge it.

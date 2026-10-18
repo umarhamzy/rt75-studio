@@ -3,13 +3,14 @@ import { decodeAction, encodeKey, encodeModTap, splitKey, FUNCTIONS, RISKY, KEY_
 import {
   isSupported, requestKeyboard, findGrantedKeyboard, readSettings, readKeymaps, settingsFromDump, setDongleTiming,
   writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, writeSleepTimes,
-  writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot, watchKeyboardEvents, readKbOption, readCurrentProfile,
+  writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot, watchKeyboardEvents, readKbOption, readCurrentProfile, readUserPic, writeUserPic,
   LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS,
 } from './device.js';
 import { EFFECTS, effectById, isOffered, normalizeLighting, lightingDiff, lightingFields, hex, MAX_LEVEL } from './lighting.js';
 import { MACRO_MODES, MOUSE_BUTTONS, MAX_DELAY, MAX_REPEAT, MACRO_BYTES, stepLabel, macroSummary, macroProblem, macroSize, heldAtEnd } from './macros.js';
 import { loadLibrary, saveLibrary, newId, isOutdated, uniqueName, exportLibrary, parseLibraryFile, validSlot } from './library.js';
 import { enhanceSelects } from './dropdown.js';
+import { loadPatternLibrary, savePatternLibrary, keyColor, setKeyColor, keysChanged, applyFill, FILLS } from './patterns.js';
 
 // Switch-type byte (magnet param 252), from qmk.top/v4's switch enum. The RT75 Pro offers
 // these seven; qmk.top shows any other value (e.g. 0xFF, unset) as type 1, Outemu.
@@ -51,6 +52,10 @@ const state = {
   pendingKb: {},             // keyboard-wide edits, e.g. { reportRateHz: 8000 }
   pendingKeys: new Map(),    // key map edits: 'layer:slot' -> 4 action bytes
   pendingLight: null,        // lighting setting to write, or null
+  // Custom lighting patterns (the Custom effect's Pattern 1–5): what the keyboard has (read on
+  // demand), unsaved edits, and the editor's colours. mode: which Lighting editor is open.
+  pt: { mode: 'effect', layer: 0, saved: {}, edits: {}, loading: null, error: null, a: '#0a2a55', b: '#ff9500', fill: null },
+  patternLibrary: [],        // saved designs in this browser: [{ id, name, colors }]
   library: [],               // macro library (this browser): [{ id, name, repeat, steps, slot?, written? }]
   pendingMacroWrites: new Map(), // macro slot -> library macro id to write there
   macroDraft: null,          // macro open in the editor dialog
@@ -155,7 +160,9 @@ function renderBoard() {
   const actuations = s ? MAGNETIC.map(k => keyData(k).actuation) : [];
   const lo = Math.min(...actuations), hi = Math.max(...actuations);
   const pairs = s ? snapPairs() : new Map();
-  const led = s && state.view === 'lighting' ? ledPreview() : null;
+  const painting = !!s && state.view === 'lighting' && state.pt.mode === 'patterns';
+  const led = s && state.view === 'lighting' ? (painting ? patternPainter() : ledPreview()) : null;
+  board.classList.toggle('pt-board', painting);
   board.classList.toggle('led-board', !!led);
   // Lighting, Macros and Keyboard settings don't use key selection: hide it there (it's kept for
   // the other views).
@@ -297,7 +304,12 @@ function renderBoard() {
     } else {
       el.setAttribute('aria-label', key.label);
     }
-    if (led) {
+    if (painting) {
+      // Click paints the key with the second colour; right-click picks its colour up instead.
+      el.onclick = () => paintKey(key.slot);
+      el.oncontextmenu = e => { e.preventDefault(); pickKeyColor(key.slot); };
+      el.setAttribute('aria-label', `${key.label}: ${patternColors(state.pt.layer) ? keyColor(patternColors(state.pt.layer), key.slot) : 'not read yet'}. Click to paint.`);
+    } else if (led) {
       el.tabIndex = -1; // lighting is keyboard-wide, so keys aren't selectable here
       el.setAttribute('aria-hidden', 'true');
     } else if (state.view === 'macros') {
@@ -538,6 +550,15 @@ function renderLegend(lo, hi) {
     el.innerHTML = '<span class="swatch swatch-mt"></span><span>Mod-tap</span><span class="swatch swatch-tg"></span><span>Toggle</span><span class="muted legend-fit">the key shows what it sends · change it under Key mode</span>';
   } else if (state.view === 'device') {
     el.innerHTML = '<span class="muted">For the whole keyboard (every profile), plus how RT75 Studio shows it.</span>';
+  } else if (state.view === 'lighting' && state.pt.mode === 'patterns') {
+    const can = editable() && !!patternColors(state.pt.layer);
+    el.innerHTML = `<div class="pt-fills" role="group" aria-label="Fill the pattern">${FILLS.map(f => `<button type="button" class="btn btn-small" data-fill="${f.id}" ${can ? '' : 'disabled'}>${f.name}</button>`).join('')}</div>
+      <label class="pt-color" title="Base colour (Solid, Gradient start, behind WASD)"><input type="color" id="ptColorA" value="${state.pt.a}" aria-label="Base colour"></label>
+      <label class="pt-color" title="Brush colour (click a key to paint it)"><input type="color" id="ptColorB" value="${state.pt.b}" aria-label="Brush colour"></label>
+      <span class="muted legend-fit">click paints · right-click picks</span>`;
+    el.querySelectorAll('[data-fill]').forEach(b => b.onclick = () => editPattern(c => applyFill(c, b.dataset.fill, state.pt.a, state.pt.b)));
+    $('ptColorA').onchange = e => { state.pt.a = e.target.value; };
+    $('ptColorB').onchange = e => { state.pt.b = e.target.value; };
   } else if (state.view === 'lighting') {
     const l = currentLight();
     const e = l && effectById(l.effect);
@@ -618,7 +639,7 @@ function renderProfiles() {
 // lighting field and macro, i.e. the rows the review dialog will list.
 function pendingCount() {
   const keySettings = pendingEdits().reduce((a, e) => a + Object.keys(e).length - 1, 0);
-  return keySettings + kbChanges().length + keymapChanges().length + (lightChange()?.fields.length ?? 0) + macroWrites().length;
+  return keySettings + kbChanges().length + keymapChanges().length + (lightChange()?.fields.length ?? 0) + macroWrites().length + patternChanges().length;
 }
 
 function renderReviewButton() {
@@ -2086,7 +2107,7 @@ function renderLivePanel() {
   drawLive();
 }
 
-function hasAnyPending() { return pendingEdits().length > 0 || kbChanges().length > 0 || keymapChanges().length > 0 || !!lightChange() || macroWrites().length > 0; }
+function hasAnyPending() { return pendingEdits().length > 0 || kbChanges().length > 0 || keymapChanges().length > 0 || !!lightChange() || macroWrites().length > 0 || patternChanges().length > 0; }
 
 // Keyboard-wide edits that differ from the keyboard: [{ field, label, from, to }].
 function kbChanges() {
@@ -2360,7 +2381,7 @@ function openReview() {
   $('reviewBody').innerHTML = `
     <p>These settings will be written to the keyboard (profile ${(state.settings.profile ?? 0) + 1}). Nothing else changes.</p>
     <div class="table-wrap"><table class="changes"><thead><tr><th>Key</th><th>Setting</th><th>Now</th><th>New</th></tr></thead>
-    <tbody>${changeRows(edits, (slot, f) => state.settings.magnet[f][slot])}${kbRows(kbChanges())}${kmRows(keymapChanges())}${macroWriteRows(macroWrites())}${lightRows(lightChange())}</tbody></table></div>
+    <tbody>${changeRows(edits, (slot, f) => state.settings.magnet[f][slot])}${kbRows(kbChanges())}${kmRows(keymapChanges())}${macroWriteRows(macroWrites())}${patternRows(patternChanges())}${lightRows(lightChange())}</tbody></table></div>
     ${macroWrites().length ? '<p class="hint-warn">This keyboard can’t give macro steps back, so they can’t be confirmed after writing. Press the key afterwards to check it.</p>' : ''}
     <label class="check"><input type="checkbox" id="chkBackup" checked> Download a backup of the current settings first</label>`;
   $('reviewStatus').textContent = '';
@@ -2374,7 +2395,7 @@ function openReview() {
   $('reviewDialog').showModal();
 }
 
-async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChanges(), light = lightChange(), macros = macroWrites() }) {
+async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChanges(), light = lightChange(), macros = macroWrites(), patterns = patternChanges() }) {
   // What each macro slot held before (when RT75 Studio wrote it), for Undo.
   for (const w of macros) w.before ??= w.entry.slot === w.slot && w.entry.written ? w.entry.written : null;
   const before = new Map(edits.map(e => [e.slot, Object.fromEntries(Object.keys(e).filter(f => f !== 'slot').map(f => [f, state.settings.magnet[f][e.slot]]))]));
@@ -2439,6 +2460,14 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
       }
       persistLibrary();
     }
+    // Custom patterns go before the lighting change that shows them (qmk.top: setLightPic, then the effect).
+    for (const c of patterns) {
+      const pr = await writeUserPic(state.dev, state.settings, c.layer, c.to, (f, label) => { status.textContent = `${label} ${c.layer + 1}… ${Math.round(f * 100)}%`; });
+      state.pt.saved[c.layer] = pr.colors; // trust the read-back
+      delete state.pt.edits[c.layer];
+      result.retried += pr.retried;
+      if (pr.mismatches) result.mismatches.push({ kb: true, label: `Custom pattern ${c.layer + 1}`, expected: 'the edited colours', actual: `${pr.mismatches} byte(s) different` });
+    }
     if (light) {
       status.textContent = 'Writing lighting…';
       const lr = await writeLighting(state.dev, state.settings, light.to);
@@ -2453,7 +2482,7 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
         result.mismatches.map(m => m.kb ? `${m.label} expected ${m.expected}, got ${m.actual}`
           : `${keyBySlot(m.slot).label} ${FIELD_LABELS[m.field]} expected ${fmt(m.field, m.expected)}, got ${fmt(m.field, m.actual)}`).join('; ');
     } else {
-      const n = edits.reduce((a, e) => a + Object.keys(e).length - 1, 0) + kb.length + keys.length + (light?.fields.length ?? 0);
+      const n = edits.reduce((a, e) => a + Object.keys(e).length - 1, 0) + kb.length + keys.length + (light?.fields.length ?? 0) + patterns.length;
       status.className = 'review-status is-ok';
       status.textContent = (n ? `Done. ${n === 1 ? 'The setting was' : `All ${n} settings were`} written and confirmed by reading ${n === 1 ? 'it' : 'them'} back.` : 'Done.') +
         (result.retried ? ` (${result.retried} needed a second try.)` : '') + macroNote(macros);
@@ -2461,7 +2490,8 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
     state.lastApplied = { undo: [...before].map(([slot, fields]) => ({ slot, ...fields })), undoKb: kb.map(c => ({ ...c, from: c.to, to: c.from })), undoKeys: keys.map(c => ({ ...c, from: c.to, to: c.from })),
       // A macro slot is restored only if RT75 Studio knows what it held before.
       undoMacros: macros.filter(w => w.before).map(w => ({ slot: w.slot, entry: w.entry, macro: w.before, before: w.macro })),
-      undoLight: light && isOffered(effectById(light.from.effect)) ? { from: light.to, to: normalizeLighting(light.from), fields: light.fields } : null };
+      undoLight: light && isOffered(effectById(light.from.effect)) ? { from: light.to, to: normalizeLighting(light.from), fields: light.fields } : null,
+      undoPatterns: patterns.map(c => ({ layer: c.layer, from: c.to, to: c.from, undo: true })) };
     $('btnApply').hidden = true;
     $('btnUndo').hidden = false;
     $('btnCancel').textContent = 'Close';
@@ -2490,12 +2520,13 @@ async function undoLast() {
   const skippedKeys = allUndoKeys.length - undoKeys.length;
   const undoLight = state.lastApplied.undoLight ?? null;
   const undoMacros = state.lastApplied.undoMacros ?? [];
+  const undoPatterns = state.lastApplied.undoPatterns ?? [];
   state.lastApplied = null;
   $('btnUndo').hidden = true;
   $('reviewBody').innerHTML = `<p>Restoring the previous values:</p>
     <div class="table-wrap"><table class="changes"><thead><tr><th>Key</th><th>Setting</th><th>Now</th><th>Restored</th></tr></thead>
-    <tbody>${changeRows(undo, (slot, f) => state.settings.magnet[f][slot])}${kbRows(undoKb)}${kmRows(undoKeys)}${macroWriteRows(undoMacros)}${lightRows(undoLight)}</tbody></table></div>${skippedKeys ? `<p class="hint-warn">${skippedKeys} key(s) had a macro, mouse or mod-tap action that RT75 Studio can’t write back; reassign those in qmk.top.</p>` : ''}`;
-  await applyEdits(undo, { backup: false, kb: undoKb, keys: undoKeys, light: undoLight, macros: undoMacros });
+    <tbody>${changeRows(undo, (slot, f) => state.settings.magnet[f][slot])}${kbRows(undoKb)}${kmRows(undoKeys)}${macroWriteRows(undoMacros)}${patternRows(undoPatterns)}${lightRows(undoLight)}</tbody></table></div>${skippedKeys ? `<p class="hint-warn">${skippedKeys} key(s) had a macro, mouse or mod-tap action that RT75 Studio can’t write back; reassign those in qmk.top.</p>` : ''}`;
+  await applyEdits(undo, { backup: false, kb: undoKb, keys: undoKeys, light: undoLight, macros: undoMacros, patterns: undoPatterns });
   $('btnUndo').hidden = true;
 }
 
@@ -2599,6 +2630,16 @@ function ledPreview() {
       default: return 0;
     }
   };
+  const pic = e.key === 'LightUserPicture' ? patternColors(l.option) : null;
+  if (pic) {
+    return { paint(el, key) {
+      el.classList.add('led-key');
+      if (level === 0) { el.classList.add('led-dark'); return; }
+      el.style.setProperty('--led', keyColor(pic, key.slot));
+      el.style.setProperty('--led-mix', `${Math.round(level * 70)}%`);
+      el.style.setProperty('--led-glow', `${Math.round(level * 55)}%`);
+    } };
+  }
   const anim = {
     wave: rainbow ? 'hue' : 'pulse', rows: rainbow ? 'hue' : 'pulse', fall: 'pulse', radial: rainbow ? 'hue' : 'pulse',
     spin: rainbow ? 'hue' : 'pulse', twinkle: 'twinkle', react: 'twinkle', breathe: 'breathe', cycle: 'hue',
@@ -2631,8 +2672,10 @@ function renderLightingPanel() {
       : 'This file has no lighting settings. Connect the keyboard to see and change them.'}</p>`;
     return;
   }
+  if (state.pt.mode === 'patterns') { renderPatternPanel(); return; }
   const can = editable();
   const e = effectById(l.effect);
+  if (e?.key === 'LightUserPicture') ensurePattern(l.option); // so the preview shows the real pattern
   const change = lightChange();
   const dis = can ? '' : 'disabled';
   const changed = f => (change?.fields.includes(f) ? ' is-changed' : '');
@@ -2653,12 +2696,13 @@ function renderLightingPanel() {
   const notes = [];
   if (e && !isOffered(e)) notes.push(`<strong>${e.name}</strong> was set in qmk.top and runs from its ${e.key === 'LightMusicFollow2' ? 'music' : 'screen'} sync, so RT75 Studio doesn’t set it. Picking another effect replaces it.`);
   if (!e) notes.push(`The keyboard reports effect ${l.effect}, which qmk.top doesn’t list for the RT75 Pro.`);
-  if (e?.key === 'LightUserPicture') notes.push('Shows one of five per-key colour patterns stored on the keyboard. Edit the patterns in qmk.top.');
+  if (e?.key === 'LightUserPicture') notes.push('Shows one of five per-key colour patterns stored on the keyboard. Edit them under Custom patterns.');
   if (e?.motion === 'react') notes.push('Lights keys up as you type.');
   if (!can) notes.push(s.source === 'device' ? (state.busy ? 'Writing…' : 'Editing is off while the live test runs.') : 'Viewing a file. Connect the keyboard to change the lighting.');
 
   el.innerHTML = `<div class="insp-head"><h2>Lighting</h2>${revert}</div>
     <p class="sub">Backlight for the whole keyboard, shared by all profiles</p>
+    ${lightModeSwitch()}
     <h3 class="lt-head${changed('effect')}">Effect</h3>
     <div class="fx-grid" role="group" aria-label="Effect">${effects}</div>
     <div class="lt-row">
@@ -2673,6 +2717,7 @@ function renderLightingPanel() {
       </div>` : ''}
     ${notes.map(n => `<p class="note">${n}</p>`).join('')}`;
 
+  wireLightModeSwitch(el);
   if (!can) return;
   el.querySelectorAll('[data-fx]').forEach(b => b.onclick = () => setLight({ effect: Number(b.dataset.fx) }));
   el.querySelectorAll('[data-bright]').forEach(b => b.onclick = () => setLight({ brightness: Number(b.dataset.bright) }));
@@ -2685,6 +2730,132 @@ function renderLightingPanel() {
   picker?.addEventListener('input', () => setLight({ rainbow: false, color: parseInt(picker.value.slice(1), 16) }, { quiet: true }));
   picker?.addEventListener('change', () => setLight({ rainbow: false, color: parseInt(picker.value.slice(1), 16) }));
   $('btnRevertLight')?.addEventListener('click', () => { state.pendingLight = null; refresh(); });
+}
+
+// ---------- Custom lighting patterns ----------
+// The Custom effect shows one of five per-key colour patterns stored on the keyboard. The editor (design
+// C3, canvas Round 17) paints the board, starts from quick fills, and keeps designs in this browser.
+// Patterns are read when first shown; edits are reviewed and written like everything else, and writing
+// one also switches the lighting to Custom with that pattern, as qmk.top does (writeSelectedCustomizationLayer).
+const CUSTOM_EFFECT = EFFECTS.find(e => e.key === 'LightUserPicture')?.id;
+const patternColors = layer => state.pt.edits[layer] ?? state.pt.saved[layer] ?? null;
+
+function patternChanges() {
+  return Object.entries(state.pt.edits).map(([layer, to]) => ({ layer: Number(layer), from: state.pt.saved[layer], to }))
+    .filter(c => c.from && keysChanged(c.from, c.to) > 0);
+}
+const patternRows = changes => changes.map(c => `<tr><td>Lighting</td><td>Custom pattern ${c.layer + 1}</td><td>${c.undo ? `${keysChanged(c.from, c.to)} keys as edited` : 'as on the keyboard'}</td>
+  <td><strong>${c.undo ? 'as before' : `${keysChanged(c.from, c.to)} key${keysChanged(c.from, c.to) === 1 ? '' : 's'} recoloured`}</strong></td></tr>`).join('');
+
+async function ensurePattern(layer) {
+  const s = state.settings;
+  if (!s || s.source !== 'device' || !state.dev || state.pt.saved[layer] || state.pt.loading === layer) return;
+  state.pt.loading = layer;
+  state.pt.error = null;
+  try {
+    const colors = await readUserPic(state.dev, s, layer);
+    if (state.settings === s) state.pt.saved[layer] = colors;
+  } catch (e) {
+    if (state.settings === s) state.pt.error = `Couldn’t read pattern ${layer + 1}: ${e.message}`;
+  } finally {
+    if (state.pt.loading === layer) state.pt.loading = null;
+    if (state.view === 'lighting' && !state.busy) refresh();
+  }
+}
+
+// Applies fn to the current pattern. The first change also switches the lighting to Custom with this
+// pattern (a pending lighting edit), so the keyboard shows it once written.
+function editPattern(fn) {
+  const layer = state.pt.layer, base = patternColors(layer);
+  if (!base || !editable()) return;
+  const next = fn(base);
+  if (keysChanged(next, state.pt.saved[layer]) === 0) delete state.pt.edits[layer];
+  else {
+    state.pt.edits[layer] = next;
+    const l = currentLight();
+    if (CUSTOM_EFFECT !== undefined && (l.effect !== CUSTOM_EFFECT || l.option !== layer)) {
+      setLight({ effect: CUSTOM_EFFECT }, { quiet: true });
+      setLight({ option: layer }, { quiet: true });
+    }
+  }
+  refresh();
+}
+const paintKey = slot => editPattern(c => setKeyColor(c, slot, state.pt.b));
+function pickKeyColor(slot) {
+  const c = patternColors(state.pt.layer);
+  if (!c) return;
+  state.pt.b = keyColor(c, slot);
+  renderLegend();
+}
+
+const lightModeSwitch = () => `<div class="segmented segmented-sm lt-mode" role="group" aria-label="Lighting editor">
+    <button type="button" data-lt-mode="effect" aria-pressed="${state.pt.mode === 'effect'}">Effect</button>
+    <button type="button" data-lt-mode="patterns" aria-pressed="${state.pt.mode === 'patterns'}">Custom patterns</button>
+  </div>`;
+function wireLightModeSwitch(el) {
+  el.querySelectorAll('[data-lt-mode]').forEach(b => b.onclick = () => { state.pt.mode = b.dataset.ltMode; refresh(); });
+}
+
+function renderPatternPanel() {
+  const el = $('inspector');
+  const s = state.settings, pt = state.pt, layer = pt.layer;
+  if (s.source === 'device') ensurePattern(layer);
+  const colors = patternColors(layer), saved = pt.saved[layer];
+  const changed = colors && saved ? keysChanged(colors, saved) : 0;
+  const status = s.source !== 'device' ? 'Connect the keyboard to read and edit its patterns.'
+    : pt.loading === layer ? `Reading pattern ${layer + 1}…`
+    : pt.error ? escapeHtml(pt.error)
+    : changed ? `${changed} key${changed === 1 ? '' : 's'} recoloured · unsaved` : `Pattern ${layer + 1} as on the keyboard.`;
+  const thumb = c => `<span class="pt-thumb" aria-hidden="true">${MAGNETIC.map(k => `<i style="left:${(k.x / LAYOUT_WIDTH * 100).toFixed(2)}%;top:${(k.y / LAYOUT_HEIGHT * 100).toFixed(2)}%;width:${(k.w / LAYOUT_WIDTH * 100 - 0.6).toFixed(2)}%;height:${(k.h / LAYOUT_HEIGHT * 100 - 2).toFixed(2)}%;background:${keyColor(c, k.slot)}"></i>`).join('')}</span>`;
+  const lib = state.patternLibrary;
+  const can = editable();
+  el.innerHTML = `<div class="insp-head"><h2>Lighting</h2>${can && changed ? '<button class="revert-chip" id="btnRevertPattern" type="button">Unsaved · Revert</button>' : ''}</div>
+    <p class="sub">Five per-key colour patterns stored on the keyboard; the Custom effect shows one.</p>
+    ${lightModeSwitch()}
+    <section class="insp-sec" style="--sec:var(--accent)"><h3>Pattern</h3>
+      <div class="segmented segmented-sm pt-layers" role="group" aria-label="Pattern">
+        ${[0, 1, 2, 3, 4].map(i => `<button type="button" data-pt-layer="${i}" aria-pressed="${i === layer}">${i + 1}${pt.edits[i] && pt.saved[i] && keysChanged(pt.edits[i], pt.saved[i]) ? '<i class="pt-dot" aria-label="edited"></i>' : ''}</button>`).join('')}
+      </div>
+      <p class="note">${status}</p>
+      <p class="note">Writing a pattern also switches the lighting to Custom · Pattern ${layer + 1}, so you see it (as qmk.top does).</p>
+    </section>
+    <section class="insp-sec" style="--sec:var(--muted)"><h3>Saved in this browser</h3>
+      ${lib.length ? `<div class="pt-lib">${lib.map(d => `<div class="pt-item">
+          <button type="button" class="pt-load" data-pt-load="${d.id}" title="Load “${escapeHtml(d.name)}” into pattern ${layer + 1}" ${can && colors ? '' : 'disabled'}>${thumb(d.colors)}<span>${escapeHtml(d.name)}</span></button>
+          <button type="button" class="pt-del" data-pt-del="${d.id}" aria-label="Delete ${escapeHtml(d.name)}" title="Delete">×</button></div>`).join('')}</div>`
+        : '<p class="note">No saved designs yet. Paint a pattern, then save it here to reuse it on any of the five patterns.</p>'}
+      <button class="btn btn-small" id="btnSavePattern" type="button" ${colors ? '' : 'disabled'}>Save this design…</button>
+    </section>`;
+  wireLightModeSwitch(el);
+  el.querySelectorAll('[data-pt-layer]').forEach(b => b.onclick = () => { pt.layer = Number(b.dataset.ptLayer); refresh(); });
+  $('btnRevertPattern')?.addEventListener('click', () => { delete pt.edits[layer]; refresh(); });
+  el.querySelectorAll('[data-pt-load]').forEach(b => b.onclick = () => { const d = lib.find(x => x.id === b.dataset.ptLoad); if (d) editPattern(() => [...d.colors]); });
+  el.querySelectorAll('[data-pt-del]').forEach(b => b.onclick = () => {
+    const d = lib.find(x => x.id === b.dataset.ptDel);
+    if (!d || !confirm(`Delete the saved design “${d.name}” from this browser?`)) return;
+    state.patternLibrary = lib.filter(x => x !== d);
+    if (!savePatternLibrary(state.patternLibrary, !!s.demo)) showError('Couldn’t save the design library in this browser (storage is blocked or full).');
+    refresh();
+  });
+  $('btnSavePattern')?.addEventListener('click', () => {
+    const name = prompt('Name this design:', `Pattern ${layer + 1}`)?.trim();
+    if (!name) return;
+    state.patternLibrary = [...lib, { id: newId(), name, colors: [...colors] }];
+    if (!savePatternLibrary(state.patternLibrary, !!s.demo)) showError('Couldn’t save the design library in this browser (storage is blocked or full).');
+    refresh();
+  });
+}
+
+// Board painter for the pattern editor: each key in its pattern colour, unanimated.
+function patternPainter() {
+  const c = patternColors(state.pt.layer);
+  return { paint(el, key) {
+    el.classList.add('led-key');
+    if (!c) { el.classList.add('led-dark'); return; }
+    el.style.setProperty('--led', keyColor(c, key.slot));
+    el.style.setProperty('--led-mix', '72%');
+    el.style.setProperty('--led-glow', '45%');
+  } };
 }
 
 // ---------- Keyboard-wide settings ----------
@@ -2917,6 +3088,8 @@ function load(settings, dev = null) {
   state.pendingLight = null;
   state.pendingMacroWrites.clear();
   state.library = loadLibrary(!!settings.demo);
+  state.patternLibrary = loadPatternLibrary(!!settings.demo);
+  state.pt = { ...state.pt, saved: {}, edits: {}, loading: null, error: null };
   state.capture = null;
   state.lastApplied = null;
   refresh();
@@ -3023,6 +3196,7 @@ $('btnClearSel').onclick = () => { state.selected.clear(); refresh(); };
 $('btnDiscard').onclick = () => {
   if (state.busy) return;
   state.pending.clear(); state.pendingKb = {}; state.pendingKeys.clear(); state.pendingLight = null; state.pendingMacroWrites.clear(); state.capture = null;
+  state.pt.edits = {};
   $('reviewDialog').close();
   refresh();
 };

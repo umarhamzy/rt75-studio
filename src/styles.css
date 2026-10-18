@@ -980,3 +980,26 @@ select.dd-native { display: none !important; }
 .ts-track { width: 30px; }
 .ts-cap { border-radius: 9px; }
 .ts-handle { left: -5px; right: -5px; height: 8px; margin-top: -4px; border-radius: 4px; }
+/* Custom lighting patterns editor (design C3). */
+.lt-mode { display: grid; grid-template-columns: 1fr 1fr; margin: 12px 0 2px; }
+.pt-board .key { cursor: crosshair; }
+.pt-board .key:hover { transform: translateY(-1px); box-shadow: 0 0 0 2px var(--text); }
+.pt-fills { display: flex; gap: 4px; flex: none; }
+.pt-fills .btn { min-height: 24px; padding: 0 8px; font-size: 12px; }
+.pt-color { display: inline-flex; flex: none; }
+.pt-color input { width: 28px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); cursor: pointer; }
+.pt-layers { display: grid; grid-template-columns: repeat(5, 1fr); }
+.pt-layers button { position: relative; }
+.pt-dot { position: absolute; top: 3px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--pending); }
+.pt-lib { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.pt-item { position: relative; min-width: 0; }
+.pt-load { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 9px;
+  background: var(--surface-2); color: var(--text); font: 600 12px var(--sans); text-align: left; cursor: pointer; }
+.pt-load:hover:not(:disabled) { border-color: color-mix(in oklab, var(--accent) 50%, var(--line)); }
+.pt-load:disabled { cursor: default; opacity: 0.6; }
+.pt-load span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pt-thumb { position: relative; display: block; width: 100%; aspect-ratio: 773 / 299; }
+.pt-thumb i { position: absolute; border-radius: 1px; }
+.pt-del { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px;
+  background: rgb(0 0 0 / 0.55); color: var(--text); font: 600 14px var(--sans); line-height: 1; cursor: pointer; opacity: 0; }
+.pt-item:hover .pt-del, .pt-del:focus-visible { opacity: 1; }

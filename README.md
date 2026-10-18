@@ -128,6 +128,15 @@ can't restore those actions.
 
 ## Lighting
 
+**Custom patterns** (Lighting › Custom patterns): the keyboard stores five per-key colour patterns,
+shown by the Custom effect. Pick a pattern (it's read from the keyboard), start from a fill (Solid,
+Gradient, Rainbow rows, Rainbow sweep, Highlight WASD) using the two colours in the toolbar, then
+click keys to paint them (right-click picks a key's colour up). Designs can be saved in this browser
+and loaded into any pattern. Writing a pattern also switches the lighting to Custom with that
+pattern, and goes through Review changes with read-back and Undo. No helper program is needed
+(qmk.top asks for its "IoT" driver only for music/screen effects, its design library and wireless).
+
+
 The **Lighting** tab sets the backlight for the whole keyboard:
 - **effect:** the 19 effects qmk.top offers for the RT75 Pro, by the same names
 - **brightness** and **speed** (0–4; brightness 0 turns the lights off)
