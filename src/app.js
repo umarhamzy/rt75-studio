@@ -235,7 +235,8 @@ function renderBoard() {
       } else if (state.view === 'mt') {
         if (isToggle(key.slot)) {
           el.classList.add('hl-tg');
-          value.textContent = mtShort(layerBytes('base', key.slot)); // the orange cap says toggle; the title says which
+          // The orange cap says toggle; the title says which. Space shortens as it does in combos.
+          value.textContent = mtShort(layerBytes('base', key.slot)).replace(/^Space$/, 'Spc');
           el.title = `${key.label}: ${MODES[raw(key.slot, 'mode') & 0x7f]} · ${mtLabel(layerBytes('base', key.slot))}`;
         } else if (isMt(key.slot)) {
           const m = mtInfo(key.slot);

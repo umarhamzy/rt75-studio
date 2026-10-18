@@ -155,7 +155,7 @@ button, input, select { font: inherit; color: inherit; }
 /* ---------- Layout ---------- */
 .workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) 380px;
   gap: 20px;
   padding: 20px 24px 24px;
   width: 100%;
@@ -963,8 +963,9 @@ select.dd-native { display: none !important; }
 .tg-wave i { flex: 1; height: 3px; border-radius: 2px; background: var(--surface-3); }
 .tg-wave i.on { height: 14px; background: var(--tg); }
 .tg-caption { font-size: 11px; color: var(--muted); }
-/* Values never run past the keycap, so fitKeyLabels can shrink or wrap them. */
-.key .key-value { max-width: 100%; }
+/* Key modes view: long values (tap/hold, toggle actions) can't run past the keycap, so fitKeyLabels
+   shrinks or wraps them. Other views keep their short values unconstrained. */
+.key.hl-mt .key-value, .key.hl-tg .key-value { max-width: 100%; }
 /* Where the key really triggers (actuation + top dead zone): a dashed line across the cap that
    follows the handle, with its depth on the left. */
 .ts-eff { position: absolute; left: -4px; right: -4px; top: min(100%, calc(var(--p) + var(--dz))); height: 0;
