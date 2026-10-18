@@ -86,7 +86,7 @@ touching device code.
   http://127.0.0.1:5180/?demo.
 - Demo presets use their own storage key (`rt75-studio-presets-demo-2865`).
 
-## Status (2026-10-16)
+## Status (2026-10-18)
 
 **Verified on the real keyboard:**
 - reads and decoding
@@ -128,15 +128,20 @@ tabs spin until it's in). Startup over 2.4G: 24.7 s → 3.0 s, verified on the r
   (device.js) only listens on the report interface, already granted at connect; it never sends.
 - Design mockups: the "RT75 Studio UI styles" canvas artifact (Rounds 1–7).
 
-**Mod-tap (feature/mod-tap, demo-tested, not yet verified on the keyboard):** Configuration ›
-Mod-tap. Mode 3 + hold key on the base layer + tap key on key-matrix sub-layer 1 + hold time
+**Mod-tap (merged; verified on the real keyboard 2026-10-18):** Configuration › Key modes.
+Mode 3 + hold key on the base layer + tap key on key-matrix sub-layer 1 + hold time
 (param 5), mirroring qmk.top (protocol-notes.md, "Mod-tap"). The tap layer loads with the key map.
 
-**Toggle (feature/toggle, branched from feature/mod-tap, demo-tested, not yet verified on the
-keyboard):** modes 4 (Long press) and 5 (Rapid fire) + the action on the base layer
+**Toggle (merged; verified on the real keyboard 2026-10-18):** modes 4 (Long press) and 5 (Rapid fire) + the action on the base layer
 (protocol-notes.md, "Toggle"). The side panel's Key mode switch (Normal · Mod-tap · DKS · Toggle)
 replaces mod-tap's on/off switch; the Configuration tab is now "Key modes". Travel and dead zones are
-read-only on mod-tap and toggle keys, as in qmk.top.
+read-only on mod-tap and toggle keys, as in qmk.top. Toggle keys trigger at ~0.5 mm whatever their
+travel (tested); the RT75 adds the top dead zone to the actuation point (tested), and the Press slider
+marks that real trigger point. Travel stops at 3.3 mm minus the bottom dead zone, as in qmk.top.
+
+**Also merged with toggle:** side panel sections with coloured heading marks (design P1, canvas
+Round 16), a 380 px side panel that narrows to 320 px before the board shrinks, the app following
+profile changes made on the keyboard (`01` push; verified), and a qmk.top link in Keyboard settings.
 
 **Next, in the user's order:** custom lighting patterns (`0x0C`/`0x8C`).
 

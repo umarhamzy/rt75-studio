@@ -681,7 +681,8 @@ device declares `noMagneticSwitch`; the RT75 doesn't, so RT75 Studio never write
   sub 1 to zeros and writes the base layer back to the **tap** action (so the key keeps doing what a
   tap did), then sets the mode to Normal. It never writes subs 2–3: only DKS and toggle use them.
 - **Reads stay in range:** `query()` allows sub 0–1 only on `0x8A`.
-- Demo-tested only so far (write, read-back and Undo; Undo writes the keys, then the mode).
+- **Verified on the real keyboard (2026-10-18):** mod-tap keys write, read back and work (tap and
+  hold), and set back to Normal cleanly. Undo writes the keys, then the mode.
 
 ## Toggle (feature/toggle)
 
@@ -707,7 +708,9 @@ continuous triggering on or off; holding the key works normally.
   their actuation point is still untested.
 - **UI:** Configuration › Key modes tab; the side panel's Key mode switch (Normal · Mod-tap · DKS ·
   Toggle) replaces mod-tap's own on/off switch. DKS is shown but disabled until its editor exists.
-- Demo-tested only so far.
+- **Verified on the real keyboard (2026-10-18):** Long press and Rapid fire toggle keys write, read
+  back and behave as described, and set back to Normal cleanly (the side panel then names the key
+  correctly; see the label fix on feature/toggle).
 
 ## Lighting (main backlight)
 
