@@ -753,6 +753,34 @@ apply to this keyboard).
   - Undo restored the original
 - Editing Custom patterns (`0x0C`/`0x8C` user picture) is not implemented.
 
+## Custom lighting (per-key colours) and qmk.top's "IoT" mode (2026-10-18)
+
+- **IoT is qmk.top's desktop helper,** not a keyboard setting: an installed driver ("开始安装IOT",
+  "切换至IOT驱动") that qmk.top talks to instead of WebHID (`isUseIotSDK`; its Electron build is
+  detected with `"electron" in process.versions`).
+- **What qmk.top gates on it** (lighting page chunk `c4a897a9.js`, mouse page `5a0196e0.js`):
+  - Music-follow (`LightMusicFollow2`) and screen-colour (`LightScreenColor`) effects: "音乐律动和光影只能
+    在IOT模式下运行" (they need the desktop program to capture audio or the screen); clicking them
+    without IoT opens the "启用IOT驱动" prompt.
+  - "My works" (我的作品) and the Save static / dynamic effect buttons, which store designs in IoT's
+    local database (`Y.getAllItems(P.DBPATH.LIGHT, …)`).
+  - Wireless connections: "无线模式设备连接驱动需要切换至iot模式" (qmk.top's browser mode doesn't do the
+    dongle relay; RT75 Studio does).
+- **Not gated on IoT:** the per-key editor tab (灯光编辑), shown when the keyboard's lighting list has
+  `LightUserPicture` (the RT75's effect 13, "Custom", options Pattern 1–5), and writing it.
+- **Commands** (RY5088 base):
+  - write `setLightPic(colors, layer)`: `[0x0C, layer, 0xFF, page 0–6, length, isLast, 0, cs, data…]`,
+    7 packets of 56 bytes (the last carries 378 − 6·56 = 42), Bit7 checksum, then `vendorSleep`.
+    The data is 3 bytes (R, G, B) per key-matrix slot, 126 slots, at `slot × 3`.
+  - read `getLightPic(layer)`: `[0x8C, layer, 0xFF, page 0–5]`, 6 pages of 64 bytes.
+  - `layer` is the pattern (Pattern 1–5 = the Custom effect's options).
+- **Static vs dynamic** (`xO`): static ("user picture") when the lighting list has `LightUserPicture`;
+  dynamic (animated frames) only with `LightUserColor` and not over 2.4G. The RT75 has
+  `LightUserPicture` only, so qmk.top offers static custom patterns.
+- **For RT75 Studio:** none of this needs a helper program. Per-key patterns are ordinary feature
+  reports (wired, and through the dongle relay), and saved designs can live in the browser like the
+  macro library. Music and screen effects stay out of scope.
+
 ## Read ranges (incident, 2026-10-15)
 
 A read-only diagnostic on feature/macros asked for macro slots (`0x8B`) beyond the 50 that qmk.top
