@@ -147,8 +147,10 @@ profile changes made on the keyboard (`01` push; verified), and a qmk.top link i
 **Custom lighting patterns (feature/custom-lighting, demo-tested, not yet verified on the keyboard):**
 Lighting › Custom patterns (design C3, canvas Round 17): per-key colours for the Custom effect's
 Pattern 1–5, read with `0x8C` on demand and written with `0x0C` (7 packets, validator
-`assertAllowedUserPicWrite`) with read-back; quick fills; designs saved in this browser
-(`src/patterns.js`). qmk.top's "IoT" desktop helper isn't needed (protocol-notes.md, "Custom lighting").
+`assertAllowedUserPicWrite`) with read-back; all five read ahead once Custom is the effect; quick
+fills, paint/pick, colours from a picture (choose/drop/paste), designs saved in this browser with a
+built-in Sunset (`src/patterns.js`). Writing also queues the effect switch to Custom · that pattern.
+qmk.top's "IoT" desktop helper isn't needed (protocol-notes.md, "Custom lighting").
 
 **Next:** the user's choice; options offered: knob remapping, switch type, DKS editor (pinned, X1).
 
