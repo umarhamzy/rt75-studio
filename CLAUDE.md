@@ -144,7 +144,7 @@ marks that real trigger point. Travel stops at 3.3 mm minus the bottom dead zone
 Round 16), a 380 px side panel that narrows to 320 px before the board shrinks, the app following
 profile changes made on the keyboard (`01` push; verified), and a qmk.top link in Keyboard settings.
 
-**Custom lighting patterns (feature/custom-lighting, demo-tested, not yet verified on the keyboard):**
+**Custom lighting patterns (merged 2026-10-18 at the user's request; demo-tested, no keyboard verification recorded yet):**
 Lighting › Custom patterns (design C3, canvas Round 17): per-key colours for the Custom effect's
 Pattern 1–5, read with `0x8C` on demand and written with `0x0C` (7 packets, validator
 `assertAllowedUserPicWrite`) with read-back; all five read ahead once Custom is the effect; quick
