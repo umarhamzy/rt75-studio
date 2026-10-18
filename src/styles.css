@@ -972,12 +972,10 @@ select.dd-native { display: none !important; }
 .ts-eff span { position: absolute; right: calc(100% + 6px); top: -9px; padding: 1px 4px; border-radius: 4px;
   background: var(--surface-2); font: 600 10px var(--mono); color: var(--text); white-space: nowrap; }
 .tslider.is-dragging .ts-eff span { visibility: hidden; }
-/* Side panel sections (P2): each setting group outlined; the current tab's group first and lit. */
-.insp-sec { margin-top: 10px; padding: 10px 10px 12px; border: 1px solid var(--line-soft); border-radius: 12px; min-width: 0; }
-.insp-sec > h3 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 8px; }
-.insp-sec.is-on { border-color: color-mix(in oklab, var(--sec) 45%, transparent); background: var(--surface-2); }
-.insp-sec.is-on > h3 { color: var(--text); }
-.sec-tag { font: 500 10px var(--mono); letter-spacing: 0.06em; text-transform: none; color: var(--sec); }
-.insp-sec .ts-row { gap: 4px; margin: 6px -6px 10px; }
-.insp-sec .ts-side { width: 64px; }
-.insp-sec .ts-bubble input { width: 40px; }
+/* Side panel sections (P1): a rule between groups and a colour mark on each heading. */
+.insp-sec { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); min-width: 0; }
+.insp-sec > h3 { margin: 0 0 10px; padding-left: 8px; border-left: 3px solid var(--sec); line-height: 1.2; }
+/* Narrower travel sliders, so press and release fit side by side with room to spare. */
+.ts-track { width: 30px; }
+.ts-cap { border-radius: 9px; }
+.ts-handle { left: -5px; right: -5px; height: 8px; margin-top: -4px; border-radius: 4px; }

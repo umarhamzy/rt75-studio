@@ -605,13 +605,10 @@ function common(datas, f) {
 }
 
 // Re-rendering replaces the panel's controls; keep keyboard focus and scroll where they were.
-let inspectorView = null;
 function renderInspector() {
   const el = $('inspector');
   const focusId = el.contains(document.activeElement) ? document.activeElement.id : '';
-  // A new tab brings its section to the top, so start from the top then.
-  const scroll = inspectorView === state.view ? el.scrollTop : 0;
-  inspectorView = state.view;
+  const scroll = el.scrollTop;
   renderInspectorBody();
   el.scrollTop = scroll;
   if (focusId) el.querySelector(`#${CSS.escape(focusId)}`)?.focus({ preventScroll: true });
@@ -671,25 +668,20 @@ function renderInspectorBody() {
   if (editable()) wireEditor(el);
 }
 
-// The side panel's settings as outlined sections, one per heading. The section for the current
-// Configuration tab goes first and is highlighted; the rest keep their usual order.
+// The side panel's settings as sections, one per heading, separated by a rule; each heading has a
+// mark in the colour the board uses for that setting. Same order on every tab (design P1).
 const SECTIONS = {
   'Key mode': { id: 'mode', hue: 'var(--mt)' }, Travel: { id: 'travel', hue: 'var(--accent)' },
   'Rapid Trigger': { id: 'rt', hue: 'var(--rt)' }, 'Snap Tap': { id: 'snap', hue: 'var(--snap)' },
   'Dead zones': { id: 'dz', hue: 'var(--muted)' }, 'Other settings': { id: 'other', hue: 'var(--muted)' },
 };
-const TAB_SECTION = { actuation: 'travel', rt: 'rt', snap: 'snap', mt: 'mode' };
 function sectionsHtml(body) {
   const [before, ...parts] = body.split('<h3>');
-  const focus = TAB_SECTION[state.view];
-  const secs = parts.map(part => {
+  return before + parts.map(part => {
     const end = part.indexOf('</h3>');
     const title = part.slice(0, end), info = SECTIONS[title] ?? { id: title, hue: 'var(--muted)' };
-    return { ...info, title, inner: part.slice(end + 5), on: info.id === focus };
-  });
-  secs.sort((a, b) => b.on - a.on);
-  return before + secs.map(s => `<section class="insp-sec${s.on ? ' is-on' : ''}" data-sec="${s.id}" style="--sec:${s.hue}">
-      <h3><span>${s.title}</span>${s.on ? '<span class="sec-tag">this tab</span>' : ''}</h3>${s.inner}</section>`).join('');
+    return `<section class="insp-sec" data-sec="${info.id}" style="--sec:${info.hue}"><h3>${title}</h3>${part.slice(end + 5)}</section>`;
+  }).join('');
 }
 
 function readOnlyHtml(datas, single) {
