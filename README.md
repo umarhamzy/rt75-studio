@@ -111,6 +111,9 @@ The **Keyboard settings** section replaces the board with these cards:
   and changes go through the review.
 - **Debounce** is shown read-only: qmk.top doesn't offer it for this keyboard, and magnetic
   switches don't bounce like mechanical contacts.
+- **Display** (saved in this browser): **Help texts** hides the explanations in the side panel,
+  below the tabs and under these settings (warnings and status messages still show), and **Travel
+  bars on keys** hides the press and release bars on the Actuation tab.
 
 ## Key map
 

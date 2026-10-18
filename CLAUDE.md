@@ -161,6 +161,12 @@ or Press, four moment dots per action, a scrubbed "Try a press"); the trigger po
 panel's Key mode section. Pattern logic in `src/dks.js`. The DKS settings are read on demand the
 first time a key is switched to DKS.
 
+**Display preferences (feature/display-prefs, from feature/dks; demo-tested):** Keyboard settings ›
+Display: Help texts (hides elements tagged `help`) and Travel bars on keys, kept in this browser
+(`rt75-studio-display`) and applied as `no-help` / `no-lanes` classes on `<body>`. New explanatory
+text should get the `help` class; warnings and status messages shouldn't. Also: the grey "remapped"
+dot compares a key-mode key's tap action (mod-tap's tap key, not its hold key) with the factory key.
+
 **Next after DKS:** the user's choice; options offered: switch type, mouse actions in the key map.
 Knob remapping isn't wanted.
 

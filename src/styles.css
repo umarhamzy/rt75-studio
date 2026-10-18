@@ -1061,3 +1061,7 @@ select.dd-native { display: none !important; }
   .dks-try { grid-column: 1 / -1; grid-row: auto; order: 1; }
   .dks-head { flex-direction: column; gap: 2px; }
 }
+/* Display preferences (Keyboard settings › RT75 Studio). */
+body.no-help .help { display: none !important; }
+body.no-lanes .key-bar, body.no-lanes .legend-bars, body.no-lanes .lanes-only { display: none; }
+body.no-lanes .key.heat .key-marks { right: 4px; }

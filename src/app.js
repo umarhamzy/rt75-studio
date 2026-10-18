@@ -75,6 +75,24 @@ const state = {
   watch: null,               // { dev, stop } listening for knob and lighting reports, or null
 };
 const $ = id => document.getElementById(id);
+
+// Display preferences, kept in this browser: help texts and the travel bars on keys. Applied as
+// classes on <body> (styles.css), so turning one off never re-lays out the page.
+const PREFS = { help: true, lanes: true };
+function loadPrefs() {
+  try { return { ...PREFS, ...JSON.parse(localStorage.getItem('rt75-studio-display') ?? '{}') }; } catch { return { ...PREFS }; }
+}
+let prefs = loadPrefs();
+function applyPrefs() {
+  document.body.classList.toggle('no-help', !prefs.help);
+  document.body.classList.toggle('no-lanes', !prefs.lanes);
+}
+function setPref(name, on) {
+  prefs = { ...prefs, [name]: on };
+  try { localStorage.setItem('rt75-studio-display', JSON.stringify(prefs)); } catch { /* storage blocked: kept for this visit */ }
+  applyPrefs();
+  refresh();
+}
 const MAGNETIC = KEYS.filter(k => !k.knob);
 const NO_SELECT_VIEWS = new Set(['lighting', 'macros', 'device']);
 const keyBySlot = slot => KEYS.find(k => k.slot === slot && !k.knob);
@@ -99,6 +117,9 @@ function keyData(key) {
   // The base layer with any unsaved edit, decoded like Key map does (every key layout, Mac names);
   // undefined until the key map is loaded.
   const current = s.keymap ? layerBytes('base', i) : undefined;
+  // What the key sends when tapped: mod-tap's tap key (its base layer is the hold key), otherwise the
+  // base layer (a toggle key's action, DKS action 1). The "remapped" dot compares this with the factory key.
+  const sends = modeId === MT && s.tapLayer ? layerBytes('tap', i) : current;
   const factory = DEFAULT_MATRIX.slice(i * 4, i * 4 + 4);
   const partnerSlot = modeId === 7 ? raw(i, 'snapPartner') : undefined;
   return {
@@ -113,7 +134,7 @@ function keyData(key) {
     topDeadZone: (raw(i, 'topDeadZone') ?? 0) / step,
     switchType: switchName(m.switchType?.[i]),
     action: current ? actionLabel('base', current) : null,
-    remapped: current ? !sameAction(current, factory) : null,
+    remapped: sends ? !sameAction(sends, factory) : null,
     pending: hasPending(i),
     partner: partnerSlot !== undefined && partnerSlot !== 0xff ? keyBySlot(partnerSlot) : undefined,
   };
@@ -495,8 +516,8 @@ function knobPanelHtml() {
     <dl>${row('Turn', 'Volume down / up')}${row('Press', 'Mute')}</dl>
     <h3>Lighting mode${m === 'lighting' ? ' <span class="km-badge">now</span>' : ''}</h3>
     <dl>${row('Turn', 'Brightness down / up')}${row('Press', 'Next effect')}</dl>
-    <p class="note">Hold the knob to switch modes. The keyboard doesn’t report which mode it’s in, so RT75 Studio follows what the knob sends while this page is open. Brightness keys on the Fn layer send the same reports as the knob in lighting mode.</p>
-    <p class="note">The knob isn’t a magnetic switch, so it has no travel settings.</p>`;
+    <p class="note help">Hold the knob to switch modes. The keyboard doesn’t report which mode it’s in, so RT75 Studio follows what the knob sends while this page is open. Brightness keys on the Fn layer send the same reports as the knob in lighting mode.</p>
+    <p class="note help">The knob isn’t a magnetic switch, so it has no travel settings.</p>`;
 }
 
 function place(el, k) {
@@ -540,7 +561,7 @@ function renderLegend(lo, hi) {
   const el = $('legend');
   if (!state.settings) { el.innerHTML = ''; return; }
   if (state.view === 'actuation') {
-    el.innerHTML = `<span>${mm(LIMITS.travel.min)} mm</span><span class="ramp" aria-hidden="true"></span><span>${MAX_TRAVEL_MM} mm</span><span class="legend-bars" aria-hidden="true"><i></i><i></i></span><span class="muted">bars: press · release · stronger color = shorter travel</span>`;
+    el.innerHTML = `<span>${mm(LIMITS.travel.min)} mm</span><span class="ramp" aria-hidden="true"></span><span>${MAX_TRAVEL_MM} mm</span><span class="legend-bars" aria-hidden="true"><i></i><i></i></span><span class="muted help"><span class="lanes-only">bars: press · release · </span>stronger color = shorter travel</span>`;
   } else if (state.view === 'rt') {
     el.innerHTML = '<span class="swatch swatch-rt"></span><span class="legend-fit">Rapid Trigger on · sensitivity in mm (↓ press, ↑ release when they differ)</span>';
   } else if (state.view === 'live') {
@@ -560,15 +581,15 @@ function renderLegend(lo, hi) {
       </div><span class="swatch swatch-mc"></span><span>library macro</span><span class="muted">(click to edit)</span><span class="swatch swatch-mc-elsewhere"></span><span>made elsewhere</span>`;
     el.querySelectorAll('[data-layer]').forEach(b => b.onclick = () => { state.layer = b.dataset.layer; refresh(); });
   } else if (state.view === 'mt') {
-    el.innerHTML = '<span class="swatch swatch-mt"></span><span>Mod-tap</span><span class="swatch swatch-tg"></span><span>Toggle</span><span class="swatch swatch-dks"></span><span>DKS</span><span class="muted legend-fit">the key shows what it sends · change it under Key mode</span>';
+    el.innerHTML = '<span class="swatch swatch-mt"></span><span>Mod-tap</span><span class="swatch swatch-tg"></span><span>Toggle</span><span class="swatch swatch-dks"></span><span>DKS</span><span class="muted legend-fit help">the key shows what it sends · change it under Key mode</span>';
   } else if (state.view === 'device') {
-    el.innerHTML = '<span class="muted">For the whole keyboard (every profile), plus how RT75 Studio shows it.</span>';
+    el.innerHTML = '<span class="muted help">For the whole keyboard (every profile), plus how RT75 Studio shows it.</span>';
   } else if (state.view === 'lighting' && state.pt.mode === 'patterns') {
     const can = editable() && !!patternColors(state.pt.layer);
     el.innerHTML = `<div class="pt-fills" role="group" aria-label="Fill the pattern">${FILLS.map(f => `<button type="button" class="btn btn-small" data-fill="${f.id}" ${can ? '' : 'disabled'}>${f.name}</button>`).join('')}</div>
       <label class="pt-color" title="Base colour (Solid, Gradient start, behind WASD)"><input type="color" id="ptColorA" value="${state.pt.a}" aria-label="Base colour"></label>
       <label class="pt-color" title="Brush colour (click a key to paint it)"><input type="color" id="ptColorB" value="${state.pt.b}" aria-label="Brush colour"></label>
-      <span class="muted legend-fit">click paints · right-click picks</span>`;
+      <span class="muted legend-fit help">click paints · right-click picks</span>`;
     el.querySelectorAll('[data-fill]').forEach(b => b.onclick = () => editPattern(c => applyFill(c, b.dataset.fill, state.pt.a, state.pt.b)));
     $('ptColorA').onchange = e => { state.pt.a = e.target.value; };
     $('ptColorB').onchange = e => { state.pt.b = e.target.value; };
@@ -846,7 +867,7 @@ function editorHtml(datas) {
   const allAdvanced = datas.every(d => ADVANCED.has(d.modeId));
   const anyToggle = datas.some(d => d.modeId === TG_HOLD || d.modeId === TG_FIRE);
   const anyDks = datas.some(d => d.modeId === DKS);
-  const fixedNote = `<p class="note">${anyToggle ? 'Toggle keys trigger at about 0.5 mm, whatever these values are (tested on the RT75). ' : ''}${anyDks ? 'DKS keys use their own trigger point (Key mode, above). ' : ''}In this key mode the travel and dead zones can’t be changed, as in qmk.top; they’re kept for when the key goes back to Normal.</p>`;
+  const fixedNote = `<p class="note help">${anyToggle ? 'Toggle keys trigger at about 0.5 mm, whatever these values are (tested on the RT75). ' : ''}${anyDks ? 'DKS keys use their own trigger point (Key mode, above). ' : ''}In this key mode the travel and dead zones can’t be changed, as in qmk.top; they’re kept for when the key goes back to Normal.</p>`;
   return `
     <h3>Key mode</h3>
     ${keyModeHtml(datas)}
@@ -1093,7 +1114,7 @@ function dksSideHtml(ok) {
   const keys = ok.filter(isDksKey), L = LIMITS.dks, step = state.settings.travelStep;
   const v = common(keys, s => raw(s, 'dksTravel'));
   return `${slider('dkt', 'Trigger point', v === null ? null : v / step, L.min, L.max)}
-    <p class="note">${keys.length === 1 ? 'Set the four actions under the keyboard.' : 'Select one of these keys to set its actions (under the keyboard).'}
+    <p class="note help">${keys.length === 1 ? 'Set the four actions under the keyboard.' : 'Select one of these keys to set its actions (under the keyboard).'}
       The first and last moments happen at the trigger point; the bottom is ${mm(L.bottom)} mm.</p>`;
 }
 
@@ -1142,7 +1163,7 @@ function renderDksPanel() {
       <div class="dks-track${has ? '' : ' is-empty'}" style="--hue:${DKS_HUES[a.i]}">${bars}${cells}<span class="dks-play" aria-hidden="true"></span></div>`;
   }).join('');
   el.innerHTML = `<div class="dks-head"><h3>DKS · ${escapeHtml(keyBySlot(slot).label)}</h3>
-      <p>${can ? 'Click a dot: nothing → tap → hold → hold further. Click a hold where it should end.' : 'Connect the keyboard to edit.'}</p></div>
+      <p${can ? ' class="help"' : ''}>${can ? 'Click a dot: nothing → tap → hold → hold further. Click a hold where it should end.' : 'Connect the keyboard to edit.'}</p></div>
     <div class="dks-grid">
       <span class="dks-corner" aria-hidden="true"></span>
       <div class="dks-moments">${heads}</div>
@@ -1151,7 +1172,7 @@ function renderDksPanel() {
         <input type="range" id="dksScrub" min="0" max="100" step="1" value="${dksTry.t}" aria-label="Scrub through one press">
         <span class="dks-try-label">Keys down</span><strong id="dksDown"></strong>
         <span class="dks-try-tap" id="dksTap"></span>
-        <span class="dks-try-note">A preview; nothing is sent.</span>
+        <span class="dks-try-note help">A preview; nothing is sent.</span>
       </div>
       ${rows}
     </div>`;
@@ -1260,7 +1281,7 @@ function modTapHtml(ok) {
         </div>
       </div>
     </div>
-    <p class="note">${tap && hold && ms !== null ? `A quick tap sends ${escapeHtml(mtLabel(tap))}; holding longer than ${ms} ms sends ${escapeHtml(mtLabel(hold))}.` : 'A quick tap sends the tap key; holding past the hold time sends the hold key.'}
+    <p class="note help">${tap && hold && ms !== null ? `A quick tap sends ${escapeHtml(mtLabel(tap))}; holding longer than ${ms} ms sends ${escapeHtml(mtLabel(hold))}.` : 'A quick tap sends the tap key; holding past the hold time sends the hold key.'}
       Press keys records a combo, like Ctrl + C.</p>`;
 }
 
@@ -1284,7 +1305,7 @@ function toggleHtml(ok) {
       <button type="button" data-tg-type="${TG_FIRE}" aria-pressed="${type === TG_FIRE}"><strong>Rapid fire</strong><span>tap: keeps repeating</span></button>
     </div>
     <div class="mt-edit">${keyPickerHtml('toggle', act, 'Key')}</div>
-    <p class="note">${type === TG_FIRE
+    <p class="note help">${type === TG_FIRE
       ? `Tap ${trigger} once and the keyboard keeps pressing ${name} over and over; tap again to stop. Holding ${trigger} works like a normal key. The repeat speed is set by the keyboard.`
       : type === TG_HOLD ? `Tap ${trigger} once and the keyboard holds ${name} down for you; tap again to let go. Holding ${trigger} works like a normal key.`
       : 'Pick Long press or Rapid fire for all of these keys.'}</p>
@@ -1292,7 +1313,7 @@ function toggleHtml(ok) {
       <div class="tg-try-head"><span>Try it</span><span class="tg-status${active ? ' is-on' : ''}">${status}</span></div>
       <div class="btn-row"><button class="btn btn-small" id="tgTryTap" type="button">Tap ${trigger}</button><button class="btn btn-small" id="tgTryHold" type="button" aria-pressed="${toggleTry.holding}">Hold ${trigger}</button></div>
       <div class="tg-wave" aria-hidden="true">${wave}</div>
-      <span class="tg-caption">A preview of what the computer sees over the next second. Nothing is sent.</span>
+      <span class="tg-caption help">A preview of what the computer sees over the next second. Nothing is sent.</span>
     </div>`;
 }
 
@@ -1771,7 +1792,7 @@ function renderLibraryPanel() {
   }).join('');
   const elsewhere = elsewhereSlots();
   el.innerHTML = `<div class="insp-head"><h2>Macros</h2></div>
-    <p class="sub">Named macros, kept in this browser. Put one on a key in the Key map tab.</p>
+    <p class="sub help">Named macros, kept in this browser. Put one on a key in the Key map tab.</p>
     <div class="lib-actions">
       <button class="btn btn-small btn-primary" id="libNew" type="button">New macro</button>
       <button class="btn btn-small" id="libImport" type="button">Import…</button>
@@ -1927,7 +1948,7 @@ function renderMacroDialog() {
         <span class="muted">used in Loop count mode</span></label>
     </div>
     <p class="hint-warn" id="mcWarn" hidden></p>
-    <p class="note">The delay is the wait after each step. Recording captures key presses and releases with their timing; the browser can’t capture some keys (such as the Windows key or Alt+Tab), so add those from the list.
+    <p class="note help">The delay is the wait after each step. Recording captures key presses and releases with their timing; the browser can’t capture some keys (such as the Windows key or Alt+Tab), so add those from the list.
       ${onKeyboard ? ' This macro is on the keyboard: saving queues a write, which you review before anything is sent.' : ' Saving keeps it in the library; nothing is written to the keyboard until you put it on a key and review.'}</p>`;
   macroDialogStatus();
   const body = $('macroBody');
@@ -2066,7 +2087,7 @@ function renderKeymapPanel() {
 
   el.innerHTML = `
     <div class="insp-head"><h2>${key.label}</h2>${revertChipHtml(key.slot)}</div>
-    <p class="sub">What this key sends. Base is for profile ${(state.settings.profile ?? 0) + 1}; Fn applies while Fn is held and is shared by all profiles (showing the ${OS_NAMES[currentOs()]} Fn layer${state.osPref === 'auto' && keyboardOs() ? ', from the keyboard’s Win/Mac switch' : ''}). Click a layer to edit it.</p>
+    <p class="sub help">What this key sends. Base is for profile ${(state.settings.profile ?? 0) + 1}; Fn applies while Fn is held and is shared by all profiles (showing the ${OS_NAMES[currentOs()]} Fn layer${state.osPref === 'auto' && keyboardOs() ? ', from the keyboard’s Win/Mac switch' : ''}). Click a layer to edit it.</p>
     <div class="km-rows">${rows}</div>
     ${editor}
     ${canEdit ? '' : `<p class="note">${state.settings.source === 'device' ? (state.live ? 'Stop the live test to edit.' : '') : 'Viewing a file. Connect the keyboard to edit.'}</p>`}`;
@@ -2331,7 +2352,7 @@ function renderLivePanel() {
     </dl>
     <h3>Last 3 seconds</h3>
     <canvas class="live-trace" id="liveTrace" width="560" height="200" aria-label="Depth over the last 3 seconds"></canvas>
-    <p class="note">${hasAnyPending() ? 'Showing the keyboard’s saved values; unsaved edits aren’t on the keyboard yet. ' : ''}The keyboard reports one depth at a time, for whichever key is moving; the key name comes from your browser’s key events, so Fn and keys pressed only part-way don’t change it.</p>`;
+    <p class="note${hasAnyPending() ? '' : ' help'}">${hasAnyPending() ? 'Showing the keyboard’s saved values; unsaved edits aren’t on the keyboard yet. ' : ''}The keyboard reports one depth at a time, for whichever key is moving; the key name comes from your browser’s key events, so Fn and keys pressed only part-way don’t change it.</p>`;
   $('btnPeakReset').onclick = () => { if (state.live) state.live.peak = 0; };
   drawLive();
 }
@@ -2935,7 +2956,7 @@ function renderLightingPanel() {
   if (!can) notes.push(s.source === 'device' ? (state.busy ? 'Writing…' : 'Editing is off while the live test runs.') : 'Viewing a file. Connect the keyboard to change the lighting.');
 
   el.innerHTML = `<div class="insp-head"><h2>Lighting</h2>${revert}</div>
-    <p class="sub">Backlight for the whole keyboard, shared by all profiles</p>
+    <p class="sub help">Backlight for the whole keyboard, shared by all profiles</p>
     ${lightModeSwitch()}
     <h3 class="lt-head${changed('effect')}">Effect</h3>
     <div class="fx-grid" role="group" aria-label="Effect">${effects}</div>
@@ -3049,14 +3070,14 @@ function renderPatternPanel() {
   const can = editable();
   const pic = pt.picture;
   el.innerHTML = `<div class="insp-head"><h2>Lighting</h2>${can && changed ? '<button class="revert-chip" id="btnRevertPattern" type="button">Unsaved · Revert</button>' : ''}</div>
-    <p class="sub">Five per-key colour patterns stored on the keyboard; the Custom effect shows one.</p>
+    <p class="sub help">Five per-key colour patterns stored on the keyboard; the Custom effect shows one.</p>
     ${lightModeSwitch()}
     <section class="insp-sec" style="--sec:var(--accent)"><h3>Pattern</h3>
       <div class="segmented segmented-sm pt-layers" role="group" aria-label="Pattern">
         ${[0, 1, 2, 3, 4].map(i => `<button type="button" data-pt-layer="${i}" aria-pressed="${i === layer}">${i + 1}${pt.edits[i] && pt.saved[i] && keysChanged(pt.edits[i], pt.saved[i]) ? '<i class="pt-dot" aria-label="edited"></i>' : ''}</button>`).join('')}
       </div>
       <p class="note">${status}</p>
-      <p class="note">Writing a pattern also switches the lighting to Custom · Pattern ${layer + 1}, so you see it (as qmk.top does).</p>
+      <p class="note help">Writing a pattern also switches the lighting to Custom · Pattern ${layer + 1}, so you see it (as qmk.top does).</p>
     </section>
     <section class="insp-sec" style="--sec:var(--rt)"><h3>From a picture</h3>
       <div class="pt-pic${pic ? ' has-pic' : ''}">
@@ -3069,7 +3090,7 @@ function renderPatternPanel() {
         <button type="button" data-pt-fit="contain" aria-pressed="${pt.fit === 'contain'}" ${can && colors ? '' : 'disabled'}>Whole picture</button>
       </div>
       <label class="check"><input type="checkbox" id="ptVivid" ${pt.vivid ? 'checked' : ''} ${can && colors ? '' : 'disabled'}> Vivid colours <span class="muted">(LEDs wash pale colours out)</span></label>
-      <p class="note">Each key takes the colour of the part of the picture under it. You can also drop a picture on the keyboard, or paste one.</p>
+      <p class="note help">Each key takes the colour of the part of the picture under it. You can also drop a picture on the keyboard, or paste one.</p>
     </section>
     <section class="insp-sec" style="--sec:var(--muted)"><h3>Saved in this browser</h3>
       ${lib.length ? `<div class="pt-lib">${lib.map(d => `<div class="pt-item">
@@ -3173,7 +3194,7 @@ function renderKeyboardSettings() {
   // Grouped sections (a heading, tiles, and a note under them), as in the Round 9 mockups.
   const group = (title, sub, tiles, note) =>
     `<section class="set-group"><h2>${title}${sub ? ` <span class="muted">${sub}</span>` : ''}</h2>
-      <div class="set-tiles">${tiles}</div>${note ? `<p class="set-foot">${note}</p>` : ''}</section>`;
+      <div class="set-tiles">${tiles}</div>${note ? `<p class="set-foot help">${note}</p>` : ''}</section>`;
   // A changed tile gets an undo arrow next to its title that drops just that change.
   const tile = (label, body, { wide = false, pending = false, field = '' } = {}) =>
     `<div class="set-tile${wide ? ' is-wide' : ''}${pending ? ' is-pending' : ''}"><div class="set-head"><div class="set-label">${label}</div>${pending && field
@@ -3189,13 +3210,18 @@ function renderKeyboardSettings() {
     : `Pinned to ${OS_NAMES[state.osPref]}: Key map and Macros show only that Fn layer. The keyboard keeps both.`;
   // qmk.top/v4 is the official configurator this app mirrors; it has what RT75 Studio doesn't
   // change (calibration, firmware, factory reset, toggle keys).
-  const qmkTile = tile('qmk.top', `<p class="set-note">The official configurator, for calibration, firmware updates and factory reset. Close RT75 Studio first: only one page can use the keyboard at a time.</p>
+  const qmkTile = tile('qmk.top', `<p class="set-note help">The official configurator, for calibration, firmware updates and factory reset. Close RT75 Studio first: only one page can use the keyboard at a time.</p>
       <a class="btn btn-small set-ext" href="https://qmk.top/v4/" target="_blank" rel="noopener noreferrer">Open qmk.top<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M18 14v5H5V6h5"/></svg></a>`);
+  const prefSwitch = (name, label, note) => tile(label, `<label class="switch"><input type="checkbox" id="pref-${name}" data-pref="${name}" ${prefs[name] ? 'checked' : ''}><span class="switch-track"></span>
+      <span>${prefs[name] ? 'On' : 'Off'}</span></label><p class="set-note">${note}</p>`);
   const studio = group('RT75 Studio', 'this browser',
     tile('Fn layer shown', `${osPicker}<p class="set-note">${osNote}</p>`, { wide: true }) + qmkTile);
+  const display = group('Display', 'this browser',
+    prefSwitch('help', 'Help texts', 'Explanations under the settings, in the side panel and below the tabs. Warnings and status messages always show.') +
+    prefSwitch('lanes', 'Travel bars on keys', 'On the Actuation tab, two thin bars on each key: amber to the press point, cyan to the release point.'));
 
   if (!s) {
-    el.innerHTML = `<div class="set-stack">${studio}<p class="set-foot">Connect the keyboard (or open a dump) to see its settings.</p></div>`;
+    el.innerHTML = `<div class="set-stack">${studio}${display}<p class="set-foot">Connect the keyboard (or open a dump) to see its settings.</p></div>`;
   } else {
     const rate = state.pendingKb.reportRateHz ?? s.reportRateHz;
     const ratePending = kbChanges().some(c => c.field === 'reportRateHz');
@@ -3203,17 +3229,17 @@ function renderKeyboardSettings() {
       <div class="set-chips" role="group" aria-label="Polling rate">
         ${RATE_OPTIONS.map(hz => `<button type="button" id="rate-${hz}" data-rate="${hz}" aria-pressed="${hz === rate}" ${can ? '' : 'disabled'} title="${fmtHz(hz)}${hz === s.reportRateHz ? ' (current)' : ''}">${hz >= 1000 ? `${hz / 1000}k` : hz}</button>`).join('')}
       </div>
-      <div class="set-note">${ratePending ? `Now ${fmtHz(s.reportRateHz)} · written when you review` : 'How often the keyboard reports to the computer.'}</div>`;
+      <div class="set-note${ratePending ? '' : ' help'}">${ratePending ? `Now ${fmtHz(s.reportRateHz)} · written when you review` : 'How often the keyboard reports to the computer.'}</div>`;
     const kb = group('Keyboard', 'every profile',
       tile('Polling rate', rateChips, { wide: true, pending: ratePending, field: 'reportRateHz' }) +
-      tile('Win/Mac switch', `<div class="set-value">${kbOs ? OS_NAMES[kbOs] : '—'}</div><div class="set-note">Read from the switch on the keyboard.</div>`) +
-      tile('Debounce', `<div class="set-value is-muted">${s.debounce ?? '?'}</div><div class="set-note">Magnetic keys don’t bounce. Disabled.</div>`));
+      tile('Win/Mac switch', `<div class="set-value">${kbOs ? OS_NAMES[kbOs] : '—'}</div><div class="set-note help">Read from the switch on the keyboard.</div>`) +
+      tile('Debounce', `<div class="set-value is-muted">${s.debounce ?? '?'}</div><div class="set-note help">Magnetic keys don’t bounce. Disabled.</div>`));
     const power = s.sleep ? group('Wireless power saving', 'minutes, 0 = never',
       sleepTile(tile, 'time_bt', 'Bluetooth backlight off', can) +
       sleepTile(tile, 'deepTime_bt', 'Bluetooth deep sleep', can) +
       sleepTile(tile, 'time_24', '2.4G backlight off', can),
       'Backlight off: the lights go off after this long idle. Deep sleep: the keyboard sleeps until you press a key.') : '';
-    el.innerHTML = `<div class="set-stack">${kb}${power}${studio}
+    el.innerHTML = `<div class="set-stack">${kb}${power}${studio}${display}
       ${s.source !== 'device' ? '<p class="set-foot">Viewing a file. Connect the keyboard to change these.</p>' : ''}</div>`;
 
     const setSleep = (field, minutes) => {
@@ -3234,6 +3260,7 @@ function renderKeyboardSettings() {
     });
   }
   el.querySelectorAll('[data-os]').forEach(b => b.onclick = () => setOsPref(b.dataset.os));
+  el.querySelectorAll('[data-pref]').forEach(cb => cb.onchange = () => setPref(cb.dataset.pref, cb.checked));
   el.querySelectorAll('[data-undo]').forEach(b => b.onclick = () => { delete state.pendingKb[b.dataset.undo]; refresh(); });
   if (focusId) el.querySelector(`#${CSS.escape(focusId)}`)?.focus({ preventScroll: true });
 }
@@ -3489,6 +3516,7 @@ new MutationObserver(() => {
   queueMicrotask(() => { ddQueued = false; enhanceSelects(document); });
 }).observe(document.body, { childList: true, subtree: true });
 enhanceSelects(document);
+applyPrefs();
 $('selectPreset').onchange = e => {
   const pick = KEY_GROUPS[e.target.value];
   e.target.value = '';
