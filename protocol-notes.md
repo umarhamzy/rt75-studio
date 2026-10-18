@@ -672,6 +672,10 @@ continuous triggering on or off; holding the key works normally.
   行程设置, and its advanced-key objects carry no travel). RT75 Studio shows them read-only for
   such keys and drops travel and dead-zone edits on them from mixed selections. RT stays editable
   (`fire` is kept).
+- **Tested on the real keyboard (2026-10-18):** a toggle key triggers very lightly, whatever its
+  actuation point was set to before (the user set a deeper one first). The firmware doesn't use
+  the key's actuation point in toggle mode, which fits qmk.top not offering it. Whether mod-tap
+  keys use it is still untested.
 - **UI:** Configuration › Key modes tab; the side panel's Key mode switch (Normal · Mod-tap · DKS ·
   Toggle) replaces mod-tap's own on/off switch. DKS is shown but disabled until its editor exists.
 - Demo-tested only so far.

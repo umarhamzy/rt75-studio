@@ -744,7 +744,8 @@ function editorHtml(datas) {
   // Like qmk.top, travel and dead zones aren't edited on mod-tap, toggle or DKS keys: they keep
   // the values they had. With a mixed selection the sliders apply to the other keys only.
   const allAdvanced = datas.every(d => ADVANCED.has(d.modeId));
-  const fixedNote = '<p class="note">In this key mode the travel and dead zones stay as they are; qmk.top doesn’t change them either. Set the key back to Normal to edit them.</p>';
+  const anyToggle = datas.some(d => d.modeId === TG_HOLD || d.modeId === TG_FIRE);
+  const fixedNote = `<p class="note">${anyToggle ? 'Toggle keys trigger with a very light press: the keyboard doesn’t use these values in this mode (tested on the RT75). ' : ''}In this key mode the travel and dead zones can’t be changed, as in qmk.top; they’re kept for when the key goes back to Normal.</p>`;
   return `
     <h3>Key mode</h3>
     ${keyModeHtml(datas)}
