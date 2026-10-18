@@ -26,6 +26,8 @@
   --mt-ink: #06210d;
   --tg: #ff922b;
   --tg-ink: #2b1400;
+  --dks: #f06595;
+  --dks-ink: #2b0614;
   --pair-0: #9b7bff;
   --pair-1: #4cc9f0;
   --pair-2: #f06595;
@@ -188,6 +190,7 @@ button, input, select { font: inherit; color: inherit; }
 .swatch-snap { background: var(--snap); }
 .swatch-mt { background: var(--mt); }
 .swatch-tg { background: var(--tg); }
+.swatch-dks { background: var(--dks); }
 
 /* ---------- Keyboard ---------- */
 .board-wrap {
@@ -235,6 +238,7 @@ button, input, select { font: inherit; color: inherit; }
 .mark-snap { background: var(--snap); }
 .mark-mt { background: var(--mt); }
 .mark-tg { background: var(--tg); }
+.mark-dks { background: var(--dks); }
 .mark-remap { background: var(--muted); }
 
 /* Actuation view: amber by how short the travel is, plus a top-to-bottom bar on the right. */
@@ -965,7 +969,7 @@ select.dd-native { display: none !important; }
 .tg-caption { font-size: 11px; color: var(--muted); }
 /* Key modes view: long values (tap/hold, toggle actions) can't run past the keycap, so fitKeyLabels
    shrinks or wraps them. Other views keep their short values unconstrained. */
-.key.hl-mt .key-value, .key.hl-tg .key-value { max-width: 100%; }
+.key.hl-mt .key-value, .key.hl-tg .key-value, .key.hl-dks .key-value { max-width: 100%; }
 /* Where the key really triggers (actuation + top dead zone): a dashed line across the cap that
    follows the handle, with its depth on the left. */
 .ts-eff { position: absolute; left: -4px; right: -4px; top: min(100%, calc(var(--p) + var(--dz))); height: 0;
@@ -1012,3 +1016,48 @@ select.dd-native { display: none !important; }
 #board.is-drop { outline: 2px dashed var(--rt); outline-offset: 6px; }
 /* Custom effect: patterns 1–5 on one row. */
 .opt-picker.opt-numbers { display: grid; grid-template-columns: repeat(5, 1fr); }
+/* DKS editor (design X1, canvas Round 14): the four actions under the keyboard. */
+.key.hl-dks { --cap-bg: color-mix(in oklab, var(--dks) 70%, var(--cap)); color: var(--dks-ink); }
+.key.hl-dks .key-value { color: var(--dks-ink); font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
+.dks-panel { margin-top: 16px; padding: 14px 18px 16px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line-soft);
+  display: grid; gap: 10px; container-type: inline-size; }
+.dks-panel[hidden] { display: none; }
+.dks-head { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.dks-head h3 { margin: 0; font: 700 12px var(--mono); letter-spacing: 0.08em; white-space: nowrap; }
+.dks-head p { margin: 0; min-width: 0; font-size: 12px; color: var(--muted); }
+.dks-grid { display: grid; grid-template-columns: 210px minmax(0, 1fr) 190px; gap: 8px 14px; align-items: center; }
+.dks-moments { position: relative; height: 34px; margin: 0 14px; }
+.dks-moment { position: absolute; top: 0; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center;
+  font: 500 11px/1.25 var(--mono); color: var(--muted); white-space: nowrap; }
+.dks-moment span:last-child { font-size: 10px; letter-spacing: 0.04em; }
+.dks-moment.is-trigger { color: var(--accent); }
+.dks-key { display: grid; grid-template-columns: 8px minmax(0, 1fr) 62px; gap: 8px; align-items: center; min-width: 0; }
+.dks-key .dd-trigger { min-width: 0; }
+.dks-key .btn { padding: 0 6px; }
+.dks-sw { width: 8px; height: 8px; border-radius: 50%; background: var(--hue); }
+.dks-track { position: relative; height: 30px; margin: 0 14px; }
+.dks-track::before { content: ''; position: absolute; left: 0; right: 0; top: 14px; height: 2px; background: var(--line-soft); }
+.dks-bar { position: absolute; top: 4px; height: 22px; border-radius: 11px; background: var(--hue); opacity: 0.9; border: 0; padding: 0; cursor: pointer; }
+.dks-cell { position: absolute; top: 4px; width: 22px; height: 22px; margin-left: -11px; border-radius: 50%; padding: 0; z-index: 2;
+  display: grid; place-items: center; cursor: pointer; background: var(--surface-2); border: 1px solid var(--surface-3); color: var(--muted);
+  font: 600 14px/1 var(--sans); }
+.dks-cell.is-tap { background: var(--hue); border: 2px solid var(--surface); box-shadow: 0 0 0 2px var(--hue); }
+.dks-cell.in-bar { background: transparent; border: 2px solid rgb(17 19 23 / 0.55); }
+.dks-cell:disabled, .dks-bar:disabled { cursor: default; }
+.dks-track.is-empty .dks-cell { opacity: 0.4; }
+.dks-cell:not(:disabled):hover, .dks-bar:not(:disabled):hover { filter: brightness(1.25); }
+.dks-cell:focus-visible, .dks-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dks-play { position: absolute; top: -6px; bottom: -6px; width: 2px; margin-left: -1px; background: var(--text); opacity: 0.5; z-index: 3; pointer-events: none; }
+.dks-try { grid-column: 3; grid-row: 1 / span 5; align-self: stretch; display: flex; flex-direction: column; justify-content: center; gap: 4px;
+  min-width: 0; padding: 8px 10px; border-radius: 9px; background: var(--bg); border: 1px solid var(--line-soft); }
+.dks-try-label { font: 500 10px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.dks-try strong { font: 700 14px var(--mono); overflow-wrap: anywhere; }
+.dks-try input[type="range"] { width: 100%; margin: 0 0 4px; accent-color: var(--accent); }
+.dks-try-tap { min-height: 1.4em; font-size: 11px; color: var(--text-2); }
+.dks-try-note { font-size: 11px; color: var(--muted); }
+/* Narrow boards: the press preview goes under the rows. */
+@container (max-width: 620px) {
+  .dks-grid { grid-template-columns: 180px minmax(0, 1fr); }
+  .dks-try { grid-column: 1 / -1; grid-row: auto; order: 1; }
+  .dks-head { flex-direction: column; gap: 2px; }
+}

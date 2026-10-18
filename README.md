@@ -52,11 +52,20 @@ board, each key has two thin bars on its right edge, filled from the top down: a
 For Snap Tap, select a key and choose **Pair with another key…**, then click its partner.
 You can also select exactly two keys and choose **Pair these two keys**. Pairing a key that
 already has a partner releases the old partner, and **Remove pair** releases both keys. Rapid
-Trigger is kept either way. Keys using DKS or toggle modes aren't changed by this app.
+Trigger is kept either way. Keys using another key mode (mod-tap, DKS, toggle) can't be paired until
+they're set back to Normal.
 
-Each key has a **Key mode** in the side panel: Normal, Mod-tap, DKS (not editable yet) or Toggle.
-The **Key modes** tab shows mod-tap (green) and toggle (orange) keys on the board. Travel and dead
-zones stay as they are on mod-tap and toggle keys, as in qmk.top.
+Each key has a **Key mode** in the side panel: Normal, Mod-tap, DKS or Toggle.
+The **Key modes** tab shows mod-tap (green), toggle (orange) and DKS (pink) keys on the board. Travel
+and dead zones stay as they are on keys in these modes, as in qmk.top.
+
+For **DKS** (dynamic keystroke), one press can send up to four keys or combos, each at the moments you
+choose: pressing past the trigger point, reaching the bottom, leaving the bottom, and releasing past
+the trigger point. With one DKS key selected, its four actions appear under the keyboard: pick a key
+for each, then click a moment's dot to cycle nothing → tap → hold → hold further, or click a hold where
+it should end. **Try a press** scrubs through one press and shows which keys would be down. The trigger
+point (0.50–2.50 mm) is in the side panel. A key switched to DKS starts by holding its own key from
+press to release, so it behaves as before until you change it.
 
 For **toggle**, a tap on the key switches its action on or off, and holding the key works normally.
 **Long press** keeps the action held after a tap; **Rapid fire** repeats it (at the keyboard's own

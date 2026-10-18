@@ -680,7 +680,7 @@ device declares `noMagneticSwitch`; the RT75 doesn't, so RT75 Studio never write
   writes subs 0–3 as `[factory key, 0, 0, 0]` (save on sub 3), then the new mode. RT75 Studio clears
   sub 1 to zeros and writes the base layer back to the **tap** action (so the key keeps doing what a
   tap did), then sets the mode to Normal. It never writes subs 2–3: only DKS and toggle use them.
-- **Reads stay in range:** `query()` allows sub 0–1 only on `0x8A`.
+- **Reads stay in range:** `query()` allows subs 0–3 on `0x8A` (0–1 before DKS needed subs 2–3).
 - **Verified on the real keyboard (2026-10-18):** mod-tap keys write, read back and work (tap and
   hold), and set back to Normal cleanly. Undo writes the keys, then the mode.
 
@@ -707,7 +707,7 @@ continuous triggering on or off; holding the key works normally.
   about 0.5 mm, and ignores the top dead zone too** (user, 2026-10-18). Whether mod-tap keys use
   their actuation point is still untested.
 - **UI:** Configuration › Key modes tab; the side panel's Key mode switch (Normal · Mod-tap · DKS ·
-  Toggle) replaces mod-tap's own on/off switch. DKS is shown but disabled until its editor exists.
+  Toggle) replaces mod-tap's own on/off switch. DKS has its own editor (see "DKS").
 - **Verified on the real keyboard (2026-10-18):** Long press and Rapid fire toggle keys write, read
   back and behave as described, and set back to Normal cleanly (the side panel then names the key
   correctly; see the label fix on feature/toggle).
@@ -746,6 +746,18 @@ qmk.top's "Dynamic Keystroke (DKS)" advanced key (动态键程). Mode param 7 = 
     `[3, 3, 2, …]`; from moment 1 over two, `[…, 3, 2, …]`.
   - Moment 3 can only be 0 or 1 (its bar has no next moment to stretch to).
   - Clicking a bar clears it, and clears the continuation it started.
+- **RT75 Studio's editor** (design X1, canvas Round 14; `src/dks.js`): clicks instead of drags. A dot
+  cycles nothing → tap → hold to the next moment → one further → nothing; a dot inside a hold, or a
+  click on the hold, ends it there. Every click on every pattern qmk.top accepts gives another one it
+  accepts (tests/dks-editor.test.mjs checks all of them against `isDksAction`).
+- **Entering DKS** in RT75 Studio: action 1 = the key's own key in the mod-tap layout, actions 2–4
+  cleared, trigger table `[3, 3, 2, 0]` for action 1 (held press → release, so the key behaves as
+  before), trigger point 0.7 mm if the key has none in range. qmk.top starts its editor empty instead.
+  **Leaving DKS:** the base layer goes back to a plain key (action 1's key), subs 1–3 are cleared, mode
+  Normal; params 4 and 8 aren't sent for keys that end up not DKS (as RT sensitivity isn't with RT off).
+  Clearing an action's key clears its moments too.
+- If no key used DKS at startup, params 4 and 10 are read (12 reads) the first time a key is switched
+  to DKS.
 - Demo-tested only so far.
 
 ## Gamepad mode (not supported, 2026-10-17)

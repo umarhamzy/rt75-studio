@@ -33,6 +33,7 @@ touching device code.
 | `src/library.js` | Macro library in this browser: storage, export/import, out-of-date check |
 | `src/lighting.js` | Lighting effects table (from qmk.top's RT75 entry), packet encode/decode, diffs |
 | `src/patterns.js` | Custom lighting patterns: per-key colour helpers, quick fills, saved-design storage |
+| `src/dks.js` | DKS trigger patterns: the editor's clicks, descriptions and the scrubbed press |
 | `src/demo.js` | Simulated keyboard (per-profile settings, polling rate, sleep timers, lighting, live reports) |
 | `src/dropdown.js` | Styled dropdowns (M1 design) layered over every native `<select>`; the select stays the source of truth |
 | `src/styles.css` | Theme tokens (dark only) and all styles |
@@ -152,10 +153,13 @@ fills, paint/pick, colours from a picture (choose/drop/paste), designs saved in 
 built-in Sunset (`src/patterns.js`). Writing also queues the effect switch to Custom · that pattern.
 qmk.top's "IoT" desktop helper isn't needed (protocol-notes.md, "Custom lighting").
 
-**DKS (feature/dks, rebased on main; in progress):** trigger point (param 4), trigger table (param 8,
-read back as param 10 over 8 pages), four key-matrix sub-layers, validators and tests; decoded from
-qmk.top's editor chunk (protocol-notes.md, "DKS"). Editor: design **X1** (tracks under the keyboard,
-Key mode switch and trigger point in the side panel; canvas Round 14).
+**DKS (feature/dks, demo-tested, not yet verified on the keyboard):** trigger point (param 4), trigger
+table (param 8, read back as param 10 over 8 pages), four key-matrix sub-layers, validators and tests;
+decoded from qmk.top's editor chunk (protocol-notes.md, "DKS"). Editor: design **X1** (canvas Round 14):
+with one DKS key selected, its four actions replace the summary tiles under the keyboard (key picker
+or Press, four moment dots per action, a scrubbed "Try a press"); the trigger point is in the side
+panel's Key mode section. Pattern logic in `src/dks.js`. The DKS settings are read on demand the
+first time a key is switched to DKS.
 
 **Next after DKS:** the user's choice; options offered: switch type, mouse actions in the key map.
 Knob remapping isn't wanted.

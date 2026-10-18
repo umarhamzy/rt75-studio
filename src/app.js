@@ -3,13 +3,14 @@ import { decodeAction, encodeKey, encodeModTap, splitKey, FUNCTIONS, RISKY, KEY_
 import {
   isSupported, requestKeyboard, findGrantedKeyboard, readSettings, readKeymaps, settingsFromDump, setDongleTiming,
   writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, writeSleepTimes,
-  writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot, watchKeyboardEvents, readKbOption, readCurrentProfile, readUserPic, writeUserPic,
+  writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot, watchKeyboardEvents, readKbOption, readCurrentProfile, readUserPic, writeUserPic, readDksSettings,
   LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS,
 } from './device.js';
 import { EFFECTS, effectById, isOffered, normalizeLighting, lightingDiff, lightingFields, hex, MAX_LEVEL } from './lighting.js';
 import { MACRO_MODES, MOUSE_BUTTONS, MAX_DELAY, MAX_REPEAT, MACRO_BYTES, stepLabel, macroSummary, macroProblem, macroSize, heldAtEnd } from './macros.js';
 import { loadLibrary, saveLibrary, newId, isOutdated, uniqueName, exportLibrary, parseLibraryFile, validSlot } from './library.js';
 import { enhanceSelects } from './dropdown.js';
+import { unpack, pack, actionByte, setActionByte, DEFAULT_TRIGGERS, holds, cycleMoment, cutHold, describe, pressAt, heldAfter, tappedAt, MOMENT_NAMES } from './dks.js';
 import { loadPatternLibrary, savePatternLibrary, keyColor, setKeyColor, keysChanged, applyFill, FILLS, BUILT_IN_DESIGNS, colorsFromImage } from './patterns.js';
 
 // Switch-type byte (magnet param 252), from qmk.top/v4's switch enum. The RT75 Pro offers
@@ -28,7 +29,7 @@ const FIELD_LABELS = {
   mode: 'Key mode', actuation: 'Actuation point', release: 'Release point',
   rtPress: 'RT press sensitivity', rtRelease: 'RT release sensitivity',
   bottomDeadZone: 'Bottom dead zone', topDeadZone: 'Top dead zone', snapPartner: 'Snap Tap partner',
-  mtTime: 'Mod-tap hold time',
+  mtTime: 'Mod-tap hold time', dksTravel: 'DKS trigger point', dksTriggers: 'DKS moments',
 };
 const SNAP = 7;
 const MT = 3;            // mod-tap key mode
@@ -246,6 +247,12 @@ function renderBoard() {
           // The orange cap says toggle; the title says which. Space shortens as it does in combos.
           value.textContent = mtShort(layerBytes('base', key.slot)).replace(/^Space$/, 'Spc');
           el.title = `${key.label}: ${MODES[raw(key.slot, 'mode') & 0x7f]} · ${mtLabel(layerBytes('base', key.slot))}`;
+        } else if (isDksKey(key.slot)) {
+          // The pink cap says DKS; it shows its first action and how many more (all of them in the title).
+          const info = dksInfo(key.slot), used = info ? dksUsed(info) : [];
+          el.classList.add('hl-dks');
+          value.textContent = used.length ? `${mtShort(used[0].bytes).replace(/^Space$/, 'Spc')}${used.length > 1 ? ` +${used.length - 1}` : ''}` : 'DKS';
+          el.title = `${key.label}: DKS · ${used.map(a => mtLabel(a.bytes)).join(', ') || (info ? 'no actions yet' : 'actions not read yet')}`;
         } else if (isMt(key.slot)) {
           const m = mtInfo(key.slot);
           el.classList.add('hl-mt');
@@ -263,7 +270,10 @@ function renderBoard() {
         value.textContent = a.none ? '·' : a.short.replaceAll('+', '+​');
         value.title = a.label;
         // A mod-tap key's base layer is its hold action: show tap/hold instead.
-        if (state.layer === 'base' && isToggle(key.slot)) {
+        if (state.layer === 'base' && isDksKey(key.slot)) {
+          value.textContent = 'DKS';
+          value.title = 'DKS: its actions are set under Configuration › Key modes';
+        } else if (state.layer === 'base' && isToggle(key.slot)) {
           value.textContent = `TGL ${mtShort(layerBytes('base', key.slot))}`;
           value.title = `${MODES[raw(key.slot, 'mode') & 0x7f]}: ${mtLabel(layerBytes('base', key.slot))}`;
         } else if (state.layer === 'base' && isMt(key.slot)) {
@@ -298,6 +308,7 @@ function renderBoard() {
       if (d.partner) marks.insertAdjacentHTML('beforeend', '<i class="mark mark-snap" title="Snap Tap"></i>');
       if (d.modeId === MT) marks.insertAdjacentHTML('beforeend', '<i class="mark mark-mt" title="Mod-tap"></i>');
       if (d.modeId === TG_HOLD || d.modeId === TG_FIRE) marks.insertAdjacentHTML('beforeend', '<i class="mark mark-tg" title="Toggle"></i>');
+      if (d.modeId === DKS) marks.insertAdjacentHTML('beforeend', '<i class="mark mark-dks" title="DKS"></i>');
       if (d.remapped) marks.insertAdjacentHTML('beforeend', '<i class="mark mark-remap" title="Remapped"></i>');
       el.appendChild(marks);
 
@@ -497,6 +508,7 @@ function place(el, k) {
 
 function clickKey(slot, additive) {
   state.knob = false;
+  if (state.capture?.dks !== undefined) state.capture = null; // the DKS action being recorded belongs to the old selection
   if (state.picking !== null) {
     if (slot !== state.picking && snapEligible(slot)) {
       makePair(state.picking, slot);
@@ -548,7 +560,7 @@ function renderLegend(lo, hi) {
       </div><span class="swatch swatch-mc"></span><span>library macro</span><span class="muted">(click to edit)</span><span class="swatch swatch-mc-elsewhere"></span><span>made elsewhere</span>`;
     el.querySelectorAll('[data-layer]').forEach(b => b.onclick = () => { state.layer = b.dataset.layer; refresh(); });
   } else if (state.view === 'mt') {
-    el.innerHTML = '<span class="swatch swatch-mt"></span><span>Mod-tap</span><span class="swatch swatch-tg"></span><span>Toggle</span><span class="muted legend-fit">the key shows what it sends · change it under Key mode</span>';
+    el.innerHTML = '<span class="swatch swatch-mt"></span><span>Mod-tap</span><span class="swatch swatch-tg"></span><span>Toggle</span><span class="swatch swatch-dks"></span><span>DKS</span><span class="muted legend-fit">the key shows what it sends · change it under Key mode</span>';
   } else if (state.view === 'device') {
     el.innerHTML = '<span class="muted">For the whole keyboard (every profile), plus how RT75 Studio shows it.</span>';
   } else if (state.view === 'lighting' && state.pt.mode === 'patterns') {
@@ -698,7 +710,10 @@ function renderInspectorBody() {
   const title = single ? keys[0].label : `${keys.length} keys`;
   const singleMt = single && single.modeId === MT && state.settings.tapLayer ? mtInfo(keys[0].slot) : null;
   const singleTg = single && (single.modeId === TG_HOLD || single.modeId === TG_FIRE) && state.settings.tapLayer ? layerBytes('base', keys[0].slot) : null;
-  const subtitle = singleTg
+  const singleDks = single && single.modeId === DKS ? dksInfo(keys[0].slot) : null;
+  const subtitle = singleDks
+    ? `DKS · ${dksUsed(singleDks).map(a => `<strong>${escapeHtml(mtLabel(a.bytes))}</strong>`).join(', ') || 'no actions yet'}${single.rt ? ' + RT' : ''}`
+    : singleTg
     ? `${single.mode} · <strong>${escapeHtml(mtLabel(singleTg))}</strong>${single.rt ? ' + RT' : ''}`
     : singleMt
     ? `Tap <strong>${escapeHtml(mtLabel(singleMt.tap))}</strong> · hold <strong>${escapeHtml(mtLabel(singleMt.hold))}</strong> · Mod-tap${single.rt ? ' + RT' : ''}`
@@ -719,6 +734,7 @@ function renderInspectorBody() {
       ${editable() ? '' : row('Top dead zone', `${mm(single.topDeadZone)} mm`) + row('Bottom dead zone', `${mm(single.bottomDeadZone)} mm`)}
       ${editable() ? '' : row('Snap Tap partner', single.partner ? `<button class="link" data-jump="${single.partner.slot}">${single.partner.label}</button>` : 'None')}
       ${!editable() && singleMt ? row('Mod-tap hold time', `${singleMt.ms} ms`) : ''}
+      ${!editable() && singleDks ? row('DKS trigger point', `${mm(singleDks.trigger)} mm`) : ''}
     </dl>`;
   }
   html += sectionsHtml(body);
@@ -829,7 +845,8 @@ function editorHtml(datas) {
   // the values they had. With a mixed selection the sliders apply to the other keys only.
   const allAdvanced = datas.every(d => ADVANCED.has(d.modeId));
   const anyToggle = datas.some(d => d.modeId === TG_HOLD || d.modeId === TG_FIRE);
-  const fixedNote = `<p class="note">${anyToggle ? 'Toggle keys trigger at about 0.5 mm, whatever these values are (tested on the RT75). ' : ''}In this key mode the travel and dead zones can’t be changed, as in qmk.top; they’re kept for when the key goes back to Normal.</p>`;
+  const anyDks = datas.some(d => d.modeId === DKS);
+  const fixedNote = `<p class="note">${anyToggle ? 'Toggle keys trigger at about 0.5 mm, whatever these values are (tested on the RT75). ' : ''}${anyDks ? 'DKS keys use their own trigger point (Key mode, above). ' : ''}In this key mode the travel and dead zones can’t be changed, as in qmk.top; they’re kept for when the key goes back to Normal.</p>`;
   return `
     <h3>Key mode</h3>
     ${keyModeHtml(datas)}
@@ -876,14 +893,14 @@ function snapHtml(datas) {
     const paired = keyData(keyBySlot(a)).partner?.slot === b && keyData(keyBySlot(b)).partner?.slot === a;
     if (paired) return `<p class="snap-line">These two keys are a pair.</p><button class="btn btn-small" id="btnUnpair" type="button">Remove pair</button>`;
     if (!snapEligible(a) || !snapEligible(b)) {
-      return [a, b].some(s => [MT, TG_HOLD, TG_FIRE].includes(raw(s, 'mode') & 0x7f)) ? '<p class="note">One of these keys has another key mode. Set both to Normal to pair them.</p>'
-        : '<p class="note">One of these keys uses DKS, which this app can’t change yet.</p>';
+      return [a, b].some(s => ADVANCED.has(raw(s, 'mode') & 0x7f)) ? '<p class="note">One of these keys has another key mode. Set both to Normal to pair them.</p>'
+        : '<p class="note">One of these keys uses a key mode this app can’t change.</p>';
     }
     return '<p class="snap-line">The last of the two pressed wins.</p><button class="btn btn-small" id="btnPairTwo" type="button">Pair these two keys</button>';
   }
   if (slots.length !== 1) return '<p class="note">Select one key, or exactly two keys to pair them.</p>';
   const d = datas[0];
-  if (!snapEligible(slots[0])) return `<p class="note">${d.modeId === DKS ? `This key uses ${d.mode}, which this app can’t change yet.` : `This key is ${d.mode}. Set its key mode to Normal to pair it.`}</p>`;
+  if (!snapEligible(slots[0])) return `<p class="note">This key is ${d.mode}. Set its key mode to Normal to pair it.</p>`;
   if (d.partner && keyData(d.partner).partner?.slot !== slots[0]) {
     return `<p class="snap-line">Points at <button class="link" data-jump="${d.partner.slot}">${d.partner.label}</button>, but ${d.partner.label} isn’t paired back.</p>
       <div class="btn-row"><button class="btn btn-small" id="btnFixPair" type="button">Complete the pair</button>
@@ -933,39 +950,46 @@ const toModTap = bytes => { const k = mtKeys(bytes); return k ? encodeModTap(k.m
 const toKeyAction = bytes => { const k = mtKeys(bytes); return k ? encodeKey(k.main, k.mods) : null; };
 const mtLabel = bytes => (mtKeys(bytes) ? decodeAction(bytes, { mac: macNames('base') }).label : 'Nothing');
 const mtShort = bytes => (mtKeys(bytes) ? decodeAction(bytes, { mac: macNames('base') }).short : '·');
-// ---------- Key modes (Normal, Mod-tap, Toggle) ----------
+// ---------- Key modes (Normal, Mod-tap, DKS, Toggle) ----------
 // Toggle (modes 4 and 5): a tap switches the key's "continuous" action on or off, holding it works
 // normally. Long press keeps the action held; Rapid fire repeats it. The action is the base layer, in
-// the mod-tap key layout (protocol-notes.md, "Toggle"). DKS is shown but not editable yet.
+// the mod-tap key layout (protocol-notes.md, "Toggle"). DKS: see below.
 const isToggle = slot => [TG_HOLD, TG_FIRE].includes(raw(slot, 'mode') & 0x7f);
 const keyModeOf = slot => {
   const m = raw(slot, 'mode') & 0x7f;
   return m === MT ? 'mt' : m === TG_HOLD || m === TG_FIRE ? 'toggle' : m === DKS ? 'dks' : m === SNAP ? 'snap' : m === 0 ? 'normal' : 'other';
 };
 // What the key sends now as a plain key or combo: the tap key of a mod-tap key, the action of a
-// toggle key, the base layer of a normal one; the factory key if that isn't a key.
+// toggle key, action 1 of a DKS key, the base layer of a normal one; the factory key if that isn't a key.
 function plainKey(slot) {
   const mode = keyModeOf(slot);
   const b = mode === 'mt' ? layerBytes('tap', slot) : layerBytes('base', slot);
   return toKeyAction(b) ?? toKeyAction(factoryBytes('base', slot));
 }
-// Normal, mod-tap and toggle keys can switch between those modes; Snap Tap, DKS and the Fn key can't.
-const modeEligible = slot => !LOCKED_SLOTS.has(slot) && ['normal', 'mt', 'toggle'].includes(keyModeOf(slot)) && !!plainKey(slot);
+// Normal, mod-tap, DKS and toggle keys can switch between those modes; Snap Tap and the Fn key can't.
+const modeEligible = slot => !LOCKED_SLOTS.has(slot) && ['normal', 'mt', 'dks', 'toggle'].includes(keyModeOf(slot)) && !!plainKey(slot);
 
 function mtInfo(slot) {
   return { tap: layerBytes('tap', slot), hold: layerBytes('base', slot), ms: (raw(slot, 'mtTime') || 0) * 10 };
 }
 
-// Moves a key to another key mode. Leaving mod-tap clears the tap layer and its hold time; the key
-// keeps sending what it sent (mod-tap's tap key, toggle's action). Entering mod-tap holds L Ctrl;
-// entering toggle starts as Long press. Going back to what the keyboard has drops the edits.
+// Moves a key to another key mode. Leaving mod-tap clears the tap layer and its hold time; leaving
+// DKS clears actions 2–4; the key keeps sending what it sent (mod-tap's tap key, toggle's action, DKS
+// action 1). Entering mod-tap holds L Ctrl; entering toggle starts as Long press; entering DKS holds
+// the key from press to release (a normal key until its actions change). Going back to what the
+// keyboard has drops the edits. DKS needs its settings read first (ensureDks).
 function setKeyMode(slot, target, toggleMode = TG_HOLD) {
   const cur = keyModeOf(slot);
   if (cur === target || !modeEligible(slot)) return;
+  if (target === 'dks' && !dksReady()) return;
   const key = plainKey(slot);
   if (cur === 'mt') {
     setKeyPending('tap', slot, DISABLED);
     setPending(slot, 'mtTime', state.settings.magnet.mtTime[slot]);
+  }
+  if (cur === 'dks') {
+    ['tap', 'sub2', 'sub3'].forEach(l => setKeyPending(l, slot, DISABLED));
+    for (const f of ['dksTravel', 'dksTriggers']) setPending(slot, f, state.settings.magnet[f][slot]);
   }
   if (target === 'normal') {
     setKeyPending('base', slot, key);
@@ -979,6 +1003,19 @@ function setKeyMode(slot, target, toggleMode = TG_HOLD) {
   } else if (target === 'toggle') {
     setKeyPending('base', slot, encodeModTap(splitKey(key).main, splitKey(key).mods));
     setMode(slot, toggleMode);
+  } else if (target === 'dks') {
+    const m = state.settings.magnet;
+    if ((m.mode[slot] & 0x7f) === DKS) {
+      DKS_LAYERS.forEach(l => setKeyPending(l, slot, deviceBytes(l, slot)));
+      for (const f of ['dksTravel', 'dksTriggers']) setPending(slot, f, m[f][slot]);
+    } else {
+      setKeyPending('base', slot, encodeModTap(splitKey(key).main, splitKey(key).mods));
+      ['tap', 'sub2', 'sub3'].forEach(l => setKeyPending(l, slot, DISABLED));
+      setPending(slot, 'dksTriggers', DEFAULT_TRIGGERS);
+      const mmNow = raw(slot, 'dksTravel') / state.settings.travelStep;
+      if (!(mmNow >= LIMITS.dks.min && mmNow <= LIMITS.dks.max)) setPending(slot, 'dksTravel', Math.round(LIMITS.dks.default * state.settings.travelStep));
+    }
+    setMode(slot, DKS);
   }
 }
 
@@ -996,10 +1033,172 @@ const isModTapBytes = b => isWritableAction(b, 'tap', 0) && !b.every(x => !x);
 // Drops unsaved edits on these keys, including the key-map halves of a key-mode change.
 function revertKeys(slots) {
   for (const s of slots) {
-    const modeChange = ['mt', 'toggle'].includes(keyModeOf(s)) || ADVANCED.has(state.settings.magnet.mode[s] & 0x7f);
+    const modeChange = ['mt', 'dks', 'toggle'].includes(keyModeOf(s)) || ADVANCED.has(state.settings.magnet.mode[s] & 0x7f);
     state.pending.delete(s);
-    if (modeChange) ['base', 'tap'].forEach(l => state.pendingKeys.delete(`${l}:${s}`));
+    if (modeChange) DKS_LAYERS.forEach(l => state.pendingKeys.delete(`${l}:${s}`));
   }
+}
+
+// ---------- DKS ----------
+// A DKS key (mode 2) sends up to four actions, each at chosen moments of one press: pressing past its
+// trigger point, reaching the bottom, leaving the bottom and releasing past the trigger point. Action 1
+// is the base layer and actions 2–4 key-matrix sub-layers 1–3, in the mod-tap key layout; the moments
+// are the trigger table (param 8) and the trigger point is param 4 (protocol-notes.md, "DKS"). The
+// editor is design X1 (canvas Round 14): the actions under the keyboard, the trigger point in the
+// side panel's Key mode section.
+const DKS_LAYERS = ['base', 'tap', 'sub2', 'sub3'];
+const DKS_HUES = ['var(--accent)', 'var(--rt)', 'var(--snap)', 'var(--dks)'];
+const MOMENT_TITLES = ['Pressing past the trigger point', 'Reaching the bottom', 'Leaving the bottom', 'Releasing past the trigger point'];
+const isDksKey = slot => (raw(slot, 'mode') & 0x7f) === DKS;
+const dksReady = () => !!state.settings?.magnet.dksTriggers && !!state.settings?.sub2Layer;
+function dksInfo(slot) {
+  if (!dksReady()) return null;
+  const quad = raw(slot, 'dksTriggers');
+  return {
+    trigger: raw(slot, 'dksTravel') / state.settings.travelStep,
+    actions: DKS_LAYERS.map((layer, i) => ({ i, layer, bytes: layerBytes(layer, slot), moments: unpack(actionByte(quad, i)) })),
+  };
+}
+// Actions that send something: a key, at one or more moments.
+const dksUsed = info => info.actions.filter(a => mtKeys(a.bytes) && a.moments.some(Boolean));
+
+// The trigger point and table are read at startup only when a key already uses DKS (as qmk.top
+// does); otherwise the first time a key is switched to DKS (12 reads).
+let dksLoading = null;
+function ensureDks() {
+  const s = state.settings;
+  if (s.magnet.dksTriggers) return Promise.resolve(true);
+  if (!state.dev || s.source !== 'device') return Promise.resolve(false);
+  dksLoading ??= readDksSettings(state.dev, s)
+    .then(r => { if (state.settings === s) Object.assign(s.magnet, r); return state.settings === s; })
+    .catch(e => { showError('Couldn’t read the DKS settings: ' + e.message); return false; })
+    .finally(() => { dksLoading = null; });
+  return dksLoading;
+}
+
+// Action i (0–3) of a DKS key. Clearing its key clears its moments too.
+function setDksAction(slot, i, bytes) {
+  const none = bytes.every(b => !b);
+  if (!none && !isModTapBytes(bytes)) { showError('That key can’t be used for DKS.'); return false; }
+  showError(null);
+  setKeyPending(DKS_LAYERS[i], slot, bytes);
+  if (none) setPending(slot, 'dksTriggers', setActionByte(raw(slot, 'dksTriggers'), i, 0));
+  return true;
+}
+const setDksMoments = (slot, i, moments) => setPending(slot, 'dksTriggers', setActionByte(raw(slot, 'dksTriggers'), i, pack(moments)));
+
+// Side panel: the trigger point for the selected DKS keys.
+function dksSideHtml(ok) {
+  if (!dksReady()) return `<p class="note">${dksLoading ? 'Reading the DKS settings…' : 'The DKS settings weren’t read.'}</p>`;
+  const keys = ok.filter(isDksKey), L = LIMITS.dks, step = state.settings.travelStep;
+  const v = common(keys, s => raw(s, 'dksTravel'));
+  return `${slider('dkt', 'Trigger point', v === null ? null : v / step, L.min, L.max)}
+    <p class="note">${keys.length === 1 ? 'Set the four actions under the keyboard.' : 'Select one of these keys to set its actions (under the keyboard).'}
+      The first and last moments happen at the trigger point; the bottom is ${mm(L.bottom)} mm.</p>`;
+}
+
+// Under the keyboard (design X1): one row per action, the four moments of a press across, a key
+// picker for each action, and a scrubbed press showing which keys would be down. Shown in place of
+// the summary tiles while one DKS key is selected.
+let dksTry = { slot: null, t: 30 };
+function dksPanelSlot() {
+  if (!state.settings?.keymap || !CONFIG_VIEWS.has(state.view) || state.knob || state.selected.size !== 1) return null;
+  const slot = [...state.selected][0];
+  return isDksKey(slot) && dksReady() ? slot : null;
+}
+
+function renderDksPanel() {
+  const el = $('dksPanel'), slot = dksPanelSlot();
+  el.hidden = slot === null;
+  $('stats').hidden = state.view === 'device' || slot !== null;
+  if (slot === null) { el.innerHTML = ''; return; }
+  const info = dksInfo(slot), can = editable();
+  if (dksTry.slot !== slot) dksTry = { slot, t: 30 };
+  const pos = i => `${(i / 3) * 100}%`;
+  const trig = mm(info.trigger), bottom = mm(LIMITS.dks.bottom);
+  const heads = [['↓', trig], ['↓', bottom], ['↑', bottom], ['↑', trig]].map(([arrow, v], i) =>
+    `<span class="dks-moment${i === 0 || i === 3 ? ' is-trigger' : ''}" style="left:${pos(i)}" title="${MOMENT_TITLES[i]}"><span>${arrow} ${v}</span><span>${MOMENT_NAMES[i]}</span></span>`).join('');
+  const rows = info.actions.map(a => {
+    const has = !!mtKeys(a.bytes), c = a.moments, hs = holds(c);
+    const capturing = state.capture?.dks === a.i && state.capture.slot === slot;
+    const label = has ? mtLabel(a.bytes) : 'Nothing';
+    const bars = hs.map(h => `<button type="button" class="dks-bar" data-dks-bar="${a.i}:${h.start}"
+        style="left:calc(${pos(h.start)} - 11px);width:calc(${pos(h.end)} - ${pos(h.start)} + 22px)"
+        aria-label="Action ${a.i + 1}: ${escapeHtml(label)} held from ${MOMENT_NAMES[h.start]} to ${MOMENT_NAMES[h.end]}; click to end it sooner" ${can && has ? '' : 'disabled'}></button>`).join('');
+    const cells = [0, 1, 2, 3].map(i => {
+      const tap = c[i] === 1 && !hs.some(h => i > h.start && i < h.end);
+      const ring = !tap && hs.some(h => i >= h.start && i <= h.end);
+      return `<button type="button" class="dks-cell${tap ? ' is-tap' : ring ? ' in-bar' : ''}" data-dks-cell="${a.i}:${i}" style="left:${pos(i)}"
+        aria-label="Action ${a.i + 1}, ${MOMENT_TITLES[i].toLowerCase()}: ${tap ? 'tap' : ring ? 'part of a hold' : 'nothing'}" ${can && has ? '' : 'disabled'}>${tap || ring ? '' : '+'}</button>`;
+    }).join('');
+    return `<div class="dks-key" style="--hue:${DKS_HUES[a.i]}"><span class="dks-sw" aria-hidden="true"></span>
+        <select id="dksKey${a.i}" aria-label="Action ${a.i + 1} sends" ${can ? '' : 'disabled'}>
+          <option value="">${escapeHtml(label)}</option>
+          ${has ? '<option value="none">Nothing</option>' : ''}
+          ${KEY_CHOICES.map(k => `<option value="${k}">${keyName(k)}</option>`).join('')}
+        </select>
+        <button class="btn btn-small${capturing ? ' is-capturing' : ''}" id="dksCap${a.i}" type="button" title="Press a key or a combo, like Ctrl + C (Esc cancels)" ${can ? '' : 'disabled'}>${capturing ? 'Press…' : 'Press'}</button>
+      </div>
+      <div class="dks-track${has ? '' : ' is-empty'}" style="--hue:${DKS_HUES[a.i]}">${bars}${cells}<span class="dks-play" aria-hidden="true"></span></div>`;
+  }).join('');
+  el.innerHTML = `<div class="dks-head"><h3>DKS · ${escapeHtml(keyBySlot(slot).label)}</h3>
+      <p>${can ? 'Click a dot: nothing → tap → hold → hold further. Click a hold where it should end.' : 'Connect the keyboard to edit.'}</p></div>
+    <div class="dks-grid">
+      <span class="dks-corner" aria-hidden="true"></span>
+      <div class="dks-moments">${heads}</div>
+      <div class="dks-try">
+        <span class="dks-try-label">Try a press · <span id="dksDepth"></span></span>
+        <input type="range" id="dksScrub" min="0" max="100" step="1" value="${dksTry.t}" aria-label="Scrub through one press">
+        <span class="dks-try-label">Keys down</span><strong id="dksDown"></strong>
+        <span class="dks-try-tap" id="dksTap"></span>
+        <span class="dks-try-note">A preview; nothing is sent.</span>
+      </div>
+      ${rows}
+    </div>`;
+  updateDksTry(el, info);
+
+  el.querySelector('#dksScrub').addEventListener('input', e => { dksTry.t = Number(e.target.value); updateDksTry(el, dksInfo(slot)); });
+  if (!can) return;
+  el.querySelectorAll('[data-dks-cell]').forEach(b => b.onclick = () => {
+    const [i, m] = b.dataset.dksCell.split(':').map(Number);
+    setDksMoments(slot, i, cycleMoment(dksInfo(slot).actions[i].moments, m));
+    refresh();
+  });
+  el.querySelectorAll('[data-dks-bar]').forEach(b => b.onclick = e => {
+    const [i, start] = b.dataset.dksBar.split(':').map(Number);
+    const c = dksInfo(slot).actions[i].moments, h = holds(c).find(x => x.start === start);
+    const r = b.parentElement.getBoundingClientRect();
+    // Where it was clicked (a keyboard press shortens it by one step).
+    const seg = e.detail === 0 ? h.end - 1 : Math.min(h.end - 1, Math.max(start, Math.floor(((e.clientX - r.left) / r.width) * 3)));
+    setDksMoments(slot, i, cutHold(c, start, seg));
+    refresh();
+  });
+  for (const a of info.actions) {
+    el.querySelector(`#dksKey${a.i}`).addEventListener('change', e => {
+      const v = e.target.value;
+      if (v && setDksAction(slot, a.i, v === 'none' ? DISABLED : encodeModTap(Number(v)))) refresh();
+    });
+    el.querySelector(`#dksCap${a.i}`).addEventListener('click', () => {
+      state.capture = state.capture?.dks === a.i && state.capture.slot === slot ? null : { dks: a.i, slot };
+      refresh();
+    });
+  }
+}
+
+// The scrubbed press: depth, which keys are down, and which were just tapped. Updated in place so the
+// slider keeps its drag.
+function updateDksTry(el, info) {
+  const p = pressAt(dksTry.t, info.trigger, LIMITS.dks.bottom);
+  el.querySelector('#dksDepth').textContent = `${mm(p.depth)} mm${p.dir === 'down' ? ' ↓' : p.dir === 'up' ? ' ↑' : ''}`;
+  const named = info.actions.filter(a => mtKeys(a.bytes));
+  const down = named.filter(a => heldAfter(a.moments, p.moment)).map(a => mtLabel(a.bytes));
+  const tapped = named.filter(a => tappedAt(a.moments, p.moment)).map(a => mtLabel(a.bytes));
+  el.querySelector('#dksDown').textContent = down.join(' + ') || 'Nothing';
+  el.querySelector('#dksTap').textContent = tapped.length ? `Tapped at ${MOMENT_NAMES[p.moment]}: ${tapped.join(', ')}` : '';
+  el.querySelectorAll('.dks-play').forEach(s => {
+    s.hidden = p.x === null;
+    if (p.x !== null) s.style.left = `${(p.x * 100).toFixed(2)}%`;
+  });
 }
 
 const MODE_CHOICES = [['normal', 'Normal'], ['mt', 'Mod-tap'], ['dks', 'DKS'], ['toggle', 'Toggle']];
@@ -1010,20 +1209,21 @@ function keyModeHtml(datas) {
   const ok = slots.filter(modeEligible);
   const loading = !state.settings.tapLayer;
   const seg = MODE_CHOICES.map(([id, label]) => {
-    const disabled = loading || id === 'dks' || !ok.length;
-    return `<button type="button" data-key-mode="${id}" aria-pressed="${current === id}" ${disabled ? 'disabled' : ''}
-      ${id === 'dks' ? 'title="DKS: coming later (the editor isn’t built yet)"' : ''}>${label}</button>`;
+    const disabled = loading || !ok.length || (id === 'dks' && !!dksLoading);
+    return `<button type="button" data-key-mode="${id}" aria-pressed="${current === id}" ${disabled ? 'disabled' : ''}>${label}</button>`;
   }).join('');
   let html = `<div class="segmented segmented-sm key-mode" role="group" aria-label="Key mode">${seg}</div>`;
   if (loading) return html + `<p class="note">${keymapsFailed ? 'The key map couldn’t be read, so key modes can’t be shown. Open Key map to try again.' : 'Loading the key map…'}</p>`;
   const skipped = slots.length - ok.length;
-  const skipNote = skipped && ok.length ? ` ${skipped} selected key${skipped === 1 ? '' : 's'} can’t change mode (Snap Tap, DKS or the Fn key) and ${skipped === 1 ? 'is' : 'are'} skipped.` : '';
+  const skipNote = skipped && ok.length ? ` ${skipped} selected key${skipped === 1 ? '' : 's'} can’t change mode (Snap Tap or the Fn key) and ${skipped === 1 ? 'is' : 'are'} skipped.` : '';
   if (!ok.length) {
     const d = datas[0];
     return html + `<p class="note">${slots.length === 1
       ? (LOCKED_SLOTS.has(slots[0]) ? 'The Fn key always stays Normal.' : d.modeId === SNAP ? 'This key is in a Snap Tap pair. Remove the pair to change its key mode.' : `This key uses ${d.mode}, set in qmk.top. RT75 Studio can’t edit it yet.`)
-      : 'None of these keys can change mode (Snap Tap pairs, DKS or the Fn key).'}</p>`;
+      : 'None of these keys can change mode (Snap Tap pairs or the Fn key).'}</p>`;
   }
+  if (dksLoading && current !== 'dks') return html + '<p class="note">Reading the DKS settings…</p>';
+  if (current === 'dks') return html + dksSideHtml(ok) + (skipNote ? `<p class="note">${skipNote.trim()}</p>` : '');
   if (current === 'mt') return html + modTapHtml(ok) + (skipNote ? `<p class="note">${skipNote.trim()}</p>` : '');
   if (current === 'toggle') return html + toggleHtml(ok) + (skipNote ? `<p class="note">${skipNote.trim()}</p>` : '');
   if (current === null) return html + `<p class="note">These keys have different key modes; pick one to set them all.${skipNote}</p>`;
@@ -1098,9 +1298,15 @@ function toggleHtml(ok) {
 
 function wireModTap(el, slots) {
   const ok = () => slots.filter(modeEligible);
-  el.querySelectorAll('[data-key-mode]').forEach(b => b.addEventListener('click', () => {
+  el.querySelectorAll('[data-key-mode]').forEach(b => b.addEventListener('click', async () => {
     state.capture = null;
-    ok().forEach(s => setKeyMode(s, b.dataset.keyMode));
+    const target = b.dataset.keyMode;
+    if (target === 'dks' && !dksReady()) {
+      const reading = ensureDks();
+      renderInspector(); // "Reading the DKS settings…"
+      if (!await reading) { refresh(); return; }
+    }
+    ok().forEach(s => setKeyMode(s, target));
     refresh();
   }));
   el.querySelectorAll('[data-tg-type]').forEach(b => b.addEventListener('click', () => {
@@ -1196,6 +1402,7 @@ function wireEditor(el) {
     if (linked()) setPending(s, 'release', toRaw(v, min, max));
   }), T.min, deepest(slots));
   bindTravel('rel', (v, min, max) => slots.forEach(s => setPending(s, 'release', toRaw(v, min, max))), T.min, deepest(slots));
+  bind('dkt', (v, min, max) => slots.filter(isDksKey).forEach(s => setPending(s, 'dksTravel', toRaw(v, min, max))), LIMITS.dks.min, LIMITS.dks.max);
   const DZ = LIMITS.deadZone;
   bind('tdz', (v, min, max) => slots.forEach(s => setPending(s, 'topDeadZone', toRaw(v, min, max))), DZ.min, DZ.max);
   // A deeper bottom dead zone pulls actuation and release points up out of it, as qmk.top does.
@@ -1288,6 +1495,9 @@ const LAYERS = {
   fnMac: { label: 'Fn · Mac', field: 'fnMac', defaults: DEFAULT_FN_MAC_MATRIX, fn: true },
   // Mod-tap tap actions (key-matrix sub-layer 1). Not shown as a layer; edited under Mod-tap.
   tap: { label: 'Mod-tap tap', field: 'tapLayer', defaults: new Array(DEFAULT_MATRIX.length).fill(0), fn: false, hidden: true },
+  // DKS actions 3 and 4 (sub-layers 2 and 3; action 2 is the tap layer). Edited under Key modes.
+  sub2: { label: 'DKS action 3', field: 'sub2Layer', defaults: new Array(DEFAULT_MATRIX.length).fill(0), fn: false, hidden: true },
+  sub3: { label: 'DKS action 4', field: 'sub3Layer', defaults: new Array(DEFAULT_MATRIX.length).fill(0), fn: false, hidden: true },
 };
 
 // The UI shows one Fn layer, Windows or Mac, to avoid showing both everywhere. By default it
@@ -1343,15 +1553,19 @@ function keymapChanges() {
 
 const actionLabel = (layer, bytes) => {
   if (LAYERS[layer].fn && bytes.every(b => b === 0)) return 'No Fn action';
-  if (layer === 'tap' && bytes.every(b => b === 0)) return 'None';
+  if (LAYERS[layer].hidden && bytes.every(b => b === 0)) return 'None';
   if (bytes[0] === 9) { // a macro: use its library name when RT75 Studio knows it
     const entry = macroForSlot(bytes[2]).entry;
     return `${entry ? `“${entry.name}”` : `Macro slot ${bytes[2] + 1}`} · ${MACRO_MODES[bytes[1]]?.name ?? `mode ${bytes[1]}`}`;
   }
   return decodeAction(bytes, { mac: macNames(layer) }).label;
 };
-// A mod-tap key's base layer is its hold action.
-const kmLayerLabel = c => (c.layer === 'base' && isMt(c.slot) ? 'Mod-tap hold' : c.layer === 'base' && isToggle(c.slot) ? 'Toggle key' : LAYERS[c.layer].label);
+// A mod-tap key's base layer is its hold action; a DKS key's layers are its four actions.
+const kmLayerLabel = c => {
+  const dks = isDksKey(c.slot) || (c.layer !== 'base' && (state.settings.magnet.mode[c.slot] & 0x7f) === DKS);
+  if (dks && DKS_LAYERS.includes(c.layer)) return `DKS action ${DKS_LAYERS.indexOf(c.layer) + 1}`;
+  return c.layer === 'base' && isMt(c.slot) ? 'Mod-tap hold' : c.layer === 'base' && isToggle(c.slot) ? 'Toggle key' : LAYERS[c.layer].label;
+};
 const kmRows = changes => changes.map(c => `<tr><td>${keyBySlot(c.slot).label}</td><td>${kmLayerLabel(c)}</td><td>${escapeHtml(actionLabel(c.layer, c.from))}</td><td><strong>${escapeHtml(actionLabel(c.layer, c.to))}</strong></td></tr>`).join('');
 
 // The same action, allowing for the two layouts of a plain key or combo: [0,0,k,0] (remaps) and
@@ -1808,8 +2022,17 @@ function renderKeymapPanel() {
   const key = keys[0];
   const mt = isMt(key.slot) && state.settings.tapLayer ? mtInfo(key.slot) : null;
   const tg = isToggle(key.slot) ? layerBytes('base', key.slot) : null;
+  const dks = isDksKey(key.slot) ? dksInfo(key.slot) : null;
   const rows = shownLayers().map(id => {
     const a = layerAction(id, key.slot);
+    if (id === 'base' && isDksKey(key.slot)) {
+      const pending = DKS_LAYERS.some(l => state.pendingKeys.has(`${l}:${key.slot}`)) || state.pending.has(key.slot);
+      return `<button type="button" class="km-row${id === layer ? ' is-current' : ''}${pending ? ' is-pending' : ''}" data-layer-row="${id}">
+      <span class="km-layer">${layerName(id)}</span>
+      <span class="km-now">DKS · ${dks ? escapeHtml(dksUsed(dks).map(x => mtLabel(x.bytes)).join(', ') || 'no actions yet') : 'actions not read yet'}${pending ? ' <span class="km-badge km-badge-pending">unsaved</span>' : ''}</span>
+      <span class="km-factory muted">Factory: ${factoryLabel(id, key.slot)}</span>
+    </button>`;
+    }
     if (id === 'base' && tg) {
       const pending = state.pendingKeys.has(`base:${key.slot}`) || state.pending.has(key.slot);
       return `<button type="button" class="km-row${id === layer ? ' is-current' : ''}${pending ? ' is-pending' : ''}" data-layer-row="${id}">
@@ -1860,6 +2083,7 @@ const factoryBytes = (layer, slot) => LAYERS[layer].defaults.slice(slot * 4, slo
 function keyEditBlock(layer, slot) {
   if (LOCKED_SLOTS.has(slot)) return 'The Fn key is locked, so you can’t lose access to the Fn layers.';
   if (layer === 'base' && isMt(slot)) return 'This key is mod-tap: its base layer is the hold action. Change its tap and hold keys under Configuration › Key mode.';
+  if (layer === 'base' && isDksKey(slot)) return 'This key uses DKS: its base layer is action 1. Change its actions under Configuration › Key modes.';
   if (layer === 'base' && isToggle(slot)) return 'This key is a toggle key: its base layer is the action it holds or repeats. Change it under Configuration › Key mode.';
   if (decodeAction(deviceBytes(layer, slot) ?? DISABLED).kind === 'unknown') return 'This is a built-in system key, so it’s left untouched (qmk.top locks it too).';
   return null;
@@ -1967,6 +2191,10 @@ function onCaptureKey(e) {
 }
 
 function finishCapture(c, main, mods) {
+  if (c.dks !== undefined) {
+    if (setDksAction(c.slot, c.dks, encodeModTap(main, mods))) { state.capture = null; refresh(); }
+    return;
+  }
   if (c.mt) {
     if (setModTapSide(c.slots, c.mt, encodeModTap(main, mods))) { state.capture = null; refresh(); }
     return;
@@ -2351,6 +2579,7 @@ function sendable(e, modeOf) {
   if (!(mode & 0x80)) { delete e.rtPress; delete e.rtRelease; }
   if ((mode & 0x7f) !== SNAP) delete e.snapPartner;
   if ((mode & 0x7f) !== MT) delete e.mtTime;
+  if ((mode & 0x7f) !== DKS) { delete e.dksTravel; delete e.dksTriggers; }
   if (ADVANCED.has(mode & 0x7f)) ['actuation', 'release', 'topDeadZone', 'bottomDeadZone'].forEach(f => delete e[f]);
   return e;
 }
@@ -2367,6 +2596,10 @@ function fmt(field, value) {
   if (field === 'mode') return `${MODES[value & 0x7f] ?? 'Mode ' + (value & 0x7f)}${value & 0x80 ? ' + RT' : ''}`;
   if (field === 'snapPartner') return keyBySlot(value)?.label ?? '—';
   if (field === 'mtTime') return value ? `${value * 10} ms` : 'Not set';
+  if (field === 'dksTriggers') {
+    const parts = [0, 1, 2, 3].map(i => [i, describe(unpack(actionByte(value, i)))]).filter(([, d]) => d);
+    return parts.length ? parts.map(([i, d]) => `Action ${i + 1}: ${d}`).join('<br>') : 'None';
+  }
   return `${mm3(value / state.settings.travelStep)} mm`;
 }
 
@@ -2419,9 +2652,9 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
       result.retried += km.retried;
       for (const m of km.mismatches) result.mismatches.push({ kb: true, label: `${keyBySlot(m.slot).label} (${kmLayerLabel(m)})`, expected: actionLabel(m.layer, m.expected), actual: actionLabel(m.layer, m.actual) });
     };
-    // Key-mode changes (mod-tap, toggle) write the key's key-map entries before its mode, as qmk.top
+    // Key-mode changes (mod-tap, DKS, toggle) write the key's key-map entries before its mode, as qmk.top
     // does; otherwise the key map follows the magnet settings, as before.
-    const keysFirst = keys.some(c => c.layer === 'tap' || (c.layer === 'base' && edits.some(e => e.slot === c.slot && e.mode !== undefined)));
+    const keysFirst = keys.some(c => LAYERS[c.layer].hidden || (c.layer === 'base' && edits.some(e => e.slot === c.slot && e.mode !== undefined)));
     if (keys.length && keysFirst) await writeKeys();
     if (edits.length) {
       const mg = await writeKeySettings(state.dev, state.settings, edits, (f, label) => { status.textContent = `${label}… ${Math.round(f * 100)}%`; });
@@ -2540,7 +2773,7 @@ function downloadBackup() {
     raw: { id: id.map(b => b.toString(16).padStart(2, '0')).join(' ') },
     deviceId: s.deviceId, rfVersion: s.rfVersion, battery: s.battery,
     featureListSupported: false, profile: s.profile, reportRateHz: s.reportRateHz, debounce: s.debounce, sleep: s.sleep, lighting: s.lighting,
-    keymap: { 0: s.keymap }, tapLayer: s.tapLayer, fnWin: s.fnWin, fnMac: s.fnMac, magnet: s.magnet, savedAt: new Date().toISOString(),
+    keymap: { 0: s.keymap }, tapLayer: s.tapLayer, sub2Layer: s.sub2Layer, sub3Layer: s.sub3Layer, fnWin: s.fnWin, fnMac: s.fnMac, magnet: s.magnet, savedAt: new Date().toISOString(),
   };
   const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -3063,6 +3296,7 @@ function refresh() {
   renderBoard();
   renderSelectionTools();
   renderStats();
+  renderDksPanel();
   renderReviewButton();
   renderInspector();
   renderTabs();

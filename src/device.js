@@ -425,6 +425,8 @@ export function settingsFromDump(d) {
     lighting: d.lighting,
     keymap: d.keymap?.['0'],
     tapLayer: d.tapLayer,
+    sub2Layer: d.sub2Layer,
+    sub3Layer: d.sub3Layer,
     fnWin: d.fnWin,
     fnMac: d.fnMac,
     magnet: d.magnet,
