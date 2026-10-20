@@ -175,6 +175,9 @@ Ember, Moss; light Paper, Porcelain, Mint, Retro. Each card's preview is drawn i
 (`data-theme` on the preview scopes the tokens). The sidebar's moon/sun button (design TP4) flips
 between the last dark and the last light theme picked. index.html applies the saved theme before
 the page paints. Help texts and Travel bars moved from Keyboard settings to Appearance › Display.
+The device card shows Yunzii's wordmark before "RT75 Pro": `assets/yunzii-logo.png` (the header logo
+from yunzii.com, downloaded with the user's OK), white on transparent, used as a CSS mask so it takes
+the theme's text colour.
 - **Colours only come from tokens.** New styles use `var(--…)`, never hex. Key text uses `--cap-ink`,
   `--cap-muted`, `--cap-accent` (Retro has dark keycaps on a light page); accent, Rapid Trigger and
   toggle colours used as *text* use `--accent-text`, `--rt-text`, `--tg-text`; mode tints use

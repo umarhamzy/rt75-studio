@@ -645,7 +645,9 @@ function renderDevice() {
   $('badgeMode').textContent = editable() || (bounds() && state.busy) ? 'Review before write' : 'Read-only';
   renderProfiles();
   if (!s) return;
-  $('deviceName').textContent = s.deviceId === DEVICE_ID ? 'Yunzii RT75 Pro' : (s.productName ?? 'Keyboard');
+  // The RT75 Pro shows Yunzii's wordmark (assets/yunzii-logo.png, from yunzii.com) before the model.
+  if (s.deviceId === DEVICE_ID) $('deviceName').innerHTML = '<span class="maker-logo" role="img" aria-label="Yunzii"></span>RT75 Pro';
+  else $('deviceName').textContent = s.productName ?? 'Keyboard';
   $('deviceDot').className = 'status-dot' + (s.source === 'device' && state.dev ? ' is-live' : '');
   $('chipFirmware').textContent = s.usbVersion ? `${(s.usbVersion >> 8).toString(16)}.${(s.usbVersion & 0xff).toString(16).padStart(2, '0')}` : '?';
   $('chipRate').textContent = fmtHz(s.reportRateHz);

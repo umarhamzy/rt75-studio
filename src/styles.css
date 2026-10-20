@@ -151,6 +151,13 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--device-bg); display: flex; flex-direction: column; gap: 10px;
 }
 .device-title { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.device-name { display: inline-flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; }
+/* Yunzii's wordmark is white on transparent: used as a mask, it takes the theme's text colour. */
+.maker-logo {
+  flex: none; width: 78px; height: 9px; background: var(--text);
+  -webkit-mask: url("../assets/yunzii-logo.png") center / contain no-repeat;
+  mask: url("../assets/yunzii-logo.png") center / contain no-repeat;
+}
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .status-dot.is-live { background: var(--ok); }
 .device-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; margin: 0; font: 500 12px var(--mono); color: var(--muted); }
