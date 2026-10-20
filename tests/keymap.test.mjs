@@ -84,5 +84,22 @@ check('Fn layer is the same on every profile', s6.fnWin.join() === s5.fnWin.join
   check('the 2,0,130,0 test encoding is no longer accepted', !isWritableAction([2, 0, 130, 0], 'fnWin', 74));
 }
 
+// Mouse actions: qmk.top's seven (buttons 240–244, wheel 245 ±1), on the base and Fn layers only.
+{
+  const { isWritableAction } = await import(new URL('../src/device.js', import.meta.url).href);
+  const { decodeAction, MOUSE_ACTIONS } = await import(new URL('../src/actions.js', import.meta.url).href);
+  check('seven mouse actions', MOUSE_ACTIONS.length === 7);
+  check('every mouse action writable on base and Fn', MOUSE_ACTIONS.every(([, , b]) => isWritableAction(b, 'base', 14) && isWritableAction(b, 'fnWin', 14) && isWritableAction(b, 'fnMac', 14)));
+  check('mouse actions refused on mod-tap / DKS sub-layers', MOUSE_ACTIONS.every(([, , b]) => !isWritableAction(b, 'tap', 14) && !isWritableAction(b, 'sub2', 14)));
+  check('other wheel steps refused', !isWritableAction([1, 0, 245, 0], 'base', 14) && !isWritableAction([1, 0, 247, 5], 'base', 14) && !isWritableAction([1, 0, 245, 2], 'base', 14));
+  check('unknown mouse codes refused', !isWritableAction([1, 0, 239, 0], 'base', 14) && !isWritableAction([1, 1, 240, 0], 'base', 14));
+  check('mouse actions decode as editable', MOUSE_ACTIONS.every(([name, , b]) => decodeAction(b).kind === 'mouse' && decodeAction(b).label === name && decodeAction(b).editable));
+  check('scroll down is wheel 245 step 255 (−1)', decodeAction([1, 0, 245, 255]).label === 'Scroll down');
+  check('other wheel bytes still decode, read-only', decodeAction([1, 0, 247, 5]).kind === 'mouse' && !decodeAction([1, 0, 247, 5]).editable);
+  const pk = buildKeymapPackets([{ layer: 'base', slot: 14, action: [1, 0, 240, 0] }, { layer: 'fnWin', slot: 12, action: [1, 0, 245, 255] }], 0);
+  check('mouse base packet', hex(pk[0].pkt) === '0a 00 0e 00 00 01 00 e6 01 00 f0 00', hex(pk[0].pkt));
+  check('mouse Fn packet', hex(pk[1].pkt).endsWith('01 00 f5 ff'), hex(pk[1].pkt));
+}
+
 console.log(failures ? `\n${failures} FAILED` : '\nall passed');
 process.exitCode = failures ? 1 : 0;

@@ -2212,7 +2212,9 @@ function keyEditorHtml(layer, slot) {
   const modNames = mac ? { 224: 'Ctrl', 225: 'Shift', 226: 'Opt', 227: 'Cmd' } : { 224: 'Ctrl', 225: 'Shift', 226: 'Alt', 227: 'Win' };
   const groups = [...new Set(FUNCTIONS.map(f => f[0]))];
   const fnValue = a.kind === 'function' ? cur.join(',') : '';
-  const overwriting = ['mouse', 'modtap'].includes(decodeAction(deviceBytes(layer, slot), { mac }).kind);
+  // Only actions RT75 Studio can't write back (other mouse wheel steps, qmk.top's old mod-tap action).
+  const was = decodeAction(deviceBytes(layer, slot), { mac });
+  const overwriting = ['mouse', 'modtap'].includes(was.kind) && !was.editable;
   return `
     <h3>Change ${L.label}</h3>
     ${overwriting ? '<p class="hint-warn">This key currently runs a mouse or mod-tap action set in qmk.top. Replacing it here can’t be undone from RT75 Studio; reassign it in qmk.top if you change your mind.</p>' : ''}

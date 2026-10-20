@@ -3,7 +3,7 @@
 //   [0, 0, 0, 0] or [0, 0, 3, 0]  disabled
 //   [0, a, b, c]                   key combo: up to three HID codes (modifiers are HID 224–231),
 //                                  e.g. A = [0,0,4,0], Win+L = [0,0,227,15], Ctrl+Shift+Esc = [0,224,225,41]
-//   [1, 0, code, x]                mouse button / wheel
+//   [1, 0, code, x]                mouse button / wheel (MOUSE_ACTIONS below)
 //   [2|3|6|8|10|13|14|18|19, …]   named functions (FUNCTIONS below)
 //   [9, mode, index, 0]            macro
 //   [24, tap, hold, time/10]       mod-tap
@@ -84,6 +84,15 @@ const FN_BY_BYTES = new Map(FUNCTIONS.map(([group, name, b]) => [b.join(','), { 
 export const FN_NOTES = {
   'Volume ↔ keyboard brightness': 'qmk.top’s name for it (音量<->键盘亮度). What it does on the RT75 Pro isn’t confirmed: it doesn’t switch the knob, which changes mode by holding it down.',
 };
+// Mouse actions qmk.top can put on a key (its 鼠标功能 list, qle, encoded with its On table): buttons
+// 240–244 and the vertical wheel 245 with a signed step. [name, short, bytes].
+export const MOUSE_ACTIONS = [
+  ['Left click', 'LClick', [1, 0, 240, 0]], ['Right click', 'RClick', [1, 0, 241, 0]], ['Middle click', 'MClick', [1, 0, 242, 0]],
+  ['Mouse back', 'MBack', [1, 0, 243, 0]], ['Mouse forward', 'MFwd', [1, 0, 244, 0]],
+  ['Scroll up', 'Wh↑', [1, 0, 245, 1]], ['Scroll down', 'Wh↓', [1, 0, 245, 255]],
+];
+const MOUSE_BY_BYTES = new Map(MOUSE_ACTIONS.map(([name, short, b]) => [b.join(','), { name, short }]));
+// Other mouse codes qmk.top knows (wheel steps it doesn't offer on keyboards): named, not editable.
 const MOUSE = { 240: 'Left click', 241: 'Right click', 242: 'Middle click', 243: 'Mouse back', 244: 'Mouse forward', 245: 'Wheel', 246: 'Wheel', 247: 'Wheel', 248: 'Wheel' };
 
 export const keyName = code => HID_NAMES[code] ?? `Key 0x${code.toString(16)}`;
@@ -108,6 +117,8 @@ export function decodeAction(b, { mac = false } = {}) {
     const cap = c => (codes.length > 1 && c === 44 ? 'Spc' : short(c));
     return { kind: codes.length === 1 ? 'key' : 'combo', codes, label: codes.map(name).join(' + '), short: codes.map(cap).join(joiner), editable: true };
   }
+  const mouse = MOUSE_BY_BYTES.get(key);
+  if (mouse) return { kind: 'mouse', label: mouse.name, short: mouse.short, editable: true };
   if (b[0] === 1) return { kind: 'mouse', label: MOUSE[b[2]] ?? 'Mouse action', short: MOUSE[b[2]] ?? 'Mouse', editable: false };
   if (b[0] === 9) return { kind: 'macro', label: `Macro ${b[2] + 1}${MACRO_MODES[b[1]] ? ` · ${MACRO_MODES[b[1]].name}` : ''}`, short: `M${b[2] + 1}`, editable: false };
   if (b[0] === 24) return { kind: 'modtap', label: `Mod-tap: ${keyName(b[1])} / ${keyName(b[2])}`, short: 'MT', editable: false };

@@ -5,7 +5,7 @@
 // one is sent.
 
 import { KEYS, DEFAULT_MATRIX, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX } from './layout.js';
-import { FUNCTIONS, MODIFIERS, HID_NAMES } from './actions.js';
+import { FUNCTIONS, MODIFIERS, HID_NAMES, MOUSE_ACTIONS } from './actions.js';
 import { effectById, isOffered, decodeLighting, lightingBytes, lightingFields, MAX_LEVEL } from './lighting.js';
 import { MAX_MACROS, MACRO_MODES, MACRO_CHUNK, encodeMacro, macroSize, macroRefs } from './macros.js';
 
@@ -828,6 +828,7 @@ export const KEYMAP_LAYERS = {
 // The Fn key itself is locked on every layer so the Fn layer can't be lost (qmk.top locks it too).
 export const LOCKED_SLOTS = new Set(KEYS.filter(k => k.code === 'Fn').map(k => k.slot));
 const FUNCTION_BYTES = new Set(FUNCTIONS.map(f => f[2].join(',')));
+const MOUSE_BYTES = new Set(MOUSE_ACTIONS.map(m => m[2].join(',')));
 const VALID_HID = new Set(Object.keys(HID_NAMES).map(Number));
 
 // Actions this app may write: disabled, a key with up to two modifiers, or a named function.
@@ -839,6 +840,7 @@ export function isWritableAction(a, layer, slot) {
   if (a.join() === '0,0,0,0') return true;
   if (SUB_LAYERS.has(layer)) return isModTapKeys(a); // mod-tap and DKS actions are keys only, as in qmk.top
   if (FUNCTION_BYTES.has(a.join())) return true;
+  if (MOUSE_BYTES.has(a.join())) return true; // qmk.top's seven mouse actions
   if (a[0] === 9) return MACRO_MODE_IDS.has(a[1]) && a[2] < MAX_MACROS && a[3] === 0; // run macro slot
   if (a[0] !== 0) return false;
   const codes = a.slice(1).filter(Boolean);
