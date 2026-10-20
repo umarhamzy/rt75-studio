@@ -27,7 +27,7 @@ touching device code.
 | File | Role |
 |---|---|
 | `src/device.js` | Everything that touches HID: transport (wired and 2.4G dongle relay), reads, validated writes, live depth, keyboard-wide settings |
-| `src/app.js` | UI state and rendering: sidebar and header, board, knob mode, inspector/editor (travel sliders), pending edits, review dialog, Undo, live test, presets, keyboard settings |
+| `src/app.js` | UI state and rendering: sidebar and header, board, knob mode, inspector/editor (travel sliders), pending edits, review dialog, Undo, live test, presets, keyboard settings, switch types |
 | `src/layout.js` | RT75 key positions (from qmk.top) and the factory key matrix; `slot` = key-matrix index |
 | `src/macros.js` | Macro buffer encoding (mirrors qmk.top), checks, modes, step labels |
 | `src/library.js` | Macro library in this browser: storage, export/import, out-of-date check |
@@ -185,7 +185,16 @@ the theme's text colour.
 - themes.css was generated from token tables with a contrast check (text and key labels ≥ 4.5:1);
   edit it by hand now, keeping that bar. The lighting view's LED preview is approximate on every theme.
 
-**Next after DKS:** the user's choice; options offered: switch type, mouse actions in the key map.
+**Switch type (feature/switch-type, not merged; demo-tested only):** Keys › **Switches** (design SW1,
+canvas Round 20): each key shows qmk.top's switch number (1–7) in qmk.top's colour (`--sw-1…7`,
+the same in every theme); select keys and pick one of the RT75 Pro's seven types in the side panel.
+Written per key as param 252 after the key's other settings (validator: one of 0, 1, 2, 3, 4, 5, 46),
+read back, Undo restores unset keys as Outemu (protocol-notes.md, "Switch type"). Presets don't hold
+switch types (the Presets button is hidden there). To verify on the real keyboard: set a key, check
+qmk.top's Switch Settings shows the same number, switch profiles to learn whether it's per profile,
+then set it back.
+
+**Next:** the user's choice; mouse actions in the key map was offered.
 Knob remapping isn't wanted.
 
 **Branches:** `feature/macros` holds the abandoned read-back approach and the full investigation

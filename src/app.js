@@ -4,7 +4,7 @@ import {
   isSupported, requestKeyboard, findGrantedKeyboard, readSettings, readKeymaps, settingsFromDump, setDongleTiming,
   writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, writeSleepTimes,
   writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot, watchKeyboardEvents, readKbOption, readCurrentProfile, readUserPic, writeUserPic, readDksSettings,
-  LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS,
+  LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS, SWITCH_TYPES,
 } from './device.js';
 import { EFFECTS, effectById, isOffered, normalizeLighting, lightingDiff, lightingFields, hex, MAX_LEVEL } from './lighting.js';
 import { MACRO_MODES, MOUSE_BUTTONS, MAX_DELAY, MAX_REPEAT, MACRO_BYTES, stepLabel, macroSummary, macroProblem, macroSize, heldAtEnd } from './macros.js';
@@ -15,7 +15,8 @@ import { loadPatternLibrary, savePatternLibrary, keyColor, setKeyColor, keysChan
 import { THEMES, loadTheme, saveTheme, applyTheme, themeInUse, withTheme, flipped } from './themes.js';
 
 // Switch-type byte (magnet param 252), from qmk.top/v4's switch enum. The RT75 Pro offers
-// these seven; qmk.top shows any other value (e.g. 0xFF, unset) as type 1, Outemu.
+// these seven (SWITCH_TYPES, in qmk.top's order: its Switch Settings numbers them 1–7 and colours
+// them, --sw-1 … --sw-7 here). qmk.top shows 0xFF (keys never set) as type 1, Outemu.
 const SWITCHES = {
   0: 'Outemu', 1: 'Magnetic Jade', 2: 'Magnetic Jade Pro', 3: 'Magnetic Jade Gaming',
   4: 'Heavenly King', 5: 'Magneto', 46: 'Red Sky',
@@ -24,13 +25,17 @@ function switchName(byte) {
   if (byte === undefined) return 'Unknown';
   return SWITCHES[byte] ?? (byte === 0xff ? 'Outemu (default)' : `Type ${byte}`);
 }
+// The switch a byte stands for, as qmk.top reads it: unset (0xFF) is Outemu.
+const fittedSwitch = byte => (byte === 0xff ? 0 : byte);
+// qmk.top's number for it (1–7), or 0 for a value the RT75 Pro doesn't offer.
+const switchNum = byte => SWITCH_TYPES.indexOf(fittedSwitch(byte)) + 1;
 
 const MODES = { 0: 'Normal', 2: 'Dynamic keystroke (DKS)', 3: 'Mod-tap', 4: 'Toggle · Long press', 5: 'Toggle · Rapid fire', 7: 'Snap Tap' };
 const FIELD_LABELS = {
   mode: 'Key mode', actuation: 'Actuation point', release: 'Release point',
   rtPress: 'RT press sensitivity', rtRelease: 'RT release sensitivity',
   bottomDeadZone: 'Bottom dead zone', topDeadZone: 'Top dead zone', snapPartner: 'Snap Tap partner',
-  mtTime: 'Mod-tap hold time', dksTravel: 'DKS trigger point', dksTriggers: 'DKS moments',
+  mtTime: 'Mod-tap hold time', dksTravel: 'DKS trigger point', dksTriggers: 'DKS moments', switchType: 'Switch',
 };
 const SNAP = 7;
 const MT = 3;            // mod-tap key mode
@@ -126,6 +131,7 @@ function keyData(key) {
   const sends = modeId === MT && s.tapLayer ? layerBytes('tap', i) : current;
   const factory = DEFAULT_MATRIX.slice(i * 4, i * 4 + 4);
   const partnerSlot = modeId === 7 ? raw(i, 'snapPartner') : undefined;
+  const switchByte = state.pending.get(i)?.switchType ?? m.switchType?.[i]; // older dumps may not have it
   return {
     mode: MODES[modeId] ?? `Mode ${modeId}`,
     modeId,
@@ -136,7 +142,8 @@ function keyData(key) {
     rtRelease: raw(i, 'rtRelease') / step,
     bottomDeadZone: raw(i, 'bottomDeadZone') / step,
     topDeadZone: (raw(i, 'topDeadZone') ?? 0) / step,
-    switchType: switchName(m.switchType?.[i]),
+    switchType: switchName(switchByte),
+    switchByte,
     action: current ? actionLabel('base', current) : null,
     remapped: sends ? !sameAction(sends, factory) : null,
     pending: hasPending(i),
@@ -285,6 +292,15 @@ function renderBoard() {
           el.title = `${key.label}: tap ${mtLabel(m.tap)}, hold ${mtLabel(m.hold)} (${m.ms} ms)`;
           if (state.capture?.mt && state.capture.slots.includes(key.slot)) el.classList.add('is-capturing');
         } else el.classList.add('dim');
+      } else if (state.view === 'switches') {
+        // qmk.top's switch number in its colour, and a strip along the bottom; Outemu (the factory
+        // setting) is drawn quieter so swapped keys stand out.
+        const num = switchNum(d.switchByte);
+        el.classList.add('sw-key');
+        if (!num || fittedSwitch(d.switchByte) === 0) el.classList.add('sw-default');
+        if (num) el.style.setProperty('--sw', `var(--sw-${num})`);
+        value.innerHTML = `<span class="sw-badge">${num || '?'}</span>`;
+        el.title = `${key.label}: ${d.switchType}`;
       } else if (state.view === 'live') {
         el.classList.add('live-key');
         if (state.live?.focus === key.slot) el.classList.add('live-focus');
@@ -337,7 +353,9 @@ function renderBoard() {
       if (d.remapped) marks.insertAdjacentHTML('beforeend', '<i class="mark mark-remap" title="Remapped"></i>');
       el.appendChild(marks);
 
-      el.setAttribute('aria-label', `${key.label}: actuation ${mm(d.actuation)} millimetres${d.rt ? ', rapid trigger on' : ''}${d.partner ? ', snap tap with ' + d.partner.label : ''}${d.pending ? ', unsaved change' : ''}`);
+      el.setAttribute('aria-label', state.view === 'switches'
+        ? `${key.label}: switch ${d.switchType}${d.pending ? ', unsaved change' : ''}`
+        : `${key.label}: actuation ${mm(d.actuation)} millimetres${d.rt ? ', rapid trigger on' : ''}${d.partner ? ', snap tap with ' + d.partner.label : ''}${d.pending ? ', unsaved change' : ''}`);
     } else {
       el.setAttribute('aria-label', key.label);
     }
@@ -586,6 +604,9 @@ function renderLegend(lo, hi) {
     el.querySelectorAll('[data-layer]').forEach(b => b.onclick = () => { state.layer = b.dataset.layer; refresh(); });
   } else if (state.view === 'mt') {
     el.innerHTML = '<span class="swatch swatch-mt"></span><span>Mod-tap</span><span class="swatch swatch-tg"></span><span>Toggle</span><span class="swatch swatch-dks"></span><span>DKS</span><span class="muted legend-fit help">the key shows what it sends · change it under Key mode</span>';
+  } else if (state.view === 'switches') {
+    el.innerHTML = [...switchCounts()].map(([t, n]) => `<span class="sw-legend">${switchBadge(t)}${escapeHtml(switchName(t))} <span class="muted">${n}</span></span>`).join('') +
+      '<span class="muted legend-fit help">the number is qmk.top’s switch number</span>';
   } else if (state.view === 'device') {
     el.innerHTML = '<span class="muted help">For the whole keyboard (every profile).</span>';
   } else if (state.view === 'appearance') {
@@ -618,6 +639,7 @@ function renderSelectionTools() {
   if (!state.settings || NO_SELECT_VIEWS.has(state.view)) { el.hidden = true; return; }
   el.hidden = false;
   $('selectCount').textContent = state.selected.size ? `${state.selected.size} selected` : 'Ctrl/Shift-click to select several';
+  $('btnPresets').hidden = state.view === 'switches'; // presets hold travel settings, not switch types
   $('btnClearSel').disabled = !state.selected.size;
 }
 
@@ -725,6 +747,7 @@ function renderInspectorBody() {
   if (state.view === 'device') { renderKeyboardSettings(); return; } // drawn in place of the board
   if (state.view === 'appearance') { renderAppearance(); return; }
   if (state.view === 'keymap' && state.settings && !state.knob && state.selected.size) { renderKeymapPanel(); return; }
+  if (state.view === 'switches' && state.settings && !state.knob && state.selected.size) { renderSwitchPanel(); return; }
   if (!state.settings || (!state.knob && !state.selected.size)) {
     el.innerHTML = '<p class="inspector-hint">Select a key to see its settings. Ctrl- or Shift-click to select several.</p>';
     return;
@@ -782,6 +805,7 @@ const SECTIONS = {
   'Key mode': { id: 'mode', hue: 'var(--mt)' }, Travel: { id: 'travel', hue: 'var(--accent)' },
   'Rapid Trigger': { id: 'rt', hue: 'var(--rt)' }, 'Snap Tap': { id: 'snap', hue: 'var(--snap)' },
   'Dead zones': { id: 'dz', hue: 'var(--muted)' }, 'Other settings': { id: 'other', hue: 'var(--muted)' },
+  Switch: { id: 'switch', hue: 'var(--accent)' },
 };
 function sectionsHtml(body) {
   const [before, ...parts] = body.split('<h3>');
@@ -1067,6 +1091,59 @@ function revertKeys(slots) {
     state.pending.delete(s);
     if (modeChange) DKS_LAYERS.forEach(l => state.pendingKeys.delete(`${l}:${s}`));
   }
+}
+
+// ---------- Switches ----------
+// Keys › Switches (design SW1, canvas Round 20): which switch is fitted in each key, magnet param 252,
+// sent per key after its other settings as qmk.top's Switch Settings does (protocol-notes.md, "Switch
+// type"). Picking the type a key already has (unset counts as Outemu) changes nothing.
+function setSwitch(slot, type) {
+  const saved = state.settings.magnet.switchType[slot];
+  setPending(slot, 'switchType', fittedSwitch(saved) === type ? saved : type);
+}
+
+// Keys per switch type, pending edits included, in qmk.top's order (unknown values last).
+function switchCounts() {
+  const counts = new Map();
+  for (const k of MAGNETIC) {
+    const t = fittedSwitch(keyData(k).switchByte);
+    counts.set(t, (counts.get(t) ?? 0) + 1);
+  }
+  const rank = t => (SWITCH_TYPES.includes(t) ? SWITCH_TYPES.indexOf(t) : 99);
+  return new Map([...counts].sort((a, b) => rank(a[0]) - rank(b[0])));
+}
+
+function switchBadge(type) {
+  const num = switchNum(type);
+  return `<span class="sw-badge"${num ? ` style="--sw:var(--sw-${num})"` : ''} aria-hidden="true">${num || '?'}</span>`;
+}
+
+function renderSwitchPanel() {
+  const el = $('inspector');
+  const slots = [...state.selected];
+  const keys = slots.map(keyBySlot);
+  const can = editable() && !!state.settings.magnet.switchType;
+  const now = keys.map(k => fittedSwitch(keyData(k).switchByte));
+  const cur = new Set(now).size === 1 ? now[0] : null;
+  const changed = slots.filter(s => state.pending.get(s)?.switchType !== undefined);
+  const was = [...new Set(changed.map(s => switchName(fittedSwitch(state.settings.magnet.switchType[s]))))];
+  const counts = switchCounts();
+  const keysWord = n => `${n} key${n === 1 ? '' : 's'}`;
+  const title = keys.length === 1 ? keys[0].label : `${keys.length} keys`;
+  const sub = `${cur === null ? 'Mixed switches' : escapeHtml(switchName(cur))}${changed.length ? ` · was ${escapeHtml(was.join(', '))}` : can ? ' · as the keyboard has it' : ''}` +
+    (keys.length > 1 ? `<br>${keys.map(k => escapeHtml(k.label)).join(', ')}` : '');
+  // Revert sits in the title row (as on the other tabs) and only discards the switch change.
+  const revert = can && changed.length
+    ? `<button class="revert-chip" id="btnRevertSw" type="button" title="Discard the unsaved switch change on ${keys.length === 1 ? 'this key' : 'these keys'}">Unsaved · Revert</button>` : '';
+  const rows = SWITCH_TYPES.map(t => `<button type="button" class="sw-row" id="sw-${t}" data-sw="${t}" aria-pressed="${cur === t}" ${can ? '' : 'disabled'}>
+      <span class="sw-radio" aria-hidden="true"></span>${switchBadge(t)}<span class="sw-name">${escapeHtml(SWITCHES[t])}</span><span class="sw-count">${counts.get(t) ? keysWord(counts.get(t)) : ''}</span></button>`).join('');
+  el.innerHTML = `<div class="insp-head"><h2>${escapeHtml(title)}</h2>${revert}</div><p class="sub">${sub}</p>` + sectionsHtml(`<h3>Switch</h3>
+    <div class="sw-list" role="group" aria-label="Switch type">${rows}</div>
+    <p class="sw-note help">Tells the keyboard which switch is in ${keys.length === 1 ? 'this socket' : 'these sockets'}, so it measures travel for that switch. Only change it after swapping switches.</p>
+    <p class="sw-note sw-note-quiet help">Numbers and colours match qmk.top’s Switch Settings. Keys never set count as Outemu, as in qmk.top.</p>`) +
+    (can ? '' : `<p class="note">${state.settings.source === 'device' ? (state.busy ? 'Writing…' : 'Editing is off for this keyboard.') : 'Viewing a file. Connect the keyboard to edit.'}</p>`);
+  el.querySelectorAll('[data-sw]').forEach(b => b.onclick = () => { slots.forEach(s => setSwitch(s, Number(b.dataset.sw))); refresh(); });
+  el.querySelector('#btnRevertSw')?.addEventListener('click', () => { changed.forEach(s => setPending(s, 'switchType', state.settings.magnet.switchType[s])); refresh(); });
 }
 
 // ---------- DKS ----------
@@ -2626,6 +2703,7 @@ function fmt(field, value) {
   if (field === 'mode') return `${MODES[value & 0x7f] ?? 'Mode ' + (value & 0x7f)}${value & 0x80 ? ' + RT' : ''}`;
   if (field === 'snapPartner') return keyBySlot(value)?.label ?? '—';
   if (field === 'mtTime') return value ? `${value * 10} ms` : 'Not set';
+  if (field === 'switchType') return switchName(value);
   if (field === 'dksTriggers') {
     const parts = [0, 1, 2, 3].map(i => [i, describe(unpack(actionByte(value, i)))]).filter(([, d]) => d);
     return parts.length ? parts.map(([i, d]) => `Action ${i + 1}: ${d}`).join('<br>') : 'None';
@@ -2776,6 +2854,10 @@ async function undoLast() {
   // those keys, so drop the zero values.
   const undo = state.lastApplied.undo
     .map(e => Object.fromEntries(Object.entries(e).filter(([f, v]) => !((f === 'rtPress' || f === 'rtRelease') && v === 0))))
+    // An unset switch (0xFF) is restored as Outemu, which qmk.top reads it as (it never writes 0xFF);
+    // any other value the RT75 Pro doesn't offer can't be written back, so it's left out.
+    .map(e => (e.switchType === undefined || SWITCH_TYPES.includes(e.switchType) ? e
+      : fittedSwitch(e.switchType) === 0 ? { ...e, switchType: 0 } : (({ switchType, ...rest }) => rest)(e)))
     .map(e => sendable(e, s => e.mode ?? state.settings.magnet.mode[s]))
     .filter(e => Object.keys(e).length > 1);
   const undoKb = state.lastApplied.undoKb ?? [];
@@ -3394,7 +3476,7 @@ function refresh() {
 
 // Configuration (Actuation / Rapid Trigger / Snap Tap tabs) and the other sidebar sections.
 const CONFIG_VIEWS = new Set(['actuation', 'rt', 'snap', 'mt']);
-const VIEW_TITLES = { keymap: 'Key map', macros: 'Macros', lighting: 'Lighting', live: 'Live test', device: 'Keyboard settings', appearance: 'Appearance' };
+const VIEW_TITLES = { keymap: 'Key map', macros: 'Macros', switches: 'Switches', lighting: 'Lighting', live: 'Live test', device: 'Keyboard settings', appearance: 'Appearance' };
 let lastConfigView = 'actuation';
 
 function renderNav() {

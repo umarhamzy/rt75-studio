@@ -27,6 +27,11 @@
   --overlay-text: var(--text);
   --overlay-text-2: var(--text-2);
   --overlay-link: var(--accent);
+  /* Switch types, numbered 1–7 in qmk.top's order and in qmk.top's colours (the same in every
+     theme, so they match qmk.top); --sw-ink is the number drawn on them. */
+  --sw-1: #ffea29; --sw-2: #60e849; --sw-3: #2effd9; --sw-4: #b780ff; --sw-5: #ff5733; --sw-6: #4ca4f4; --sw-7: #fa7e31;
+  --sw-ink: #111317;
+  --sw-edge: rgb(0 0 0 / 0.28);
 }
 /* Amber's own values for the worked-out tokens above (as before themes existed). */
 :root:not([data-theme]), [data-theme="amber"] {
@@ -1172,3 +1177,28 @@ body.no-lanes .key.heat .key-marks { right: 4px; }
 .theme-card[aria-pressed="true"] .th-check { visibility: visible; }
 .th-tag { flex: none; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line); font: 500 10px var(--mono); color: var(--muted); }
 .th-note { margin-top: -4px; font-size: 11px; color: var(--muted); }
+
+/* Keys › Switches (design SW1): each key shows its switch as qmk.top's number in qmk.top's colour,
+   with a strip along the bottom; Outemu (the factory setting) is quieter. */
+.key.sw-key { --cap-bg: color-mix(in oklab, var(--sw, var(--surface-3)) 10%, var(--cap)); }
+.key.sw-key::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--sw, var(--surface-3)); }
+.key.sw-default { --cap-bg: var(--cap); }
+.key.sw-default::before { opacity: 0.45; }
+.key.sw-default .sw-badge { opacity: 0.7; }
+.sw-badge { display: inline-grid; place-items: center; flex: none; min-width: 15px; height: 15px; padding: 0 3px; box-sizing: border-box; border-radius: 4px;
+  background: var(--sw, var(--surface-3)); color: var(--sw-ink); box-shadow: inset 0 0 0 1px var(--sw-edge); font: 700 10px/1 var(--mono); }
+.key .sw-badge { min-width: 14px; height: 14px; font-size: 9px; }
+.sw-legend { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.sw-list { display: flex; flex-direction: column; gap: 2px; }
+.sw-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 0 10px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.sw-row:hover:not(:disabled) { background: var(--surface-2); }
+.sw-row[aria-pressed="true"] { background: var(--surface-2); }
+.sw-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sw-row:disabled { cursor: default; opacity: 0.6; }
+.sw-radio { flex: none; width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; border: 2px solid var(--line); background: var(--surface); }
+.sw-row[aria-pressed="true"] .sw-radio { border: 5px solid var(--accent); }
+.sw-name { flex: 1; min-width: 0; font-weight: 600; font-size: 13px; }
+.sw-count { flex: none; font: 500 11px var(--mono); color: var(--muted); }
+.sw-note { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
+.sw-note-quiet { margin-top: 6px; }

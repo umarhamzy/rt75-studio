@@ -763,6 +763,38 @@ qmk.top's "Dynamic Keystroke (DKS)" advanced key (动态键程). Mode param 7 = 
   deeper trigger point, the same actions shown in qmk.top, back to Normal, and Undo; it passes over
   2.4G too.
 
+## Switch type (feature/switch-type)
+
+qmk.top's Switch Settings (轴体设置) tells the keyboard which switch is fitted in each socket, for
+people who swap switches. Its hint: after changing switches, select the keys with that switch and
+pick its type. Nothing about calibration is sent or suggested with it.
+
+- **Offered for the RT75 Pro:** the device entry has `isSwitchReplaceable: true` and
+  `supportedSwitchTypes` 高特, 磁玉, 磁玉pro, 磁玉gaming, 天王, 万磁王, 赤霄轴 (bytes 0, 1, 2, 3, 4, 5, 46;
+  table under "Hall-effect parameters"). qmk.top numbers them 1–7 in that order on the keys and
+  colours them from `轴体颜色字典` (#ffea29, #60e849, #2effd9, #b780ff, #ff5733, #4ca4f4, #fa7e31);
+  RT75 Studio uses the same numbers and colours so the two can be compared.
+- **Read:** param 252, 2 pages, one byte per key (`_getMulitMagnetismCMD(252, 2)`), decoded with
+  `_解码轴体`: any byte not in the enum (0xFF on keys never set) becomes 高特 (Outemu).
+- **Write, one key** (`setMagnetismInfoSimple`): after the key's other params (and their vendorSleep),
+  if the switch changed: `_sendMagnetismInfoSimpleCMD(252, key, true, [byte])` →
+  `[0x65, 0xFC, 0, key, 1, 0, 0, cs, byte]`, then vendorSleep. Picking the type a key already has
+  sends nothing (an unset key picked as Outemu included).
+- **Write, several keys:** qmk.top's Confirm (`保存轴体设置`) sets the type on every selected key, and
+  more than one changed key goes through `setMultiMagnetismInfo`, which rewrites the whole 252
+  table (forbidden here). RT75 Studio sends the single-key packet per key instead, in the usual
+  per-key order (… 251, **252**, then Snap partners 9), with the save flag only on the batch's final
+  packet, and reads param 252 back. Validator: one byte, one of the seven values (0xFF is never
+  written).
+- **Undo** writes an unset key back as Outemu (0), what qmk.top reads 0xFF as.
+- **Per profile?** Unknown. It is read and written like the other magnet params, which are per
+  profile. To check on the real keyboard: set one key in Profile 1, switch to Profile 2, see whether
+  it changed, then set it back.
+- **What the firmware does with it** isn't documented; presumably it picks the travel curve for that
+  switch's magnet. Changing it on unswapped keys may make their travel read wrong until set back.
+- **UI:** Keys › Switches (design SW1, canvas Round 20).
+- **Status:** tested against the simulated keyboard and in `?demo` only (2026-10-20).
+
 ## Gamepad mode (not supported, 2026-10-17)
 
 The user asked for a Wootility / Keychron style gamepad (key depth as analog controller input).
