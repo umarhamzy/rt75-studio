@@ -12,6 +12,7 @@ import { loadLibrary, saveLibrary, newId, isOutdated, uniqueName, exportLibrary,
 import { enhanceSelects } from './dropdown.js';
 import { unpack, pack, actionByte, setActionByte, DEFAULT_TRIGGERS, holds, cycleMoment, cutHold, describe, pressAt, heldAfter, tappedAt, MOMENT_NAMES } from './dks.js';
 import { loadPatternLibrary, savePatternLibrary, keyColor, setKeyColor, keysChanged, applyFill, FILLS, BUILT_IN_DESIGNS, colorsFromImage } from './patterns.js';
+import { THEMES, loadTheme, saveTheme, applyTheme, themeInUse, withTheme, flipped } from './themes.js';
 
 // Switch-type byte (magnet param 252), from qmk.top/v4's switch enum. The RT75 Pro offers
 // these seven; qmk.top shows any other value (e.g. 0xFF, unset) as type 1, Outemu.
@@ -83,6 +84,7 @@ function loadPrefs() {
   try { return { ...PREFS, ...JSON.parse(localStorage.getItem('rt75-studio-display') ?? '{}') }; } catch { return { ...PREFS }; }
 }
 let prefs = loadPrefs();
+let themePref = loadTheme(); // { mode, dark, light }: the Appearance page and the sidebar switch
 function applyPrefs() {
   document.body.classList.toggle('no-help', !prefs.help);
   document.body.classList.toggle('no-lanes', !prefs.lanes);
@@ -94,7 +96,9 @@ function setPref(name, on) {
   refresh();
 }
 const MAGNETIC = KEYS.filter(k => !k.knob);
-const NO_SELECT_VIEWS = new Set(['lighting', 'macros', 'device']);
+// Keyboard settings and Appearance are pages drawn in place of the board, with no side panel.
+const PAGE_VIEWS = new Set(['device', 'appearance']);
+const NO_SELECT_VIEWS = new Set(['lighting', 'macros', ...PAGE_VIEWS]);
 const keyBySlot = slot => KEYS.find(k => k.slot === slot && !k.knob);
 
 const bounds = () => (state.settings?.source === 'device' ? writeBounds(state.settings.travelStep) : null);
@@ -190,7 +194,7 @@ function renderBoard() {
   // Lighting, Macros and Keyboard settings don't use key selection: hide it there (it's kept for
   // the other views).
   const selectable = !!s && !NO_SELECT_VIEWS.has(state.view);
-  board.classList.toggle('inert-board', !!s && state.view === 'device');
+  board.classList.toggle('inert-board', !!s && PAGE_VIEWS.has(state.view));
   board.classList.toggle('mc-board', !!s && state.view === 'macros');
 
   // The three knob entries share one physical knob.
@@ -349,8 +353,8 @@ function renderBoard() {
       // Clicking a key that runs a library macro opens that macro; other keys do nothing here.
       if (el.dataset.macroId) el.onclick = () => openMacroEditor(libById(el.dataset.macroId));
       else el.tabIndex = -1;
-    } else if (state.view === 'device') {
-      el.tabIndex = -1; // keyboard-wide settings: the board is only shown for context
+    } else if (PAGE_VIEWS.has(state.view)) {
+      el.tabIndex = -1; // a page drawn in place of the board
     } else el.onclick = e => clickKey(key.slot, e.ctrlKey || e.metaKey || e.shiftKey);
     board.appendChild(el);
   }
@@ -583,7 +587,9 @@ function renderLegend(lo, hi) {
   } else if (state.view === 'mt') {
     el.innerHTML = '<span class="swatch swatch-mt"></span><span>Mod-tap</span><span class="swatch swatch-tg"></span><span>Toggle</span><span class="swatch swatch-dks"></span><span>DKS</span><span class="muted legend-fit help">the key shows what it sends · change it under Key mode</span>';
   } else if (state.view === 'device') {
-    el.innerHTML = '<span class="muted help">For the whole keyboard (every profile), plus how RT75 Studio shows it.</span>';
+    el.innerHTML = '<span class="muted help">For the whole keyboard (every profile).</span>';
+  } else if (state.view === 'appearance') {
+    el.innerHTML = '<span class="muted help">How RT75 Studio looks in this browser. Nothing here is written to the keyboard.</span>';
   } else if (state.view === 'lighting' && state.pt.mode === 'patterns') {
     const can = editable() && !!patternColors(state.pt.layer);
     el.innerHTML = `<div class="pt-fills" role="group" aria-label="Fill the pattern">${FILLS.map(f => `<button type="button" class="btn btn-small" data-fill="${f.id}" ${can ? '' : 'disabled'}>${f.name}</button>`).join('')}</div>
@@ -715,6 +721,7 @@ function renderInspectorBody() {
   if (state.view === 'lighting' && state.settings) { renderLightingPanel(); return; }
   if (state.view === 'macros' && state.settings) { renderLibraryPanel(); return; }
   if (state.view === 'device') { renderKeyboardSettings(); return; } // drawn in place of the board
+  if (state.view === 'appearance') { renderAppearance(); return; }
   if (state.view === 'keymap' && state.settings && !state.knob && state.selected.size) { renderKeymapPanel(); return; }
   if (!state.settings || (!state.knob && !state.selected.size)) {
     el.innerHTML = '<p class="inspector-hint">Select a key to see its settings. Ctrl- or Shift-click to select several.</p>';
@@ -1131,7 +1138,7 @@ function dksPanelSlot() {
 function renderDksPanel() {
   const el = $('dksPanel'), slot = dksPanelSlot();
   el.hidden = slot === null;
-  $('stats').hidden = state.view === 'device' || slot !== null;
+  $('stats').hidden = PAGE_VIEWS.has(state.view) || slot !== null;
   if (slot === null) { el.innerHTML = ''; return; }
   const info = dksInfo(slot), can = editable();
   if (dksTry.slot !== slot) dksTry = { slot, t: 30 };
@@ -3185,20 +3192,23 @@ function patternPainter() {
 }
 
 // ---------- Keyboard-wide settings ----------
+// Grouped sections (a heading, tiles, and a note under them), as in the Round 9 mockups. Used by
+// the Keyboard settings and Appearance pages.
+const group = (title, sub, tiles, note) =>
+  `<section class="set-group"><h2>${title}${sub ? ` <span class="muted">${sub}</span>` : ''}</h2>
+    <div class="set-tiles">${tiles}</div>${note ? `<p class="set-foot help">${note}</p>` : ''}</section>`;
+// A changed tile gets an undo arrow next to its title that drops just that change.
+const tile = (label, body, { wide = false, full = false, pending = false, field = '' } = {}) =>
+  `<div class="set-tile${wide ? ' is-wide' : ''}${full ? ' is-full' : ''}${pending ? ' is-pending' : ''}"><div class="set-head"><div class="set-label">${label}</div>${pending && field
+    ? `<button type="button" class="set-undo" id="undo-${field}" data-undo="${field}" title="Undo this change" aria-label="Undo the ${label.toLowerCase()} change"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/></svg></button>` : ''}</div>${body}</div>`;
+
 // The Keyboard settings view, drawn in place of the board. (Profiles are in the header.)
 function renderKeyboardSettings() {
   const el = $('settingsPanel');
+  el.setAttribute('aria-label', 'Keyboard settings');
   const focusId = el.contains(document.activeElement) ? document.activeElement.id : '';
   const s = state.settings;
   const can = editable();
-  // Grouped sections (a heading, tiles, and a note under them), as in the Round 9 mockups.
-  const group = (title, sub, tiles, note) =>
-    `<section class="set-group"><h2>${title}${sub ? ` <span class="muted">${sub}</span>` : ''}</h2>
-      <div class="set-tiles">${tiles}</div>${note ? `<p class="set-foot help">${note}</p>` : ''}</section>`;
-  // A changed tile gets an undo arrow next to its title that drops just that change.
-  const tile = (label, body, { wide = false, pending = false, field = '' } = {}) =>
-    `<div class="set-tile${wide ? ' is-wide' : ''}${pending ? ' is-pending' : ''}"><div class="set-head"><div class="set-label">${label}</div>${pending && field
-      ? `<button type="button" class="set-undo" id="undo-${field}" data-undo="${field}" title="Undo this change" aria-label="Undo the ${label.toLowerCase()} change"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/></svg></button>` : ''}</div>${body}</div>`;
 
   const kbOs = s?.kbOption?.system;
   const osPicker = `<div class="segmented segmented-sm" role="group" aria-label="Fn layer shown">
@@ -3212,16 +3222,11 @@ function renderKeyboardSettings() {
   // change (calibration, firmware, factory reset, toggle keys).
   const qmkTile = tile('qmk.top', `<p class="set-note help">The official configurator, for calibration, firmware updates and factory reset. Close RT75 Studio first: only one page can use the keyboard at a time.</p>
       <a class="btn btn-small set-ext" href="https://qmk.top/v4/" target="_blank" rel="noopener noreferrer">Open qmk.top<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-8 8M18 14v5H5V6h5"/></svg></a>`);
-  const prefSwitch = (name, label, note) => tile(label, `<label class="switch"><input type="checkbox" id="pref-${name}" data-pref="${name}" ${prefs[name] ? 'checked' : ''}><span class="switch-track"></span>
-      <span>${prefs[name] ? 'On' : 'Off'}</span></label><p class="set-note">${note}</p>`);
   const studio = group('RT75 Studio', 'this browser',
     tile('Fn layer shown', `${osPicker}<p class="set-note">${osNote}</p>`, { wide: true }) + qmkTile);
-  const display = group('Display', 'this browser',
-    prefSwitch('help', 'Help texts', 'Explanations under the settings, in the side panel and below the tabs. Warnings and status messages always show.') +
-    prefSwitch('lanes', 'Travel bars on keys', 'On the Actuation tab, two thin bars on each key: amber to the press point, cyan to the release point.'));
 
   if (!s) {
-    el.innerHTML = `<div class="set-stack">${studio}${display}<p class="set-foot">Connect the keyboard (or open a dump) to see its settings.</p></div>`;
+    el.innerHTML = `<div class="set-stack">${studio}<p class="set-foot">Connect the keyboard (or open a dump) to see its settings.</p></div>`;
   } else {
     const rate = state.pendingKb.reportRateHz ?? s.reportRateHz;
     const ratePending = kbChanges().some(c => c.field === 'reportRateHz');
@@ -3239,7 +3244,7 @@ function renderKeyboardSettings() {
       sleepTile(tile, 'deepTime_bt', 'Bluetooth deep sleep', can) +
       sleepTile(tile, 'time_24', '2.4G backlight off', can),
       'Backlight off: the lights go off after this long idle. Deep sleep: the keyboard sleeps until you press a key.') : '';
-    el.innerHTML = `<div class="set-stack">${kb}${power}${studio}${display}
+    el.innerHTML = `<div class="set-stack">${kb}${power}${studio}
       ${s.source !== 'device' ? '<p class="set-foot">Viewing a file. Connect the keyboard to change these.</p>' : ''}</div>`;
 
     const setSleep = (field, minutes) => {
@@ -3260,7 +3265,6 @@ function renderKeyboardSettings() {
     });
   }
   el.querySelectorAll('[data-os]').forEach(b => b.onclick = () => setOsPref(b.dataset.os));
-  el.querySelectorAll('[data-pref]').forEach(cb => cb.onchange = () => setPref(cb.dataset.pref, cb.checked));
   el.querySelectorAll('[data-undo]').forEach(b => b.onclick = () => { delete state.pendingKb[b.dataset.undo]; refresh(); });
   if (focusId) el.querySelector(`#${CSS.escape(focusId)}`)?.focus({ preventScroll: true });
 }
@@ -3276,6 +3280,63 @@ function sleepTile(tile, field, label, can) {
       <button type="button" class="btn" id="step-${field}-up" data-step="${field}" data-dir="1" aria-label="${label}: one minute more" ${dis}>+</button>
     </div>
     <div class="set-note">${pending ? `Now ${fmtSecs(s.sleep[field])} · written when you review` : fmtSecs(sec)}</div>`, { pending, field });
+}
+
+// ---------- Appearance ----------
+// Theme (design TP1, canvas Round 19) and display preferences, kept in this browser. Each card's
+// preview is drawn in its own theme: data-theme on the preview scopes that theme's colours.
+// (themePref is loaded with the display preferences, near the top.)
+
+function setTheme(pref) {
+  themePref = pref;
+  saveTheme(pref);
+  applyTheme(pref);
+  renderThemeFlip();
+  if (state.view === 'appearance') renderAppearance();
+}
+
+// The sidebar switch (design TP4): flips between the dark and the light theme last picked.
+function renderThemeFlip() {
+  const cur = themeInUse(themePref), next = themeInUse(flipped(themePref));
+  $('themeFlipMoon').toggleAttribute('hidden', cur.mode !== 'dark'); // SVG elements have no .hidden property
+  $('themeFlipSun').toggleAttribute('hidden', cur.mode !== 'light');
+  $('themeFlipName').textContent = cur.name;
+  $('themeFlipNext').dataset.theme = next.id;
+  $('themeFlip').title = `Switch to ${next.name}`;
+  $('themeFlip').setAttribute('aria-label', `Theme: ${cur.name}. Switch to ${next.name} (${next.mode})`);
+}
+
+// A miniature keyboard for the previews: plain keys plus an accent, a Rapid Trigger and a Snap Tap key.
+const PREVIEW_KEYS = Array.from({ length: 24 }, (_, i) =>
+  `<i${{ 10: ' class="is-acc"', 13: ' class="is-rt"', 17: ' class="is-snap"' }[i] ?? ''}></i>`).join('');
+
+function renderAppearance() {
+  const el = $('settingsPanel');
+  el.setAttribute('aria-label', 'Appearance');
+  const focusId = el.contains(document.activeElement) ? document.activeElement.id : '';
+  const cur = themeInUse(themePref), next = themeInUse(flipped(themePref));
+  const card = t => {
+    const on = t.id === cur.id, paired = t.id === next.id;
+    return `<button type="button" class="theme-card" id="theme-${t.id}" data-theme-pick="${t.id}" aria-pressed="${on}">
+      <span class="th-prev" data-theme="${t.id}" aria-hidden="true"><span class="th-side"><i></i><i></i><i></i></span><span class="th-board">${PREVIEW_KEYS}</span></span>
+      <span class="th-name"><span>${t.name}</span>${paired ? '<span class="th-tag">switch</span>' : `<svg class="th-check" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.2l2.3 2.3 4.7-5"/></svg>`}</span>
+      <span class="th-note">${t.note}</span></button>`;
+  };
+  const row = (mode, label) => `<div class="theme-row"><div class="theme-mode">${label}</div>
+    <div class="theme-cards">${THEMES.filter(t => t.mode === mode).map(card).join('')}</div></div>`;
+  const prefSwitch = (name, label, note) => tile(label, `<label class="switch"><input type="checkbox" id="pref-${name}" data-pref="${name}" ${prefs[name] ? 'checked' : ''}><span class="switch-track"></span>
+      <span>${prefs[name] ? 'On' : 'Off'}</span></label><p class="set-note">${note}</p>`);
+
+  el.innerHTML = `<div class="set-stack">
+    ${group('Theme', 'this browser', tile(`In use: ${cur.name}`, `${row('dark', 'Dark')}${row('light', 'Light')}
+      <p class="set-note help">The ${cur.mode === 'dark' ? 'moon' : 'sun'} button in the sidebar switches to ${next.name}, your ${next.mode} theme (marked “switch”). Picking a theme here makes it the one for its side.</p>`, { full: true }))}
+    ${group('Display', 'this browser',
+      prefSwitch('help', 'Help texts', 'Explanations under the settings, in the side panel and below the tabs. Warnings and status messages always show.') +
+      prefSwitch('lanes', 'Travel bars on keys', 'On the Actuation tab, two thin bars on each key: accent to the press point, the Rapid Trigger colour to the release point.'))}
+  </div>`;
+  el.querySelectorAll('[data-theme-pick]').forEach(b => b.onclick = () => setTheme(withTheme(themePref, b.dataset.themePick)));
+  el.querySelectorAll('[data-pref]').forEach(cb => cb.onchange = () => setPref(cb.dataset.pref, cb.checked));
+  if (focusId) el.querySelector(`#${CSS.escape(focusId)}`)?.focus({ preventScroll: true });
 }
 
 // The inputs work in whole minutes, so deep sleep starts at 1 minute (the keyboard allows 10 s;
@@ -3331,7 +3392,7 @@ function refresh() {
 
 // Configuration (Actuation / Rapid Trigger / Snap Tap tabs) and the other sidebar sections.
 const CONFIG_VIEWS = new Set(['actuation', 'rt', 'snap', 'mt']);
-const VIEW_TITLES = { keymap: 'Key map', macros: 'Macros', lighting: 'Lighting', live: 'Live test', device: 'Keyboard settings' };
+const VIEW_TITLES = { keymap: 'Key map', macros: 'Macros', lighting: 'Lighting', live: 'Live test', device: 'Keyboard settings', appearance: 'Appearance' };
 let lastConfigView = 'actuation';
 
 function renderNav() {
@@ -3343,8 +3404,7 @@ function renderNav() {
   document.querySelectorAll('#configTabs [data-view]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === state.view)));
   $('configTabs').hidden = !config;
   $('viewTitle').hidden = config;
-  // Keyboard settings replace the board, and need no side panel.
-  const settings = state.view === 'device';
+  const settings = PAGE_VIEWS.has(state.view); // drawn in place of the board, with no side panel
   $('boardWrap').hidden = settings;
   $('stats').hidden = settings;
   $('settingsPanel').hidden = !settings;
@@ -3517,6 +3577,9 @@ new MutationObserver(() => {
 }).observe(document.body, { childList: true, subtree: true });
 enhanceSelects(document);
 applyPrefs();
+applyTheme(themePref);
+renderThemeFlip();
+$('themeFlip').onclick = () => setTheme(flipped(themePref));
 $('selectPreset').onchange = e => {
   const pick = KEY_GROUPS[e.target.value];
   e.target.value = '';

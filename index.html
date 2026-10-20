@@ -8,6 +8,12 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
 <link rel="stylesheet" href="src/styles.css">
+<link rel="stylesheet" href="src/themes.css">
+<script>
+  // The saved theme, applied before the page paints (src/themes.js has the rest).
+  try { const t = JSON.parse(localStorage.getItem('rt75-studio-theme') || '{}'); document.documentElement.dataset.theme = (t.mode === 'light' ? t.light || 'paper' : t.dark) || 'amber'; }
+  catch { document.documentElement.dataset.theme = 'amber'; }
+</script>
 </head>
 <body>
 <div class="app">
@@ -36,6 +42,20 @@
       <button class="nav-item" type="button" data-nav="device" data-view="device">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h3"/></svg>Keyboard settings</button>
     </div>
+
+    <div class="nav-group">
+      <div class="nav-label">Studio</div>
+      <button class="nav-item" type="button" data-nav="appearance" data-view="appearance">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 000 18z" fill="currentColor"/></svg>Appearance</button>
+    </div>
+
+    <!-- Flips between the dark and the light theme picked on the Appearance page. -->
+    <button class="theme-flip" id="themeFlip" type="button">
+      <svg class="tf-icon" id="themeFlipMoon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>
+      <svg class="tf-icon" id="themeFlipSun" viewBox="0 0 24 24" aria-hidden="true" hidden><circle cx="12" cy="12" r="4"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>
+      <span class="tf-name" id="themeFlipName"></span>
+      <span class="tf-next" id="themeFlipNext" aria-hidden="true"></span>
+    </button>
 
     <div class="device-card" id="device" hidden>
       <div class="device-title"><span class="status-dot" id="deviceDot"></span><span class="device-name" id="deviceName"></span></div>
