@@ -20,6 +20,8 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
     p.dksTravel ??= p.dksStart ?? new Array(p.mode.length).fill(0);
     p.dksTriggers = new Array(p.mode.length).fill(0); // DKS trigger table, 4 bytes per key (packed)
   }
+  // Switch types (param 252) are one table for the whole keyboard, as on the real RT75 Pro.
+  for (const p of profiles) p.switchType = profiles[0].switchType;
   let profile = 0, rateCode = 3; // 1000 Hz
   // Sleep timers (seconds, uint16 LE): BT backlight 120, 2.4G backlight 120, BT deep 1680, 2.4G deep 1680
   let sleepBytes = Uint8Array.from([120, 0, 120, 0, 0x90, 0x06, 0x90, 0x06]);

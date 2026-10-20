@@ -606,7 +606,7 @@ function renderLegend(lo, hi) {
     el.innerHTML = '<span class="swatch swatch-mt"></span><span>Mod-tap</span><span class="swatch swatch-tg"></span><span>Toggle</span><span class="swatch swatch-dks"></span><span>DKS</span><span class="muted legend-fit help">the key shows what it sends · change it under Key mode</span>';
   } else if (state.view === 'switches') {
     el.innerHTML = [...switchCounts()].map(([t, n]) => `<span class="sw-legend">${switchBadge(t)}${escapeHtml(switchName(t))} <span class="muted">${n}</span></span>`).join('') +
-      '<span class="muted legend-fit help">the number is qmk.top’s switch number</span>';
+      '<span class="muted">shared by all profiles</span><span class="muted legend-fit help">· the number is qmk.top’s switch number</span>';
   } else if (state.view === 'device') {
     el.innerHTML = '<span class="muted help">For the whole keyboard (every profile).</span>';
   } else if (state.view === 'appearance') {
@@ -1096,7 +1096,8 @@ function revertKeys(slots) {
 // ---------- Switches ----------
 // Keys › Switches (design SW1, canvas Round 20): which switch is fitted in each key, magnet param 252,
 // sent per key after its other settings as qmk.top's Switch Settings does (protocol-notes.md, "Switch
-// type"). Picking the type a key already has (unset counts as Outemu) changes nothing.
+// type"). One table for the whole keyboard, unlike the other magnet settings (tested on the RT75 Pro).
+// Picking the type a key already has (unset counts as Outemu) changes nothing.
 function setSwitch(slot, type) {
   const saved = state.settings.magnet.switchType[slot];
   setPending(slot, 'switchType', fittedSwitch(saved) === type ? saved : type);
@@ -2721,7 +2722,7 @@ function openReview() {
   if (!editable() || !hasAnyPending()) return;
   const edits = pendingEdits();
   $('reviewBody').innerHTML = `
-    <p>These settings will be written to the keyboard (profile ${(state.settings.profile ?? 0) + 1}). Nothing else changes.</p>
+    <p>These settings will be written to the keyboard (profile ${(state.settings.profile ?? 0) + 1}). Nothing else changes.${edits.some(e => e.switchType !== undefined) ? ' Switch types are shared by all profiles.' : ''}</p>
     <div class="table-wrap"><table class="changes"><thead><tr><th>Key</th><th>Setting</th><th>Now</th><th>New</th></tr></thead>
     <tbody>${changeRows(edits, (slot, f) => state.settings.magnet[f][slot])}${kbRows(kbChanges())}${kmRows(keymapChanges())}${macroWriteRows(macroWrites())}${patternRows(patternChanges())}${lightRows(lightChange())}</tbody></table></div>
     ${macroWrites().length ? '<p class="hint-warn">This keyboard can’t give macro steps back, so they can’t be confirmed after writing. Press the key afterwards to check it.</p>' : ''}

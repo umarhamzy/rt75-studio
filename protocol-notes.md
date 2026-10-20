@@ -787,13 +787,14 @@ pick its type. Nothing about calibration is sent or suggested with it.
   packet, and reads param 252 back. Validator: one byte, one of the seven values (0xFF is never
   written).
 - **Undo** writes an unset key back as Outemu (0), what qmk.top reads 0xFF as.
-- **Per profile?** Unknown. It is read and written like the other magnet params, which are per
-  profile. To check on the real keyboard: set one key in Profile 1, switch to Profile 2, see whether
-  it changed, then set it back.
+- **Shared by all profiles (tested by the user, 2026-10-20):** unlike the other magnet params, param
+  252 is one table for the whole keyboard: a key set in one profile shows the same switch in the
+  others. The demo keyboard shares it the same way.
 - **What the firmware does with it** isn't documented; presumably it picks the travel curve for that
   switch's magnet. Changing it on unswapped keys may make their travel read wrong until set back.
 - **UI:** Keys › Switches (design SW1, canvas Round 20).
-- **Status:** tested against the simulated keyboard and in `?demo` only (2026-10-20).
+- **Verified on the real keyboard (2026-10-20):** written from RT75 Studio and shown in qmk.top's
+  Switch Settings, and set in qmk.top and shown in RT75 Studio ("changes reflected both ways").
 
 ## Gamepad mode (not supported, 2026-10-17)
 
