@@ -652,6 +652,33 @@ changes mode by holding the knob down.
   matched qmk.top's Custom Keys and Fn Layer pages. The user's Fn layer has a qmk.top macro on
   Fn+F (`9,0,0,0` → Macro 1).
 
+### Mouse actions (feature/mouse-keys)
+
+- **Encoding:** `[1, 0, code, x]`. qmk.top's key-map store builds `ConfigMouse` from its shared `On`
+  table (`configToMatrix`) and writes it with `setKeyConfigSimple`, like any other remap.
+- **What's offered:** qmk.top's mouse-function list (`qle`, labels `K2`) has seven entries, and RT75
+  Studio offers exactly those:
+
+  | Action | Bytes |
+  |---|---|
+  | Left click | `1,0,240,0` |
+  | Right click | `1,0,241,0` |
+  | Middle click (鼠标滚轮点击) | `1,0,242,0` |
+  | Mouse back | `1,0,243,0` |
+  | Mouse forward | `1,0,244,0` |
+  | Scroll up (鼠标滚轮向上, `SCROLLUP`) | `1,0,245,1` |
+  | Scroll down (`SCROLLDOWN`) | `1,0,245,255` |
+
+  `On` also has wheel bytes for qmk.top's mice (`245/246/247/248` with step 0 or ±5); those still
+  decode as "Wheel" but aren't writable.
+- **Where it's searched:** the only downloaded chunk importing `qle` is qmk.top's mouse-product page
+  (`3317118e.js`); the RT75 key-map picker's own screen wasn't found in the downloaded code, so the
+  seven are inferred from qmk.top's shared list, not seen in its RT75 UI.
+- **Layers:** base and Fn layers only. Mod-tap and DKS sub-layers stay keys only (`isModTapKeys`).
+- **UI:** design MK2 (canvas Round 21), a Mouse menu between Macro and Function in the Key map editor.
+- **Status:** tested against the simulated keyboard and in `?demo` (write, read-back, Undo); not yet
+  on the real keyboard.
+
 ## Mod-tap (feature/mod-tap)
 
 qmk.top's "Hold / tap (MT)" advanced key (按住单击). On a magnetic keyboard it's a **key mode**, not

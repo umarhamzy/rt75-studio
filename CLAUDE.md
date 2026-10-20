@@ -193,7 +193,13 @@ read back, Undo restores unset keys as Outemu (protocol-notes.md, "Switch type")
 switch types (the Presets button is hidden there). **Switch types are shared by all profiles**
 (tested), unlike the other magnet settings; the legend and review dialog say so, and the demo shares them.
 
-**Next:** the user's choice; mouse actions in the key map was offered.
+**Mouse actions (feature/mouse-keys, not merged; demo-tested only):** Key map editor › **Mouse** (design MK2,
+canvas Round 21): qmk.top's seven mouse actions (left, right, middle click, back, forward, scroll up,
+scroll down; `MOUSE_ACTIONS` in actions.js) on base and Fn layers, never on mod-tap/DKS sub-layers
+(protocol-notes.md, "Mouse actions"). To verify on the real keyboard: put Left click and Scroll down on
+spare keys, check qmk.top shows them, try them, then Restore factory.
+
+**Next:** the user's choice.
 Knob remapping isn't wanted.
 
 **Branches:** `feature/macros` holds the abandoned read-back approach and the full investigation

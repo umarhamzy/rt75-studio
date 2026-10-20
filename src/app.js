@@ -1,5 +1,5 @@
 import { KEYS, DEFAULT_MATRIX, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX, LAYOUT_WIDTH, LAYOUT_HEIGHT, DEVICE_ID } from './layout.js';
-import { decodeAction, encodeKey, encodeModTap, splitKey, FUNCTIONS, RISKY, KEY_CHOICES, CODE_TO_HID, MODIFIERS, keyName, DISABLED, HID_NAMES } from './actions.js';
+import { decodeAction, encodeKey, encodeModTap, splitKey, FUNCTIONS, MOUSE_ACTIONS, RISKY, KEY_CHOICES, CODE_TO_HID, MODIFIERS, keyName, DISABLED, HID_NAMES } from './actions.js';
 import {
   isSupported, requestKeyboard, findGrantedKeyboard, readSettings, readKeymaps, settingsFromDump, setDongleTiming,
   writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, writeSleepTimes,
@@ -2212,6 +2212,7 @@ function keyEditorHtml(layer, slot) {
   const modNames = mac ? { 224: 'Ctrl', 225: 'Shift', 226: 'Opt', 227: 'Cmd' } : { 224: 'Ctrl', 225: 'Shift', 226: 'Alt', 227: 'Win' };
   const groups = [...new Set(FUNCTIONS.map(f => f[0]))];
   const fnValue = a.kind === 'function' ? cur.join(',') : '';
+  const mouseValue = a.kind === 'mouse' && a.editable ? cur.join(',') : '';
   // Only actions RT75 Studio can't write back (other mouse wheel steps, qmk.top's old mod-tap action).
   const was = decodeAction(deviceBytes(layer, slot), { mac });
   const overwriting = ['mouse', 'modtap'].includes(was.kind) && !was.editable;
@@ -2232,6 +2233,11 @@ function keyEditorHtml(layer, slot) {
         <span class="muted km-mods-hint">up to 2</span>
       </div>
       ${macroEditorHtml(cur)}
+      <span class="km-edit-label">Mouse</span>
+      <select id="kmMouseSelect" aria-label="Choose a mouse action">
+        <option value="">${mouseValue ? a.label : 'Choose a mouse action…'}</option>
+        ${MOUSE_ACTIONS.map(([name, , b]) => `<option value="${b.join(',')}" ${b.join(',') === mouseValue ? 'selected' : ''}>${name}</option>`).join('')}
+      </select>
       <span class="km-edit-label">Function</span>
       <select id="kmFnSelect" aria-label="Choose a function">
         <option value="">${a.kind === 'function' ? a.label : 'Choose a function…'}</option>
@@ -2265,6 +2271,7 @@ function wireKeyEditor(layer, slot) {
     if (RISKY.has(f[1]) && !confirm(`"${f[1]}" can be disruptive if pressed by accident. Assign it anyway?`)) { refresh(); return; }
     set(f[2]);
   };
+  $('kmMouseSelect').onchange = e => { if (e.target.value) set(e.target.value.split(',').map(Number)); };
   $('kmMacroSelect').onchange = e => {
     const v = e.target.value, mode = cur()[0] === 9 ? cur()[1] : 0;
     if (v === 'new') { openMacroEditor(null, { then: entry => assignLibraryMacro(layer, slot, entry, mode) }); return; }
