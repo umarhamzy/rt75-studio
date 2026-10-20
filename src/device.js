@@ -48,14 +48,18 @@ export const WRITABLE = {
   mtTime: 5,
   dksTravel: 4,   // DKS trigger point (qmk.top's 触发行程 / dynamicTravel)
   dksTriggers: 8, // DKS trigger table: four bytes per key (read back as param 10)
+  switchType: 252, // which switch is fitted (qmk.top's 轴体 / Switch Settings)
 };
+// Switch-type bytes the RT75 Pro offers (qmk.top/v4's enum, its supportedSwitchTypes), in qmk.top's
+// order. qmk.top shows any other value (the keyboard reports 0xFF on keys never set) as Outemu, 0.
+export const SWITCH_TYPES = [0, 1, 2, 3, 4, 5, 46];
 // One byte per key; the rest are uint16 LE.
-const NARROW_PARAMS = new Set([WRITABLE.mode, WRITABLE.topDeadZone, WRITABLE.snapPartner, WRITABLE.mtTime]);
+const NARROW_PARAMS = new Set([WRITABLE.mode, WRITABLE.topDeadZone, WRITABLE.snapPartner, WRITABLE.mtTime, WRITABLE.switchType]);
 // Four bytes per key (kept as one packed number, byte 0 lowest): the DKS trigger table.
 const QUAD_PARAMS = new Set([WRITABLE.dksTriggers]);
-// Order qmk.top/v4 uses within one key: mode first, then 0, 1, 6, 2, 3, 4, 8, 5, 251
-// (setMagnetismInfoSimple); Snap partners (9) are sent last (setMultiMagnetismInfo).
-const WRITE_ORDER = ['mode', 'actuation', 'release', 'bottomDeadZone', 'rtPress', 'rtRelease', 'dksTravel', 'dksTriggers', 'mtTime', 'topDeadZone', 'snapPartner'];
+// Order qmk.top/v4 uses within one key: mode first, then 0, 1, 6, 2, 3, 4, 8, 5, 251, then the
+// switch type 252 (setMagnetismInfoSimple); Snap partners (9) are sent last (setMultiMagnetismInfo).
+const WRITE_ORDER = ['mode', 'actuation', 'release', 'bottomDeadZone', 'rtPress', 'rtRelease', 'dksTravel', 'dksTriggers', 'mtTime', 'topDeadZone', 'switchType', 'snapPartner'];
 
 // Setting ranges in mm, from qmk.top/v4 for this device: actuation/release 0.1 to 3.3,
 // Rapid Trigger sensitivity one step (0.005) to 2.0, top and bottom dead zone 0 to 1.
@@ -493,6 +497,9 @@ function assertAllowedWrite(p, bounds) {
       break;
     case WRITABLE.dksTravel:
       range(bounds.dksMin, bounds.dksMax);
+      break;
+    case WRITABLE.switchType:
+      if (!SWITCH_TYPES.includes(v)) fail(`switch type ${v} is not one the RT75 Pro offers`);
       break;
     case WRITABLE.dksTriggers:
       for (let i = 0; i < 4; i++) if (!isDksAction((v >>> (i * 8)) & 0xff)) fail(`DKS action ${i + 1} has a trigger pattern qmk.top can't make`);

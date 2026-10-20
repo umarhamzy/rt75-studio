@@ -127,5 +127,28 @@ check('retry resends only the dropped value, with the save flag', retryPkts.leng
 const res6 = await writeKeySettings(makeDevice({ ignoreSlot: 14 }), settings, [{ slot: 14, actuation: 100 }]);
 check('persistent failure still reported after retry', res6.mismatches.length === 1 && res6.retried === 1);
 
+
+// 8. Switch type (param 252): one byte after the key's other settings, before Snap partners
+const pk3 = buildWritePackets([
+  { slot: 20, mode: 0x07, topDeadZone: 40, switchType: 46, snapPartner: 26 },
+  { slot: 26, switchType: 1 },
+], b);
+console.log(pk3.map(p => `${p.field.padEnd(14)} ${hex(p.pkt)}`).join('\n'));
+check('order: mode, top dz, switch type, partner', pk3.slice(0, 4).map(p => p.field).join() === 'mode,topDeadZone,switchType,snapPartner');
+check('switch type packet is [65 fc 00 slot …] with one byte', pk3[2].pkt[1] === 0xfc && pk3[2].pkt[2] === 0 && pk3[2].pkt[3] === 20 && pk3[2].pkt[8] === 46 && pk3[2].pkt[9] === 0);
+check('save flag only on the final packet (switch batch)', pk3.map(p => p.pkt[4]).join('') === '00001');
+for (const v of [0, 1, 2, 3, 4, 5, 46]) check(`allows switch type ${v}`, (() => { try { buildWritePackets([{ slot: 14, switchType: v }], b); return true; } catch { return false; } })());
+blocked('blocks switch type 6 (not on the RT75 Pro)', [{ slot: 14, switchType: 6 }]);
+blocked('blocks switch type 0xFF (qmk.top never writes it)', [{ slot: 14, switchType: 255 }]);
+blocked('blocks switch type on the knob', [{ slot: 91, switchType: 1 }]);
+
+const dev7 = makeDevice();
+const res7 = await writeKeySettings(dev7, settings, [{ slot: 14, switchType: 2 }, { slot: 15, switchType: 2 }]);
+check('switch types stored on the simulated keyboard', dev7.store.switchType[14] === 2 && dev7.store.switchType[15] === 2 && dev7.store.switchType[16] === dump.magnet.switchType[16]);
+check('switch types read back without mismatches', res7.mismatches.length === 0 && Object.keys(res7.magnet).join() === 'switchType');
+check('only switch-type writes sent', dev7.log.filter(p => p[0] === 0x65).every(p => p[1] === 0xfc));
+const res8 = await writeKeySettings(makeDevice({ ignoreSlot: 14 }), settings, [{ slot: 14, switchType: 3 }]);
+check('detects a switch type the keyboard ignored', res8.mismatches.length === 1 && res8.mismatches[0].field === 'switchType' && res8.mismatches[0].actual === 255);
+
 console.log(failures ? `\n${failures} FAILED` : '\nall passed');
 process.exitCode = failures ? 1 : 0;
