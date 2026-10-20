@@ -250,7 +250,7 @@ button, input, select { font: inherit; color: inherit; }
 .key.heat.is-selected { --key-border: var(--accent); }
 .key.heat .key-value { color: color-mix(in oklab, var(--accent) calc(var(--heat-t, 0) * 100%), var(--muted)); }
 .key-bar { position: absolute; right: 6px; top: 16%; bottom: 16%; width: 2px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
-.key-bar span { display: block; width: 100%; background: color-mix(in oklab, var(--accent) calc(var(--heat-t, 0) * 100%), #5a5f69); }
+.key-bar span { display: block; width: 100%; background: var(--accent); } /* solid at any travel; the number carries the shading */
 .key-bar.key-bar-rel { right: 3px; }
 .key-bar.key-bar-rel span { background: var(--rt); opacity: 0.85; }
 .key.heat .key-marks { right: 10px; }
