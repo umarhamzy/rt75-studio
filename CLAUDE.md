@@ -169,7 +169,7 @@ Display (was Keyboard settings › Display until feature/themes): Help texts (hi
 text should get the `help` class; warnings and status messages shouldn't. Also: the grey "remapped"
 dot compares a key-mode key's tap action (mod-tap's tap key, not its hold key) with the factory key.
 
-**Themes (feature/themes, demo-tested):** a Studio › **Appearance** page with the theme gallery
+**Themes (merged 2026-10-20; UI only, checked by the user in the app):** a Studio › **Appearance** page with the theme gallery
 (design TP1, canvas Round 19; themes from Round 18): dark Amber (default), Frost, High contrast,
 Ember, Moss; light Paper, Porcelain, Mint, Retro. Each card's preview is drawn in its own theme
 (`data-theme` on the preview scopes the tokens). The sidebar's moon/sun button (design TP4) flips
