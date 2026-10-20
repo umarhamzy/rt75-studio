@@ -90,7 +90,7 @@ touching device code.
   http://127.0.0.1:5180/?demo.
 - Demo presets use their own storage key (`rt75-studio-presets-demo-2865`).
 
-## Status (2026-10-18)
+## Status (2026-10-20)
 
 **Verified on the real keyboard:**
 - reads and decoding
@@ -185,7 +185,7 @@ the theme's text colour.
 - themes.css was generated from token tables with a contrast check (text and key labels ≥ 4.5:1);
   edit it by hand now, keeping that bar. The lighting view's LED preview is approximate on every theme.
 
-**Switch type (feature/switch-type, not merged; verified on the real keyboard 2026-10-20, both ways with qmk.top):** Keys › **Switches** (design SW1,
+**Switch type (merged 2026-10-20; verified on the real keyboard, both ways with qmk.top):** Keys › **Switches** (design SW1,
 canvas Round 20): each key shows qmk.top's switch number (1–7) in qmk.top's colour (`--sw-1…7`,
 the same in every theme); select keys and pick one of the RT75 Pro's seven types in the side panel.
 Written per key as param 252 after the key's other settings (validator: one of 0, 1, 2, 3, 4, 5, 46),
