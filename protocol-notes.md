@@ -676,8 +676,8 @@ changes mode by holding the knob down.
   seven are inferred from qmk.top's shared list, not seen in its RT75 UI.
 - **Layers:** base and Fn layers only. Mod-tap and DKS sub-layers stay keys only (`isModTapKeys`).
 - **UI:** design MK2 (canvas Round 21), a Mouse menu between Macro and Function in the Key map editor.
-- **Status:** tested against the simulated keyboard and in `?demo` (write, read-back, Undo); not yet
-  on the real keyboard.
+- **Verified on the real keyboard (2026-10-21):** the user reported it works (mouse actions written
+  from RT75 Studio, checked against qmk.top, used, then restored).
 
 ## Mod-tap (feature/mod-tap)
 
