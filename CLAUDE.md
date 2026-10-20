@@ -153,7 +153,7 @@ fills, paint/pick, colours from a picture (choose/drop/paste), designs saved in 
 built-in Sunset (`src/patterns.js`). Writing also queues the effect switch to Custom · that pattern.
 qmk.top's "IoT" desktop helper isn't needed (protocol-notes.md, "Custom lighting").
 
-**DKS (merged; verified on the real keyboard 2026-10-18):** trigger point (param 4), trigger
+**DKS (merged; verified on the real keyboard 2026-10-18, wired and 2.4G):** trigger point (param 4), trigger
 table (param 8, read back as param 10 over 8 pages), four key-matrix sub-layers, validators and tests;
 decoded from qmk.top's editor chunk (protocol-notes.md, "DKS"). Editor: design **X1** (canvas Round 14):
 with one DKS key selected, its four actions replace the summary tiles under the keyboard (key picker
