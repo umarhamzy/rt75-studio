@@ -90,7 +90,7 @@ touching device code.
   http://127.0.0.1:5180/?demo.
 - Demo presets use their own storage key (`rt75-studio-presets-demo-2865`).
 
-## Status (2026-10-20)
+## Status (2026-10-21)
 
 **Verified on the real keyboard:**
 - reads and decoding
@@ -193,7 +193,7 @@ read back, Undo restores unset keys as Outemu (protocol-notes.md, "Switch type")
 switch types (the Presets button is hidden there). **Switch types are shared by all profiles**
 (tested), unlike the other magnet settings; the legend and review dialog say so, and the demo shares them.
 
-**Mouse actions (feature/mouse-keys, not merged; verified on the real keyboard 2026-10-21):** Key map editor › **Mouse** (design MK2,
+**Mouse actions (merged 2026-10-21; verified on the real keyboard):** Key map editor › **Mouse** (design MK2,
 canvas Round 21): qmk.top's seven mouse actions (left, right, middle click, back, forward, scroll up,
 scroll down; `MOUSE_ACTIONS` in actions.js) on base and Fn layers, never on mod-tap/DKS sub-layers
 (protocol-notes.md, "Mouse actions").
