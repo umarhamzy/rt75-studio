@@ -233,6 +233,12 @@ scroll down; `MOUSE_ACTIONS` in actions.js) on base and Fn layers, never on mod-
 sliders (and the small mm sliders: RT sensitivity, dead zones, DKS trigger point) moves in 0.05 mm
 steps; Shift+drag moves in their fine steps. Arrow keys and typed values are unchanged; no help text.
 
+**Keyboard shortcuts (feature/shortcuts, not merged; demo-tested):** Ctrl+Z undoes the newest History
+entry the keyboard still matches (repeat to step back), Ctrl+Y / Ctrl+Shift+Z redoes the latest Undo,
+Ctrl+Enter opens Review, Ctrl+A selects every key (`onShortcut`). Ignored while typing in a field, in a
+dialog, during the live test, key capture or macro recording; waits for a running write. Named in the
+History and Review button tooltips.
+
 **Next:** the user's choice.
 Knob remapping isn't wanted.
 

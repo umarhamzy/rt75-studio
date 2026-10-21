@@ -731,7 +731,7 @@ function renderReviewButton() {
   $('reviewCount').hidden = !n;
   $('reviewCount').textContent = n;
   btn.setAttribute('aria-label', n ? `Review ${n} unsaved change${n === 1 ? '' : 's'}` : 'No unsaved changes');
-  btn.title = n && !editable() ? (state.busy ? 'Writing…' : 'Connect the keyboard to write these changes.') : '';
+  btn.title = n && !editable() ? (state.busy ? 'Writing…' : 'Connect the keyboard to write these changes.') : 'Review changes (Ctrl+Enter)';
 }
 
 // ---------- Inspector ----------
@@ -4094,6 +4094,46 @@ $('selectPreset').onchange = e => {
   refresh();
 };
 $('btnClearSel').onclick = () => { state.selected.clear(); refresh(); };
+
+// ---------- Keyboard shortcuts ----------
+// Ctrl+Z undoes the newest change the keyboard still has (again for the one before), Ctrl+Y or
+// Ctrl+Shift+Z redoes the latest Undo, Ctrl+Enter opens Review, Ctrl+A selects every key. They stay
+// out of the way while typing in a field, in a dialog, during the live test, key capture or macro
+// recording (those handlers see keys first).
+const isRedoEntry = h => h.source === 'undo' && !h.redo; // reversing it puts a change back
+// A shortcut pressed while a write is still running (Ctrl+Z then straight away Ctrl+Y) waits for it.
+const whenIdle = async () => { for (let i = 0; i < 150 && (state.saving || state.busy); i++) await new Promise(r => setTimeout(r, 100)); };
+async function historyShortcut(redo) {
+  if (state.saving || state.busy) await whenIdle();
+  const h = [...state.history].reverse().find(x => isRedoEntry(x) === redo && !historyUndoBlocked(x));
+  if (h) { undoHistoryEntry(h.id); return; }
+  // Nothing available: say why, using the newest entry that would otherwise qualify.
+  const near = [...state.history].reverse().find(x => isRedoEntry(x) === redo);
+  const why = near ? historyUndoBlocked(near) : '';
+  showNotice(redo ? `Nothing to redo${why && !/changed since|no longer/.test(why) ? `: ${why}` : '.'}`
+    : `Nothing to undo${why && !/changed since|no longer/.test(why) ? `: ${why}` : '.'}`);
+}
+
+function onShortcut(e) {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.repeat || !state.settings) return;
+  if (state.live || state.capture || state.recording || document.querySelector('dialog[open]')) return;
+  if (e.target.closest?.('input:not([type=range]):not([type=checkbox]), textarea, select, [contenteditable="true"]')) return;
+  const k = e.key.toLowerCase();
+  if (k === 'z' || k === 'y') {
+    e.preventDefault();
+    historyShortcut(k === 'y' || e.shiftKey);
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (hasAnyPending()) openReview();
+  } else if (k === 'a' && !NO_SELECT_VIEWS.has(state.view)) {
+    e.preventDefault();
+    state.knob = false;
+    state.picking = null;
+    state.selected = new Set(MAGNETIC.map(key => key.slot));
+    refresh();
+  }
+}
+document.addEventListener('keydown', onShortcut);
 $('btnDiscard').onclick = () => {
   if (state.busy) return;
   state.pending.clear(); state.pendingKb = {}; state.pendingKeys.clear(); state.pendingLight = null; state.pendingMacroWrites.clear(); state.capture = null;

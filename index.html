@@ -81,9 +81,9 @@
         <span class="save-status" id="saveStatus" role="status" hidden></span>
         <button class="btn" id="btnOpen" type="button">Open dump…</button>
         <button class="btn" id="btnConnect" type="button">Connect keyboard</button>
-        <button class="btn btn-history" id="btnHistory" type="button" aria-expanded="false" aria-controls="historyDrawer" aria-label="History" title="History">
+        <button class="btn btn-history" id="btnHistory" type="button" aria-expanded="false" aria-controls="historyDrawer" aria-label="History" title="History (Ctrl+Z undoes the latest change, Ctrl+Y redoes)">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg></button>
-        <button class="btn btn-review" id="btnReview" type="button" disabled><span id="reviewLabel">No changes</span><span class="review-count" id="reviewCount" hidden></span></button>
+        <button class="btn btn-review" id="btnReview" type="button" title="Review changes (Ctrl+Enter)" disabled><span id="reviewLabel">No changes</span><span class="review-count" id="reviewCount" hidden></span></button>
         <input type="file" id="fileInput" accept="application/json,.json" hidden>
       </div>
     </header>
