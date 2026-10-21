@@ -831,6 +831,8 @@ same read-back; only the review dialog is skipped (CLAUDE.md, rule 3).
 
 - **Verified on the real keyboard (2026-10-21):** the user reported it works: Instant save writing a
   slider change after release (checked in qmk.top), Undo from History, and History surviving a reload.
+  Re-checked after the restore-point and mid-save fixes (Undo/Redo by keyboard state, edits made
+  during a write kept): the user reported History works (2026-10-21).
 
 ## Gamepad mode (not supported, 2026-10-17)
 

@@ -202,7 +202,7 @@ canvas Round 21): qmk.top's seven mouse actions (left, right, middle click, back
 scroll down; `MOUSE_ACTIONS` in actions.js) on base and Fn layers, never on mod-tap/DKS sub-layers
 (protocol-notes.md, "Mouse actions").
 
-**History and Instant save (feature/history, not merged; verified on the real keyboard 2026-10-21):** design HS1 drawer + HS3 switch
+**History and Instant save (merged 2026-10-21; verified on the real keyboard):** design HS1 drawer + HS3 switch
 (canvas Round 22).
 - **History** (clock button in the header) lists every write (Review, Instant or Undo), newest first by day,
   with filters (Key settings, Key map, Lighting, Keyboard), the rows as the review dialog words them,
