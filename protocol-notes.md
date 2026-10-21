@@ -823,6 +823,15 @@ pick its type. Nothing about calibration is sent or suggested with it.
 - **Verified on the real keyboard (2026-10-20):** written from RT75 Studio and shown in qmk.top's
   Switch Settings, and set in qmk.top and shown in RT75 Studio ("changes reflected both ways").
 
+## History and Instant save (feature/history)
+
+App-level only: no new commands. Instant save and Undo from History send the same validated packets
+as Review changes (`applyEdits` → `writeKeySettings`, `writeKeymap`, `writeLighting`, …), with the
+same read-back; only the review dialog is skipped (CLAUDE.md, rule 3).
+
+- **Verified on the real keyboard (2026-10-21):** the user reported it works: Instant save writing a
+  slider change after release (checked in qmk.top), Undo from History, and History surviving a reload.
+
 ## Gamepad mode (not supported, 2026-10-17)
 
 The user asked for a Wootility / Keychron style gamepad (key depth as analog controller input).
