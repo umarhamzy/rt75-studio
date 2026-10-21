@@ -44,7 +44,9 @@ export function summarize(rows) {
   if (rows.every(r => r[1] === setting && r[2] === before && r[3] === after)) return `${setting}: ${before} → ${after}`;
   const what = [...new Set(rows.map(r => r[0]))];
   if (what.length === 1) {
-    const parts = rows.slice(0, 3).map((r, i) => `${i ? r[1].charAt(0).toLowerCase() + r[1].slice(1) : r[1]} ${r[2]} → ${r[3]}`);
+    // Lower-case "Release point" after the first, but not "DKS trigger point".
+    const lower = t => (/^[A-Z][a-z]/.test(t) ? t.charAt(0).toLowerCase() + t.slice(1) : t);
+    const parts = rows.slice(0, 3).map((r, i) => `${i ? lower(r[1]) : r[1]} ${r[2]} → ${r[3]}`);
     return parts.join(', ') + (rows.length > 3 ? ` +${rows.length - 3} more` : '');
   }
   const one = r => `${AREA_ROWS.has(r[0]) ? '' : `${r[0]} `}${r[1]}: ${r[2]} → ${r[3]}`;

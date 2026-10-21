@@ -220,7 +220,10 @@ scroll down; `MOUSE_ACTIONS` in actions.js) on base and Fn layers, never on mod-
 - **Instant save** (header switch, off by default, `rt75-studio-save`): pending changes are written
   about 1 s after the last edit (not while a slider is held or a dialog is open), via
   `applyEdits(..., { quiet: true })`, which keeps the page editable and only clears pending values that
-  match what was written. A failed write waits for the next edit or Retry. The header chip shows
+  match what was written. While it writes, the page takes the values being written as the keyboard's
+  (`showAsWritten`), so edits made meanwhile (a key switched to DKS and straight back) are compared with
+  those and saved next; a failed write rolls them back and re-queues them. A failed write waits for the
+  next edit or Retry (`instantSig` ignores order). The header chip shows
   Saving… / Saved · Undo / didn't stick. The Read-only badge now shows only when nothing can be written.
 
 **Next:** the user's choice.

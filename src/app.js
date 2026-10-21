@@ -2776,6 +2776,11 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
   // The rows History shows, as the review dialog words them, worked out before anything changes.
   const rowsHtml = changeRows(edits, (slot, f) => state.settings.magnet[f][slot]) + kbRows(kb) + kmRows(keys) + macroWriteRows(macros) + patternRows(patterns) + lightRows(light);
   const profile = state.settings.profile ?? 0;
+  // Instant save leaves the page editable while it writes, so the page takes the values being
+  // written as the keyboard's straight away: edits made meanwhile are compared with those (switching
+  // a key to DKS and straight back to Normal is then a change, not a no-op), and key modes work out
+  // their layers from them. A failed write puts everything back (rollback).
+  const rollback = quiet ? showAsWritten({ edits, kb, keys, light, patterns }) : null;
   if (backup) downloadBackup();
   if (quiet) state.saving = true; else state.busy = true;
   refresh();
@@ -2895,7 +2900,7 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
   } catch (e) {
     status.className = 'review-status is-error';
     status.textContent = 'Write failed: ' + e.message + ' Your pending changes are kept. Refresh to see what the keyboard has now.';
-    if (quiet) { state.saveStatus = { kind: 'error', text: 'Couldn’t save' }; showError(status.textContent); }
+    if (quiet) { rollback(); state.saveStatus = { kind: 'error', text: 'Couldn’t save' }; showError(status.textContent); }
     else $('btnApply').disabled = false;
     return false;
   } finally {
@@ -2903,6 +2908,67 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
     if (!quiet) $('btnCancel').disabled = false;
     refresh();
   }
+}
+
+// Takes a write's values as the keyboard's (Instant save) and clears them from pending. Returns a
+// function that restores the old values and queues the write's values again, unless an edit made
+// since replaced them. Values read back after the write overwrite these either way.
+function showAsWritten({ edits, kb, keys, light, patterns }) {
+  const s = state.settings, undo = [];
+  for (const e of edits) {
+    for (const [f, v] of Object.entries(e)) {
+      if (f === 'slot' || !s.magnet[f]) continue;
+      const arr = s.magnet[f], old = arr[e.slot];
+      arr[e.slot] = v;
+      undo.push(() => {
+        if (arr[e.slot] === v) arr[e.slot] = old;
+        if (state.pending.get(e.slot)?.[f] === undefined) setPending(e.slot, f, v);
+      });
+    }
+    // Drop what's now the keyboard's value, and a key's leftovers that could never be sent.
+    const left = { ...(state.pending.get(e.slot) ?? {}) };
+    for (const f of Object.keys(e)) if (f !== 'slot' && left[f] === e[f]) delete left[f];
+    if (Object.keys(sendable({ slot: e.slot, ...left }, x => left.mode ?? s.magnet.mode[x])).length > 1) state.pending.set(e.slot, left);
+    else state.pending.delete(e.slot);
+  }
+  for (const c of keys) {
+    const arr = s[LAYERS[c.layer].field], id = `${c.layer}:${c.slot}`;
+    if (!arr) continue;
+    const old = arr.slice(c.slot * 4, c.slot * 4 + 4);
+    arr.splice(c.slot * 4, 4, ...c.to);
+    if (state.pendingKeys.get(id)?.join() === c.to.join()) state.pendingKeys.delete(id);
+    undo.push(() => {
+      if (arr.slice(c.slot * 4, c.slot * 4 + 4).join() === c.to.join()) arr.splice(c.slot * 4, 4, ...old);
+      if (!state.pendingKeys.has(id)) setKeyPending(c.layer, c.slot, c.to);
+    });
+  }
+  for (const c of kb) {
+    const sleepField = KB_FIELDS[c.field].sleep;
+    const set = v => { if (sleepField) s.sleep = { ...s.sleep, [c.field]: v }; else s[c.field] = v; };
+    set(c.to);
+    if (state.pendingKb[c.field] === c.to) delete state.pendingKb[c.field];
+    undo.push(() => {
+      if (KB_FIELDS[c.field].current(s) === c.to) set(c.from);
+      if (state.pendingKb[c.field] === undefined) state.pendingKb[c.field] = c.to;
+    });
+  }
+  if (light) {
+    s.lighting = light.to;
+    if (state.pendingLight && !lightingDiff(state.pendingLight, light.to).length) state.pendingLight = null;
+    undo.push(() => {
+      if (s.lighting === light.to) s.lighting = light.from;
+      if (!state.pendingLight) state.pendingLight = light.to;
+    });
+  }
+  for (const c of patterns) {
+    state.pt.saved[c.layer] = c.to;
+    if (state.pt.edits[c.layer] && keysChanged(state.pt.edits[c.layer], c.to) === 0) delete state.pt.edits[c.layer];
+    undo.push(() => {
+      if (state.pt.saved[c.layer] === c.to) state.pt.saved[c.layer] = c.from;
+      if (!state.pt.edits[c.layer]) state.pt.edits[c.layer] = c.to;
+    });
+  }
+  return () => { undo.reverse().forEach(f => f()); };
 }
 
 // ---------- History ----------
@@ -2918,7 +2984,9 @@ function rowsFromHtml(html) {
 function recordHistory({ source, undoOf, rowsHtml, undoPayload, result, profile, edits, kb, keys, light, macros, patterns }) {
   const s = state.settings;
   const areas = [edits.length && 'keys', (keys.length || macros.length) && 'keymap', (light || patterns.length) && 'lighting', kb.length && 'keyboard'].filter(Boolean);
-  const rows = rowsFromHtml(rowsHtml);
+  // Rows whose before and after read the same (a key's action moved between layouts, say) say nothing.
+  const allRows = rowsFromHtml(rowsHtml), changedRows = allRows.filter(r => r[2] !== r[3]);
+  const rows = changedRows.length ? changedRows : allRows;
   // Undoing an Undo entry is a redo: it puts back the change that Undo reversed.
   const orig = undoOf ? state.history.find(h => h.id === undoOf) : null;
   const redo = orig?.source === 'undo';
@@ -3120,7 +3188,12 @@ function instantChanges() {
   };
 }
 const instantEmpty = c => !c.edits.length && !c.kb.length && !c.keys.length && !c.light && !c.patterns.length;
-const instantSig = c => JSON.stringify([c.edits, c.kb.map(x => [x.field, x.to]), c.keys.map(x => [x.layer, x.slot, x.to]), c.light?.to ?? null, c.patterns.map(x => [x.layer, x.to])]);
+// The same changes give the same signature whatever order they were made in (a failed write's
+// rollback re-adds them in another order), so a failure isn't retried until something changes.
+const instantSig = c => JSON.stringify([
+  [...c.edits].sort((a, b) => a.slot - b.slot).map(e => Object.keys(e).sort().map(k => [k, e[k]])),
+  c.kb.map(x => [x.field, x.to]).sort(), c.keys.map(x => [x.layer, x.slot, x.to]).sort(), c.light?.to ?? null, c.patterns.map(x => [x.layer, x.to]).sort(),
+]);
 
 const INSTANT_DELAY = 1000;
 let instantTimer = null, instantRun = null, instantFailedSig = null, pointerHeld = false;

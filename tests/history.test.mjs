@@ -10,6 +10,8 @@ check('title names the keys', titleFor(wasd, ['keys']) === 'W, A, S, D · Actuat
 const q = [['Q', 'Actuation point', '1.30 mm', '1.00 mm'], ['Q', 'Release point', '1.30 mm', '1.00 mm']];
 check('one key, two settings', summarize(q) === 'Actuation point 1.30 mm → 1.00 mm, release point 1.30 mm → 1.00 mm', summarize(q));
 check('title: key and two settings', titleFor(q, ['keys']) === 'Q · Actuation point and Release point', titleFor(q, ['keys']));
+const dks = [['W', 'Key mode', 'Normal', 'DKS'], ['W', 'DKS trigger point', '0.00 mm', '0.70 mm']];
+check('acronyms keep their capitals', summarize(dks) === 'Key mode Normal → DKS, DKS trigger point 0.00 mm → 0.70 mm', summarize(dks));
 const remap = [['F2', 'Base', 'F2', 'Left click']];
 check('one remap', summarize(remap) === 'Base: F2 → Left click' && titleFor(remap, ['keymap']) === 'F2 · Key map', `${titleFor(remap, ['keymap'])} | ${summarize(remap)}`);
 const mixed = [['E', 'Base', 'E', 'Left click'], ['Keyboard', 'Polling rate', '1 kHz', '8 kHz'], ['F', 'Base', 'F', 'Mute']];
