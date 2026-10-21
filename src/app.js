@@ -858,8 +858,9 @@ function slider(id, label, value, min, max, badge = '') {
 }
 
 // Keychron-style vertical slider: 0 mm (key up) at the top, the deepest setting at the bottom, so
-// moving the handle down is like pressing the key further. Drag it, use the arrow keys (Shift for
-// 0.1 mm steps), or type in the bubble. Dead zones are hatched at the ends.
+// moving the handle down is like pressing the key further. Drag it (0.05 mm steps; Shift for
+// 0.01 mm), use the arrow keys (Shift for 0.1 mm steps), or type in the bubble. Dead zones are
+// hatched at the ends.
 const travelPct = v => `${((Math.min(Math.max(v, 0), MAX_TRAVEL_MM) / MAX_TRAVEL_MM) * 100).toFixed(2)}%`;
 // effective: also mark where the key really triggers. The RT75 adds the top dead zone to the
 // actuation point (tested 2026-10-18), so the marker follows the handle at +dzTop while dragging.
@@ -927,8 +928,7 @@ function editorHtml(datas) {
       ${travelSlider('act', linked ? 'Press & release' : 'Press (actuation)', act, T.min, deepest([...state.selected]), { ...dz, effective: true })}
       ${linked ? '' : travelSlider('rel', 'Release', rel, T.min, deepest([...state.selected]), { ...dz, tone: 'rel' })}
     </div>
-    <label class="check"><input type="checkbox" id="relLink" ${linked ? 'checked' : ''}> Release at the same point</label>
-    ${tdz > 0 && act !== null ? `<p class="note">With the ${mm(tdz)} mm top dead zone, this key triggers at about <strong>${mm(act + tdz)} mm</strong> (dashed line): the keyboard adds the two together (tested on the RT75).${act + tdz > LIMITS.travel.max - (bdz ?? 0) ? ' That’s inside the bottom dead zone, so the key may never trigger.' : ''}</p>` : ''}`}
+    <label class="check"><input type="checkbox" id="relLink" ${linked ? 'checked' : ''}> Release at the same point</label>    ${tdz > 0 && act !== null ? `<p class="note">With the ${mm(tdz)} mm top dead zone, this key triggers at about <strong>${mm(act + tdz)} mm</strong> (dashed line): the keyboard adds the two together (tested on the RT75).${act + tdz > LIMITS.travel.max - (bdz ?? 0) ? ' That’s inside the bottom dead zone, so the key may never trigger.' : ''}</p>` : ''}`}
 
     <h3>Rapid Trigger</h3>
     <label class="switch"><input type="checkbox" id="rtToggle" ${rt ? 'checked' : ''}><span class="switch-track"></span>
@@ -1461,6 +1461,14 @@ function wireModTap(el, slots) {
   num?.addEventListener('change', () => { if (num.value === '') return; setMs(Number(num.value)); refresh(); });
 }
 
+// Dragging a slider moves in 0.05 mm steps; with Shift held it moves in the slider's fine steps.
+// Shift is tracked here because a range input's own events don't say whether it's held.
+const DRAG_STEP = 0.05;
+let shiftHeld = false;
+const snapDrag = (v, min, max) => Math.min(max, Math.max(min, Math.round(v / DRAG_STEP) * DRAG_STEP));
+for (const t of ['keydown', 'keyup']) window.addEventListener(t, e => { shiftHeld = e.shiftKey; }, true);
+window.addEventListener('blur', () => { shiftHeld = false; });
+
 function wireEditor(el) {
   const slots = [...state.selected];
   const T = LIMITS.travel, rtMin = 1 / state.settings.travelStep;
@@ -1469,7 +1477,16 @@ function wireEditor(el) {
   const bind = (id, onValue, min, max) => {
     const range = el.querySelector(`#${id}Range`), num = el.querySelector(`#${id}Num`);
     if (!range) return;
-    range.addEventListener('input', () => { num.value = mm3(Number(range.value)); onValue(Number(range.value), min, max); renderBoardOnly(); });
+    // Snap only while the pointer drags it; the arrow keys keep the fine 0.005 mm steps.
+    let dragging = false;
+    range.addEventListener('pointerdown', e => { dragging = true; shiftHeld = e.shiftKey; });
+    for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) range.addEventListener(t, () => { dragging = false; });
+    range.addEventListener('input', () => {
+      if (dragging && !shiftHeld) range.value = Number(snapDrag(Number(range.value), min, max).toFixed(3));
+      num.value = mm3(Number(range.value));
+      onValue(Number(range.value), min, max);
+      renderBoardOnly();
+    });
     range.addEventListener('change', apply);
     num.addEventListener('change', () => { if (num.value === '') return; onValue(Number(num.value), min, max); apply(); });
   };
@@ -1491,6 +1508,7 @@ function wireEditor(el) {
     };
     const fromY = y => { const r = track.getBoundingClientRect(); return ((y - r.top) / r.height) * MAX_TRAVEL_MM; };
     let dragging = false, keyTimer;
+    const dragTo = e => { const v = fromY(e.clientY); set(e.shiftKey ? v : snapDrag(v, min, max)); };
     track.addEventListener('pointerdown', e => {
       if (e.button !== 0) return;
       e.preventDefault();
@@ -1498,9 +1516,9 @@ function wireEditor(el) {
       dragging = true;
       box.classList.add('is-dragging');
       range.focus({ preventScroll: true });
-      set(fromY(e.clientY));
+      dragTo(e);
     });
-    track.addEventListener('pointermove', e => { if (dragging) set(fromY(e.clientY)); });
+    track.addEventListener('pointermove', e => { if (dragging) dragTo(e); });
     const end = () => { if (!dragging) return; dragging = false; box.classList.remove('is-dragging'); apply(); };
     track.addEventListener('pointerup', end);
     track.addEventListener('pointercancel', end);
