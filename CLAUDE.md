@@ -226,6 +226,10 @@ scroll down; `MOUSE_ACTIONS` in actions.js) on base and Fn layers, never on mod-
   next edit or Retry (`instantSig` ignores order). The header chip shows
   Saving… / Saved · Undo / didn't stick. The Read-only badge now shows only when nothing can be written.
 
+**Slider snapping (merged 2026-10-21; UI only, checked by the user in the app):** dragging the travel
+sliders (and the small mm sliders: RT sensitivity, dead zones, DKS trigger point) moves in 0.05 mm
+steps; Shift+drag moves in their fine steps. Arrow keys and typed values are unchanged; no help text.
+
 **Next:** the user's choice.
 Knob remapping isn't wanted.
 
