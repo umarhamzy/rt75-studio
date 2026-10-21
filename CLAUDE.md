@@ -36,6 +36,7 @@ touching device code.
 | `src/dks.js` | DKS trigger patterns: the editor's clicks, descriptions and the scrubbed press |
 | `src/demo.js` | Simulated keyboard (per-profile settings, polling rate, sleep timers, lighting, live reports) |
 | `src/dropdown.js` | Styled dropdowns (M1 design) layered over every native `<select>`; the select stays the source of truth |
+| `src/history.js` | History of writes in this browser per keyboard (`rt75-studio-history-<id>`, last 200): storage, summaries, titles |
 | `src/themes.js` | Themes: the list (5 dark, 4 light), the saved choice (`rt75-studio-theme`), applying it |
 | `src/themes.css` | One `[data-theme]` block of colour tokens per theme except Amber (generated with a contrast check, see Status) |
 | `src/styles.css` | Amber's tokens (the default), tokens worked out from a theme's colours, and all styles |
@@ -49,6 +50,9 @@ touching device code.
    `assertAllowedKeymapWrite`, `assertAllowedLightWrite`, `assertAllowedMacroWrite`, and the
    read allowlist `READ_COMMANDS`. New commands get their own validator.
 3. **Writes go through review → write → read back → report mismatches → Undo.** No silent writes.
+   The one exception is **Instant save**, which the user turns on: it skips the review dialog but still
+   validates, reads back, reports mismatches and logs every write in History with Undo. Macros and ⚠
+   functions always wait for Review.
 4. **Never send:**
    - calibration (`0x1C`, `0x1E`; qmk.top's all-keys depth read only works inside calibration,
      which rewrites it)
@@ -197,6 +201,20 @@ switch types (the Presets button is hidden there). **Switch types are shared by 
 canvas Round 21): qmk.top's seven mouse actions (left, right, middle click, back, forward, scroll up,
 scroll down; `MOUSE_ACTIONS` in actions.js) on base and Fn layers, never on mod-tap/DKS sub-layers
 (protocol-notes.md, "Mouse actions").
+
+**History and Instant save (feature/history, not merged; demo-tested only):** design HS1 drawer + HS3 switch
+(canvas Round 22).
+- **History** (clock button in the header) lists every write (Review, Instant or Undo), newest first by day,
+  with filters (Key settings, Key map, Lighting, Keyboard), the rows as the review dialog words them,
+  read-back status and **Undo** per entry. Kept in this browser per keyboard and survives a reload.
+- **Undo from History** writes the Before values back without the dialog and adds its own entry. It is
+  blocked while unsaved changes exist, from another profile for profile-specific entries, and it skips
+  values the keyboard already has; it asks first if the keyboard changed since.
+- **Instant save** (header switch, off by default, `rt75-studio-save`): pending changes are written
+  about 1 s after the last edit (not while a slider is held or a dialog is open), via
+  `applyEdits(..., { quiet: true })`, which keeps the page editable and only clears pending values that
+  match what was written. A failed write waits for the next edit or Retry. The header chip shows
+  Saving… / Saved · Undo / didn't stick. The Read-only badge now shows only when nothing can be written.
 
 **Next:** the user's choice.
 Knob remapping isn't wanted.

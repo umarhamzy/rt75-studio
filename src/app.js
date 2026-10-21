@@ -13,6 +13,7 @@ import { enhanceSelects } from './dropdown.js';
 import { unpack, pack, actionByte, setActionByte, DEFAULT_TRIGGERS, holds, cycleMoment, cutHold, describe, pressAt, heldAfter, tappedAt, MOMENT_NAMES } from './dks.js';
 import { loadPatternLibrary, savePatternLibrary, keyColor, setKeyColor, keysChanged, applyFill, FILLS, BUILT_IN_DESIGNS, colorsFromImage } from './patterns.js';
 import { THEMES, loadTheme, saveTheme, applyTheme, themeInUse, withTheme, flipped } from './themes.js';
+import { loadHistory, saveHistory, summarize, titleFor, dayLabel, timeLabel, AREAS } from './history.js';
 
 // Switch-type byte (magnet param 252), from qmk.top/v4's switch enum. The RT75 Pro offers
 // these seven (SWITCH_TYPES, in qmk.top's order: its Switch Settings numbers them 1–7 and colours
@@ -79,6 +80,12 @@ const state = {
   knobMode: 'unknown',       // 'volume' | 'lighting' | 'unknown': inferred from what the knob sends
   knobSeenAt: 0,             // when the knob (or a lighting push) was last heard
   watch: null,               // { dev, stop } listening for knob and lighting reports, or null
+  history: [],               // writes to this keyboard, oldest first (src/history.js), kept in this browser
+  historyOpen: false,        // the History drawer (design HS1)
+  historyFilter: 'all',      // 'all' or an AREAS key
+  historyExpanded: new Set(), // entry ids showing their rows
+  saving: false,             // an Instant save write is running (the UI stays editable meanwhile)
+  saveStatus: null,          // { kind: 'saving' | 'saved' | 'error', text, entryId? } for the header chip
 };
 const $ = id => document.getElementById(id);
 
@@ -89,6 +96,12 @@ function loadPrefs() {
   try { return { ...PREFS, ...JSON.parse(localStorage.getItem('rt75-studio-display') ?? '{}') }; } catch { return { ...PREFS }; }
 }
 let prefs = loadPrefs();
+
+// Instant save (design HS3, canvas Round 22): pending changes are written about a second after the
+// last edit, read back and logged in History; macros and ⚠ functions still wait for Review changes.
+// Off by default; kept in this browser.
+const SAVE_PREF = 'rt75-studio-save';
+let instantSave = (() => { try { return JSON.parse(localStorage.getItem(SAVE_PREF) ?? '{}').instant === true; } catch { return false; } })();
 let themePref = loadTheme(); // { mode, dark, light }: the Appearance page and the sidebar switch
 function applyPrefs() {
   document.body.classList.toggle('no-help', !prefs.help);
@@ -663,8 +676,11 @@ function renderStats() {
 function renderDevice() {
   const s = state.settings;
   $('device').hidden = !s;
-  $('badgeMode').hidden = !s;
-  $('badgeMode').textContent = editable() || (bounds() && state.busy) ? 'Review before write' : 'Read-only';
+  // Read-only shows only when nothing can be written; otherwise the Instant save switch says how
+  // changes are written (the two take the same place, so the header never re-wraps).
+  const writable = !!s && s.source === 'device' && !!bounds();
+  $('badgeMode').hidden = !s || writable;
+  $('badgeMode').textContent = 'Read-only';
   renderProfiles();
   if (!s) return;
   // The RT75 Pro shows Yunzii's wordmark (assets/yunzii-logo.png, from yunzii.com) before the model.
@@ -707,7 +723,7 @@ function pendingCount() {
 }
 
 function renderReviewButton() {
-  const n = pendingCount();
+  const n = instantSave && !instantFailedSig ? heldBackCount() : pendingCount();
   const btn = $('btnReview');
   btn.disabled = !n || !editable();
   btn.classList.toggle('has-changes', n > 0);
@@ -2727,7 +2743,8 @@ function changeRows(edits, before) {
     `<tr><td>${keyBySlot(e.slot).label}</td><td>${FIELD_LABELS[f]}</td><td>${fmt(f, before(e.slot, f))}</td><td><strong>${fmt(f, e[f])}</strong></td></tr>`)).join('');
 }
 
-function openReview() {
+async function openReview() {
+  if (instantRun) await instantRun;
   if (!editable() || !hasAnyPending()) return;
   const edits = pendingEdits();
   $('reviewBody').innerHTML = `
@@ -2747,26 +2764,37 @@ function openReview() {
   $('reviewDialog').showModal();
 }
 
-async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChanges(), light = lightChange(), macros = macroWrites(), patterns = patternChanges() }) {
+// quiet: an Instant save or an Undo from History, written without the review dialog and with the
+// page left editable (so only values that still match what was written are cleared from pending).
+// source ('review' | 'instant' | 'undo') and undoOf (a History entry id) go into History.
+// Returns true once written (even with mismatches), false if the write failed.
+async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChanges(), light = lightChange(), macros = macroWrites(), patterns = patternChanges(),
+  quiet = false, source = 'review', undoOf = null }) {
   // What each macro slot held before (when RT75 Studio wrote it), for Undo.
   for (const w of macros) w.before ??= w.entry.slot === w.slot && w.entry.written ? w.entry.written : null;
   const before = new Map(edits.map(e => [e.slot, Object.fromEntries(Object.keys(e).filter(f => f !== 'slot').map(f => [f, state.settings.magnet[f][e.slot]]))]));
+  // The rows History shows, as the review dialog words them, worked out before anything changes.
+  const rowsHtml = changeRows(edits, (slot, f) => state.settings.magnet[f][slot]) + kbRows(kb) + kmRows(keys) + macroWriteRows(macros) + patternRows(patterns) + lightRows(light);
+  const profile = state.settings.profile ?? 0;
   if (backup) downloadBackup();
-  state.busy = true;
+  if (quiet) state.saving = true; else state.busy = true;
   refresh();
-  $('btnApply').disabled = true;
-  $('btnCancel').disabled = true;
-  $('btnDiscard').hidden = true; // what's left pending after a write is reviewed again from the header
-  const status = $('reviewStatus');
+  if (!quiet) {
+    $('btnApply').disabled = true;
+    $('btnCancel').disabled = true;
+    $('btnDiscard').hidden = true; // what's left pending after a write is reviewed again from the header
+  }
+  const status = quiet ? { className: '', textContent: '' } : $('reviewStatus');
   status.className = 'review-status';
   status.textContent = 'Writing…';
+  if (quiet) { state.saveStatus = { kind: 'saving', text: source === 'undo' ? 'Undoing…' : 'Saving…' }; renderSaveStatus(); }
   try {
     const result = { mismatches: [], retried: 0 };
     const writeKeys = async () => {
       const km = await writeKeymap(state.dev, state.settings, keys.map(c => ({ layer: c.layer, slot: c.slot, action: c.to })),
         (f, label) => { status.textContent = `${label}… ${Math.round(f * 100)}%`; });
       for (const [layer, arr] of Object.entries(km.layers)) state.settings[LAYERS[layer].field] = arr; // trust the read-back
-      for (const c of keys) state.pendingKeys.delete(`${c.layer}:${c.slot}`);
+      for (const c of keys) if (state.pendingKeys.get(`${c.layer}:${c.slot}`)?.join() === c.to.join()) state.pendingKeys.delete(`${c.layer}:${c.slot}`);
       result.retried += km.retried;
       for (const m of km.mismatches) result.mismatches.push({ kb: true, label: `${keyBySlot(m.slot).label} (${kmLayerLabel(m)})`, expected: actionLabel(m.layer, m.expected), actual: actionLabel(m.layer, m.actual) });
     };
@@ -2780,13 +2808,20 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
       result.mismatches.push(...mg.mismatches);
       result.retried += mg.retried;
     }
-    for (const e of edits) state.pending.delete(e.slot);
+    // Clear the written values from pending; a key's leftovers that could never be sent (sensitivity
+    // with RT off, say) go too, as before. Newer edits made during an Instant save stay.
+    for (const e of edits) {
+      const left = { ...(state.pending.get(e.slot) ?? {}) };
+      for (const f of Object.keys(e)) if (f !== 'slot' && left[f] === e[f]) delete left[f];
+      if (Object.keys(sendable({ slot: e.slot, ...left }, s => left.mode ?? state.settings.magnet.mode[s])).length > 1) state.pending.set(e.slot, left);
+      else state.pending.delete(e.slot);
+    }
     const rate = kb.find(c => c.field === 'reportRateHz');
     if (rate) {
       status.textContent = 'Writing polling rate…';
       const got = await writeReportRate(state.dev, state.settings, rate.to);
       state.settings.reportRateHz = got;
-      delete state.pendingKb.reportRateHz;
+      if (state.pendingKb.reportRateHz === rate.to) delete state.pendingKb.reportRateHz;
       if (got !== rate.to) result.mismatches.push({ kb: true, label: rate.label, expected: fmtHz(rate.to), actual: fmtHz(got) });
     }
     const sleeps = kb.filter(c => KB_FIELDS[c.field].sleep);
@@ -2795,7 +2830,7 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
       const got = await writeSleepTimes(state.dev, state.settings, Object.fromEntries(sleeps.map(c => [c.field, c.to])));
       if (got) state.settings.sleep = got;
       for (const c of sleeps) {
-        delete state.pendingKb[c.field];
+        if (state.pendingKb[c.field] === c.to) delete state.pendingKb[c.field];
         if (got?.[c.field] !== c.to) result.mismatches.push({ kb: true, label: c.label, expected: fmtSecs(c.to), actual: fmtSecs(got?.[c.field]) });
       }
     }
@@ -2816,7 +2851,7 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
     for (const c of patterns) {
       const pr = await writeUserPic(state.dev, state.settings, c.layer, c.to, (f, label) => { status.textContent = `${label} ${c.layer + 1}… ${Math.round(f * 100)}%`; });
       state.pt.saved[c.layer] = pr.colors; // trust the read-back
-      delete state.pt.edits[c.layer];
+      if (state.pt.edits[c.layer] && keysChanged(state.pt.edits[c.layer], c.to) === 0) delete state.pt.edits[c.layer];
       result.retried += pr.retried;
       if (pr.mismatches) result.mismatches.push({ kb: true, label: `Custom pattern ${c.layer + 1}`, expected: 'the edited colours', actual: `${pr.mismatches} byte(s) different` });
     }
@@ -2824,7 +2859,7 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
       status.textContent = 'Writing lighting…';
       const lr = await writeLighting(state.dev, state.settings, light.to);
       if (lr.lighting) state.settings.lighting = lr.lighting; // trust the read-back
-      state.pendingLight = null;
+      if (state.pendingLight && !lightingDiff(state.pendingLight, light.to).length) state.pendingLight = null;
       result.retried += lr.retried;
       for (const f of lr.mismatches) result.mismatches.push({ kb: true, label: `Lighting ${LIGHT_LABELS[f].toLowerCase()}`, expected: fmtLight(f, light.to), actual: lr.lighting ? fmtLight(f, lr.lighting) : 'no reply' });
     }
@@ -2839,30 +2874,99 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
       status.textContent = (n ? `Done. ${n === 1 ? 'The setting was' : `All ${n} settings were`} written and confirmed by reading ${n === 1 ? 'it' : 'them'} back.` : 'Done.') +
         (result.retried ? ` (${result.retried} needed a second try.)` : '') + macroNote(macros);
     }
-    state.lastApplied = { undo: [...before].map(([slot, fields]) => ({ slot, ...fields })), undoKb: kb.map(c => ({ ...c, from: c.to, to: c.from })), undoKeys: keys.map(c => ({ ...c, from: c.to, to: c.from })),
+    const undoPayload = { undo: [...before].map(([slot, fields]) => ({ slot, ...fields })), undoKb: kb.map(c => ({ ...c, from: c.to, to: c.from })), undoKeys: keys.map(c => ({ ...c, from: c.to, to: c.from })),
       // A macro slot is restored only if RT75 Studio knows what it held before.
       undoMacros: macros.filter(w => w.before).map(w => ({ slot: w.slot, entry: w.entry, macro: w.before, before: w.macro })),
       undoLight: light && isOffered(effectById(light.from.effect)) ? { from: light.to, to: normalizeLighting(light.from), fields: light.fields } : null,
       undoPatterns: patterns.map(c => ({ layer: c.layer, from: c.to, to: c.from, undo: true })) };
-    $('btnApply').hidden = true;
-    $('btnUndo').hidden = false;
-    $('btnCancel').textContent = 'Close';
+    const entry = recordHistory({ source, undoOf, rowsHtml, undoPayload, result, profile, edits, kb, keys, light, macros, patterns });
+    if (quiet) {
+      state.saveStatus = result.mismatches.length
+        ? { kind: 'error', text: `${result.mismatches.length} didn’t stick`, entryId: entry.id }
+        : { kind: 'saved', text: `${source === 'undo' ? 'Undone' : 'Saved'} ${timeLabel(entry.at)} · ${entry.title}`, entryId: entry.id };
+      if (result.mismatches.length) showError(status.textContent);
+    } else {
+      state.lastApplied = { ...undoPayload, historyId: entry.id };
+      $('btnApply').hidden = true;
+      $('btnUndo').hidden = false;
+      $('btnCancel').textContent = 'Close';
+    }
+    return true;
   } catch (e) {
     status.className = 'review-status is-error';
     status.textContent = 'Write failed: ' + e.message + ' Your pending changes are kept. Refresh to see what the keyboard has now.';
-    $('btnApply').disabled = false;
+    if (quiet) { state.saveStatus = { kind: 'error', text: 'Couldn’t save' }; showError(status.textContent); }
+    else $('btnApply').disabled = false;
+    return false;
   } finally {
-    state.busy = false;
-    $('btnCancel').disabled = false;
+    if (quiet) state.saving = false; else state.busy = false;
+    if (!quiet) $('btnCancel').disabled = false;
     refresh();
   }
 }
 
-async function undoLast() {
-  if (!state.lastApplied) return;
+// ---------- History ----------
+// Each write becomes one entry (src/history.js), with the review dialog's rows as plain text and
+// what Undo needs. Undo from History writes those values back without the dialog, like the dialog's
+// own Undo button, and adds its own entry.
+function rowsFromHtml(html) {
+  const body = document.createElement('tbody');
+  body.innerHTML = html;
+  return [...body.rows].map(r => [...r.cells].map(c => c.textContent.replace(/\s+/g, ' ').trim()));
+}
+
+function recordHistory({ source, undoOf, rowsHtml, undoPayload, result, profile, edits, kb, keys, light, macros, patterns }) {
+  const s = state.settings;
+  const areas = [edits.length && 'keys', (keys.length || macros.length) && 'keymap', (light || patterns.length) && 'lighting', kb.length && 'keyboard'].filter(Boolean);
+  const rows = rowsFromHtml(rowsHtml);
+  const entry = {
+    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, at: new Date().toISOString(), source, undoOf, profile,
+    // Magnet settings (except switch types) and the key matrix belong to one profile.
+    profileSpecific: edits.some(e => Object.keys(e).some(f => f !== 'slot' && f !== 'switchType')) || keys.some(c => !LAYERS[c.layer].fn),
+    areas, rows, summary: summarize(rows),
+    title: source === 'undo' && state.history.some(h => h.id === undoOf) ? `Undo: ${state.history.find(h => h.id === undoOf).title}` : titleFor(rows, areas),
+    mismatches: result.mismatches.length, retried: result.retried, macros: macros.length,
+    undo: source === 'undo' ? null : undoPayload,
+    // What was written, to tell whether the keyboard has changed since (see historyStale).
+    applied: { edits, kb: kb.map(c => ({ field: c.field, to: c.to })), keys: keys.map(c => ({ layer: c.layer, slot: c.slot, to: c.to })), light: light?.to ?? null },
+  };
+  const list = state.history.map(h => (h.id === undoOf ? { ...h, undoneBy: entry.id, undoneAt: entry.at } : h));
+  list.push(entry);
+  state.history = saveHistory(s.deviceId, s.demo, list);
+  return entry;
+}
+
+// How many of an entry's written values the keyboard no longer has (changed later, here or in qmk.top).
+function historyStale(h) {
+  const s = state.settings, a = h.applied ?? {};
+  let n = 0;
+  for (const e of a.edits ?? []) for (const [f, v] of Object.entries(e)) {
+    if (f === 'slot') continue;
+    const now = s.magnet[f]?.[e.slot];
+    if (f === 'switchType' ? fittedSwitch(now) !== fittedSwitch(v) : now !== v) n++;
+  }
+  for (const c of a.keys ?? []) if (deviceBytes(c.layer, c.slot)?.join() !== c.to.join()) n++;
+  for (const c of a.kb ?? []) if (KB_FIELDS[c.field]?.current(s) !== c.to) n++;
+  if (a.light && s.lighting && lightingDiff(s.lighting, a.light).length) n++;
+  return n;
+}
+
+// Why an entry can't be undone right now, or '' if it can.
+function historyUndoBlocked(h) {
+  if (!h.undo || h.source === 'undo') return 'An Undo can’t be undone here.';
+  if (h.undoneBy) return 'Already undone.';
+  if (!editable()) return state.settings?.source === 'device' ? 'Writing…' : 'Connect the keyboard to undo.';
+  if (state.saving) return 'Saving…';
+  if (hasAnyPending()) return 'Write or discard your unsaved changes first.';
+  if (h.profileSpecific && h.profile !== (state.settings.profile ?? 0)) return `Switch to Profile ${h.profile + 1} to undo this.`;
+  return '';
+}
+
+// The writes that put a payload's "before" values back (shared with the review dialog's Undo).
+function undoArgs(p) {
   // A sensitivity of 0 means "never set" and can't be written; turning RT back off restores
   // those keys, so drop the zero values.
-  const undo = state.lastApplied.undo
+  const undo = (p.undo ?? [])
     .map(e => Object.fromEntries(Object.entries(e).filter(([f, v]) => !((f === 'rtPress' || f === 'rtRelease') && v === 0))))
     // An unset switch (0xFF) is restored as Outemu, which qmk.top reads it as (it never writes 0xFF);
     // any other value the RT75 Pro doesn't offer can't be written back, so it's left out.
@@ -2870,19 +2974,184 @@ async function undoLast() {
       : fittedSwitch(e.switchType) === 0 ? { ...e, switchType: 0 } : (({ switchType, ...rest }) => rest)(e)))
     .map(e => sendable(e, s => e.mode ?? state.settings.magnet.mode[s]))
     .filter(e => Object.keys(e).length > 1);
-  const undoKb = state.lastApplied.undoKb ?? [];
-  const allUndoKeys = state.lastApplied.undoKeys ?? [];
-  const undoKeys = allUndoKeys.filter(c => isWritableAction(c.to, c.layer, c.slot));
-  const skippedKeys = allUndoKeys.length - undoKeys.length;
-  const undoLight = state.lastApplied.undoLight ?? null;
-  const undoMacros = state.lastApplied.undoMacros ?? [];
-  const undoPatterns = state.lastApplied.undoPatterns ?? [];
+  const allKeys = p.undoKeys ?? [];
+  const keys = allKeys.filter(c => isWritableAction(c.to, c.layer, c.slot));
+  return { undo, kb: p.undoKb ?? [], keys, skippedKeys: allKeys.length - keys.length, light: p.undoLight ?? null, macros: p.undoMacros ?? [], patterns: p.undoPatterns ?? [] };
+}
+
+async function undoHistoryEntry(id) {
+  const h = state.history.find(x => x.id === id);
+  if (!h) return;
+  const blocked = historyUndoBlocked(h);
+  if (blocked) { showNotice(blocked); return; }
+  const stale = historyStale(h);
+  if (stale && !confirm(`${stale === 1 ? 'One of these settings has' : `${stale} of these settings have`} changed since this write. Undo puts everything in it back to how it was before. Continue?`)) return;
+  const a = undoArgs(h.undo);
+  // Values the keyboard already has (changed back since, here or in qmk.top) aren't written again.
+  const m = state.settings.magnet;
+  a.undo = a.undo.map(e => Object.fromEntries(Object.entries(e).filter(([f, v]) => f === 'slot' || m[f]?.[e.slot] !== v))).filter(e => Object.keys(e).length > 1);
+  a.kb = a.kb.filter(c => KB_FIELDS[c.field]?.current(state.settings) !== c.to);
+  a.keys = a.keys.filter(c => deviceBytes(c.layer, c.slot)?.join() !== c.to.join());
+  if (a.light && state.settings.lighting && !lightingDiff(state.settings.lighting, a.light.to).length) a.light = null;
+  if (!a.undo.length && !a.kb.length && !a.keys.length && !a.light && !a.macros.length && !a.patterns.length) { showNotice('The keyboard already has these settings as they were before; nothing to write.'); return; }
+  if (a.skippedKeys) showNotice(`${a.skippedKeys} key(s) had an action RT75 Studio can’t write back; reassign those in qmk.top.`);
+  await applyEdits(a.undo, { backup: false, kb: a.kb, keys: a.keys, light: a.light, macros: a.macros, patterns: a.patterns, quiet: true, source: 'undo', undoOf: h.id });
+}
+
+const AREA_HUES = { keys: 'var(--accent)', keymap: 'var(--mt)', lighting: 'var(--rt)', keyboard: 'var(--muted)' };
+const SOURCE_NAMES = { review: 'Review', instant: 'Instant', undo: 'Undo' };
+
+function historyStatus(h) {
+  if (h.undoneBy) return { cls: 'is-muted', text: `Undone ${timeLabel(h.undoneAt)}` };
+  if (h.mismatches) return { cls: 'is-warn', text: `${h.mismatches} didn’t stick` };
+  const retried = h.retried ? ` · ${h.retried} retried` : '';
+  if (h.macros) return { cls: 'is-ok', text: `✓ written · macro steps can’t be read back${retried}` };
+  return { cls: 'is-ok', text: `✓ confirmed${retried}` };
+}
+
+function renderHistory() {
+  const el = $('historyDrawer');
+  el.hidden = !state.historyOpen;
+  $('btnHistory').setAttribute('aria-expanded', String(state.historyOpen));
+  $('btnHistory').classList.toggle('is-open', state.historyOpen);
+  if (!state.historyOpen) return;
+  el.style.top = `${Math.round(document.querySelector('.topbar').getBoundingClientRect().bottom)}px`;
+  const scroll = el.querySelector('.hist-list')?.scrollTop ?? 0;
+  const list = [...state.history].reverse().filter(h => state.historyFilter === 'all' || h.areas.includes(state.historyFilter));
+  const days = [];
+  for (const h of list) {
+    const d = dayLabel(h.at);
+    if (days.at(-1)?.label !== d) days.push({ label: d, entries: [] });
+    days.at(-1).entries.push(h);
+  }
+  const entryHtml = h => {
+    const open = state.historyExpanded.has(h.id), st = historyStatus(h), blocked = historyUndoBlocked(h);
+    const canShowUndo = h.undo && h.source !== 'undo' && !h.undoneBy;
+    return `<div class="hist-entry${h.undoneBy ? ' is-undone' : ''}">
+      <div class="hist-top">
+        <button type="button" class="hist-main" data-hist-toggle="${h.id}" aria-expanded="${open}">
+          <span class="hist-title"><i class="hist-dot" style="--hue:${AREA_HUES[h.areas[0]] ?? 'var(--muted)'}"></i>${escapeHtml(h.title)}</span>
+          <span class="hist-sum">${escapeHtml(h.summary)}</span>
+          <span class="hist-meta"><span class="hist-time">${timeLabel(h.at)}</span><span class="hist-tag tag-${h.source}">${SOURCE_NAMES[h.source]}</span>${h.profileSpecific ? `<span>Profile ${h.profile + 1}</span>` : ''}<span class="hist-status ${st.cls}">${st.text}</span></span>
+        </button>
+        ${canShowUndo ? `<button type="button" class="btn btn-small" data-hist-undo="${h.id}" ${blocked ? 'aria-disabled="true"' : ''} title="${escapeHtml(blocked || 'Write the Before values back')}">Undo</button>` : ''}
+      </div>
+      ${open ? `<div class="hist-rows" role="table" aria-label="What changed">${h.rows.map(r => `<span role="cell">${escapeHtml(r[0])}</span><span role="cell" class="muted">${escapeHtml(r[1])}</span><span role="cell" class="hist-change">${escapeHtml(r[2])} → <strong>${escapeHtml(r[3])}</strong></span>`).join('')}</div>` : ''}
+    </div>`;
+  };
+  const filters = [['all', 'All'], ...Object.entries(AREAS)];
+  el.innerHTML = `<div class="hist-head"><h2>History</h2><span class="muted">${state.history.length} write${state.history.length === 1 ? '' : 's'}</span>
+      <button type="button" class="btn btn-small hist-close" id="btnHistoryClose" aria-label="Close history">✕</button></div>
+    <div class="hist-filters" role="group" aria-label="Show">${filters.map(([id, label]) => `<button type="button" data-hist-filter="${id}" aria-pressed="${state.historyFilter === id}">${label}</button>`).join('')}</div>
+    <div class="hist-list">
+      ${days.length ? days.map(d => `<div class="hist-day">${escapeHtml(d.label)}</div>${d.entries.map(entryHtml).join('')}`).join('')
+        : `<p class="muted hist-empty">${state.history.length ? 'Nothing here for this filter.' : 'Nothing written yet. Every change you write to the keyboard shows up here, with Undo.'}</p>`}
+      <p class="hist-foot help">Kept in this browser for this keyboard (the last 200 writes), so it survives a reload. Undo writes the Before values back and adds its own entry.</p>
+      ${state.history.length ? '<button type="button" class="link hist-clear" id="btnHistoryClear">Clear history</button>' : ''}
+    </div>`;
+  el.querySelector('.hist-list').scrollTop = scroll;
+  $('btnHistoryClose').onclick = () => { state.historyOpen = false; renderHistory(); $('btnHistory').focus(); };
+  el.querySelectorAll('[data-hist-filter]').forEach(b => b.onclick = () => { state.historyFilter = b.dataset.histFilter; renderHistory(); });
+  el.querySelectorAll('[data-hist-toggle]').forEach(b => b.onclick = () => {
+    const id = b.dataset.histToggle;
+    if (state.historyExpanded.has(id)) state.historyExpanded.delete(id); else state.historyExpanded.add(id);
+    renderHistory();
+  });
+  el.querySelectorAll('[data-hist-undo]').forEach(b => b.onclick = () => undoHistoryEntry(b.dataset.histUndo));
+  $('btnHistoryClear')?.addEventListener('click', () => {
+    if (!confirm('Clear the history for this keyboard? Nothing on the keyboard changes.')) return;
+    state.history = saveHistory(state.settings.deviceId, state.settings.demo, []);
+    renderHistory();
+  });
+}
+
+// ---------- Instant save ----------
+// Held back for Review even with Instant save on: macros (their steps can't be read back), keys
+// set to run a macro, and the ⚠ functions.
+const RISKY_BYTES = new Set(FUNCTIONS.filter(f => RISKY.has(f[1])).map(f => f[2].join(',')));
+const heldBackKey = c => c.to[0] === 9 || RISKY_BYTES.has(c.to.join(','));
+const heldBackCount = () => macroWrites().length + keymapChanges().filter(heldBackKey).length;
+
+function instantChanges() {
+  return {
+    edits: pendingEdits(), kb: kbChanges(), keys: keymapChanges().filter(c => !heldBackKey(c)), light: lightChange(),
+    // A copy, so painting can go on while it's written.
+    patterns: patternChanges().map(c => ({ ...c, to: structuredClone(c.to) })),
+  };
+}
+const instantEmpty = c => !c.edits.length && !c.kb.length && !c.keys.length && !c.light && !c.patterns.length;
+const instantSig = c => JSON.stringify([c.edits, c.kb.map(x => [x.field, x.to]), c.keys.map(x => [x.layer, x.slot, x.to]), c.light?.to ?? null, c.patterns.map(x => [x.layer, x.to])]);
+
+const INSTANT_DELAY = 1000;
+let instantTimer = null, instantRun = null, instantFailedSig = null, pointerHeld = false;
+
+// Called on every render: (re)starts the one-second wait after the latest edit.
+function scheduleInstantSave() {
+  clearTimeout(instantTimer);
+  if (!instantSave || !editable() || instantRun) return;
+  const c = instantChanges();
+  if (instantEmpty(c) || instantSig(c) === instantFailedSig) return; // a failed write waits for the next edit (or Retry)
+  instantTimer = setTimeout(runInstantSave, INSTANT_DELAY);
+}
+
+// Not while a slider is held, a key is being captured or a dialog is open: try again shortly.
+function instantPaused() {
+  return pointerHeld || !!state.capture || !!state.live || $('reviewDialog').open || $('macroDialog').open || $('presetDialog').open;
+}
+
+function runInstantSave({ now = false } = {}) {
+  clearTimeout(instantTimer);
+  if (instantRun) return instantRun;
+  if (!instantSave || !editable()) return Promise.resolve();
+  if (!now && instantPaused()) { instantTimer = setTimeout(runInstantSave, 400); return Promise.resolve(); }
+  const c = instantChanges();
+  if (instantEmpty(c)) return Promise.resolve();
+  const sig = instantSig(c);
+  instantRun = applyEdits(c.edits, { backup: false, kb: c.kb, keys: c.keys, light: c.light, macros: [], patterns: c.patterns, quiet: true, source: 'instant' })
+    .then(ok => { instantFailedSig = ok ? null : sig; })
+    .finally(() => { instantRun = null; renderSaveStatus(); renderReviewButton(); scheduleInstantSave(); });
+  return instantRun;
+}
+
+function setInstantSave(on) {
+  instantSave = on;
+  try { localStorage.setItem(SAVE_PREF, JSON.stringify({ instant: on })); } catch { /* storage blocked: kept for this visit */ }
+  instantFailedSig = null;
+  state.saveStatus = null;
+  if (!on) clearTimeout(instantTimer);
+  refresh();
+}
+
+function renderSaveStatus() {
+  const btn = $('btnInstant');
+  btn.setAttribute('aria-checked', String(instantSave));
+  btn.hidden = !(state.settings?.source === 'device' && bounds());
+  const el = $('saveStatus');
+  const show = instantSave && state.settings?.source === 'device';
+  el.hidden = !show;
+  if (!show) return;
+  const st = state.saveStatus;
+  const latest = st?.entryId ? state.history.find(h => h.id === st.entryId) : null;
+  const canUndo = st?.kind === 'saved' && latest && latest.source !== 'undo' && !latest.undoneBy && !historyUndoBlocked(latest);
+  const text = st?.text ?? (editable() ? 'Instant save on' : 'Instant save on · connect to write');
+  el.className = `save-status${st ? ` is-${st.kind}` : ''}`;
+  el.innerHTML = `<i class="save-dot" aria-hidden="true"></i><span class="save-text">${escapeHtml(text)}</span>${canUndo ? '<button type="button" class="link" id="btnSaveUndo">Undo</button>' : ''}${st?.kind === 'error' && !st.entryId ? '<button type="button" class="link" id="btnSaveRetry">Retry</button>' : ''}${st?.kind === 'error' && st.entryId ? '<button type="button" class="link" id="btnSaveHistory">History</button>' : ''}`;
+  el.title = text;
+  $('btnSaveUndo')?.addEventListener('click', () => undoHistoryEntry(latest.id));
+  $('btnSaveRetry')?.addEventListener('click', () => { instantFailedSig = null; state.saveStatus = null; showError(null); runInstantSave({ now: true }); });
+  $('btnSaveHistory')?.addEventListener('click', () => { state.historyOpen = true; renderHistory(); });
+}
+
+async function undoLast() {
+  if (!state.lastApplied) return;
+  const { undo, kb: undoKb, keys: undoKeys, skippedKeys, light: undoLight, macros: undoMacros, patterns: undoPatterns } = undoArgs(state.lastApplied);
+  const undoOf = state.lastApplied.historyId ?? null;
   state.lastApplied = null;
   $('btnUndo').hidden = true;
   $('reviewBody').innerHTML = `<p>Restoring the previous values:</p>
     <div class="table-wrap"><table class="changes"><thead><tr><th>Key</th><th>Setting</th><th>Now</th><th>Restored</th></tr></thead>
     <tbody>${changeRows(undo, (slot, f) => state.settings.magnet[f][slot])}${kbRows(undoKb)}${kmRows(undoKeys)}${macroWriteRows(undoMacros)}${patternRows(undoPatterns)}${lightRows(undoLight)}</tbody></table></div>${skippedKeys ? `<p class="hint-warn">${skippedKeys} key(s) had a macro, mouse or mod-tap action that RT75 Studio can’t write back; reassign those in qmk.top.</p>` : ''}`;
-  await applyEdits(undo, { backup: false, kb: undoKb, keys: undoKeys, light: undoLight, macros: undoMacros, patterns: undoPatterns });
+  await applyEdits(undo, { backup: false, kb: undoKb, keys: undoKeys, light: undoLight, macros: undoMacros, patterns: undoPatterns, source: 'undo', undoOf });
   $('btnUndo').hidden = true;
 }
 
@@ -3444,6 +3713,8 @@ function uiSleepLimits(field) {
 async function changeProfile(index) {
   const s = state.settings;
   if (!editable() || index === s.profile) return;
+  if (instantSave) await runInstantSave({ now: true }); // write what's waiting before leaving the profile
+  if (instantRun) await instantRun;
   if (hasAnyPending() && !confirm(`Switching to profile ${index + 1} discards your unsaved changes. Continue?`)) return;
   showError(null);
   const dev = state.dev;
@@ -3470,6 +3741,7 @@ async function changeProfile(index) {
 function renderBoardOnly() {
   renderBoard();
   renderReviewButton();
+  scheduleInstantSave();
 }
 
 function refresh() {
@@ -3482,6 +3754,9 @@ function refresh() {
   renderReviewButton();
   renderInspector();
   renderTabs();
+  renderSaveStatus();
+  renderHistory();
+  scheduleInstantSave();
 }
 
 // Configuration (Actuation / Rapid Trigger / Snap Tap tabs) and the other sidebar sections.
@@ -3579,6 +3854,9 @@ function load(settings, dev = null) {
   state.pt = { ...state.pt, saved: {}, edits: {}, loading: new Set(), error: null };
   state.capture = null;
   state.lastApplied = null;
+  state.history = loadHistory(settings.deviceId, settings.demo);
+  state.saveStatus = null;
+  instantFailedSig = null;
   refresh();
   keymapsFailed = false;
   ensureKeymaps(); // the key map loads in the background; device operations queue behind each other
@@ -3700,16 +3978,24 @@ document.addEventListener('keydown', onRecordKey, true);
 document.addEventListener('keyup', onRecordKey, true);
 $('btnApply').onclick = () => applyEdits(pendingEdits(), { backup: $('chkBackup')?.checked });
 $('btnUndo').onclick = undoLast;
+$('btnInstant').onclick = () => setInstantSave(!instantSave);
+$('btnHistory').onclick = () => { state.historyOpen = !state.historyOpen; renderHistory(); };
+// A slider (or a key being painted) held down isn't finished yet: Instant save waits for the release.
+document.addEventListener('pointerdown', () => { pointerHeld = true; }, true);
+document.addEventListener('pointerup', () => { pointerHeld = false; }, true);
+document.addEventListener('pointercancel', () => { pointerHeld = false; }, true);
+window.addEventListener('resize', () => { if (state.historyOpen) renderHistory(); });
 $('btnCancel').onclick = () => $('reviewDialog').close();
 $('reviewDialog').addEventListener('cancel', e => { if (state.busy) e.preventDefault(); });
 document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
 document.querySelector('[data-nav="config"]').onclick = () => setView(lastConfigView);
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape' || $('reviewDialog').open || $('presetDialog').open) return;
+  if (state.historyOpen) { state.historyOpen = false; renderHistory(); $('btnHistory').focus(); return; }
   if (state.picking !== null) { state.picking = null; refresh(); return; }
   if (state.selected.size || state.knob) { state.selected.clear(); state.knob = false; refresh(); }
 });
-window.addEventListener('beforeunload', e => { if (hasAnyPending() || state.busy) e.preventDefault(); });
+window.addEventListener('beforeunload', e => { if (hasAnyPending() || state.busy || state.saving) e.preventDefault(); });
 // Best effort: turn live reporting off if the tab closes mid-test.
 window.addEventListener('pagehide', () => { state.live?.stop().catch(() => {}); });
 $('btnPresets').onclick = openPresets;
