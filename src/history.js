@@ -33,32 +33,34 @@ export function saveHistory(deviceId, demo, list) {
   return keep;
 }
 
-// rows: [[what, setting, before, after]] as plain text.
-// "W, A, S, D: 1.20 → 0.80 mm" when every row changes the same setting the same way, otherwise
-// the first two rows and how many more.
+// rows: [[what, setting, before, after]] as plain text. The title names the keys (titleFor), so
+// the summary only says what changed: "Actuation point: 1.20 mm → 0.80 mm" when every row changes
+// the same setting the same way, each setting for one key, otherwise the first two rows (with
+// their keys) and how many more.
+const AREA_ROWS = new Set(['Keyboard', 'Lighting']); // rows about the whole keyboard, not a key
 export function summarize(rows) {
   if (!rows.length) return '';
   const [, setting, before, after] = rows[0];
-  if (rows.length > 1 && rows.every(r => r[1] === setting && r[2] === before && r[3] === after)) {
-    const what = rows.map(r => r[0]);
-    return `${what.length > 6 ? `${what.slice(0, 5).join(', ')} +${what.length - 5}` : what.join(', ')}: ${before} → ${after}`;
-  }
+  if (rows.every(r => r[1] === setting && r[2] === before && r[3] === after)) return `${setting}: ${before} → ${after}`;
   const what = [...new Set(rows.map(r => r[0]))];
-  if (what.length === 1 && rows.length > 1) {
-    const lower = t => t.charAt(0).toLowerCase() + t.slice(1);
-    const parts = rows.slice(0, 3).map(r => `${lower(r[1])} ${r[2]} → ${r[3]}`);
-    return `${what[0]}: ${parts.join(', ')}${rows.length > 3 ? ` +${rows.length - 3} more` : ''}`;
+  if (what.length === 1) {
+    const parts = rows.slice(0, 3).map((r, i) => `${i ? r[1].charAt(0).toLowerCase() + r[1].slice(1) : r[1]} ${r[2]} → ${r[3]}`);
+    return parts.join(', ') + (rows.length > 3 ? ` +${rows.length - 3} more` : '');
   }
-  const one = r => `${r[0] === r[1] || ['Keyboard', 'Lighting'].includes(r[0]) ? '' : `${r[0]} `}${r[1]}: ${r[2]} → ${r[3]}`;
+  const one = r => `${AREA_ROWS.has(r[0]) ? '' : `${r[0]} `}${r[1]}: ${r[2]} → ${r[3]}`;
   return rows.slice(0, 2).map(one).join(' · ') + (rows.length > 2 ? ` · +${rows.length - 2} more` : '');
 }
 
-// The entry's title: the one setting it changed, or the areas it touched.
+// The entry's title: the keys it touched, then the one or two settings it changed (or the areas):
+// "W, A, S, D · Rapid Trigger", "F2 · Key map", "Lighting · Effect".
 export function titleFor(rows, areas) {
   const settings = [...new Set(rows.map(r => r[1]))];
+  const keys = [...new Set(rows.map(r => r[0]))].filter(w => !AREA_ROWS.has(w) && !w.startsWith('Macro slot'));
   // Key-map rows name the layer (Base, Fn …), which says less than "Key map".
-  if (settings.length <= 2 && areas.length === 1 && areas[0] !== 'keymap') return settings.join(' and ');
-  return areas.map(a => AREAS[a]).join(' + ');
+  const what = settings.length <= 2 && areas.length === 1 && areas[0] !== 'keymap' ? settings.join(' and ') : areas.map(a => AREAS[a]).join(' + ');
+  if (keys.length) return `${keys.length > 4 ? `${keys.slice(0, 3).join(', ')} +${keys.length - 3}` : keys.join(', ')} · ${what}`;
+  const area = areas.length === 1 && ['lighting', 'keyboard'].includes(areas[0]) ? AREAS[areas[0]] : '';
+  return area && area !== what ? `${area} · ${what}` : what;
 }
 
 export const dayLabel = (iso, now = new Date()) => {

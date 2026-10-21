@@ -2919,18 +2919,31 @@ function recordHistory({ source, undoOf, rowsHtml, undoPayload, result, profile,
   const s = state.settings;
   const areas = [edits.length && 'keys', (keys.length || macros.length) && 'keymap', (light || patterns.length) && 'lighting', kb.length && 'keyboard'].filter(Boolean);
   const rows = rowsFromHtml(rowsHtml);
+  // Undoing an Undo entry is a redo: it puts back the change that Undo reversed.
+  const orig = undoOf ? state.history.find(h => h.id === undoOf) : null;
+  const redo = orig?.source === 'undo';
+  const base = redo ? state.history.find(h => h.id === orig.undoOf) ?? orig : orig;
+  const plainTitle = h => h.title.replace(/^(Undo|Redo): /, '');
   const entry = {
-    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, at: new Date().toISOString(), source, undoOf, profile,
+    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, at: new Date().toISOString(), source, undoOf, redo, profile,
     // Magnet settings (except switch types) and the key matrix belong to one profile.
     profileSpecific: edits.some(e => Object.keys(e).some(f => f !== 'slot' && f !== 'switchType')) || keys.some(c => !LAYERS[c.layer].fn),
     areas, rows, summary: summarize(rows),
-    title: source === 'undo' && state.history.some(h => h.id === undoOf) ? `Undo: ${state.history.find(h => h.id === undoOf).title}` : titleFor(rows, areas),
+    title: base ? `${redo ? 'Redo' : 'Undo'}: ${plainTitle(base)}` : titleFor(rows, areas),
     mismatches: result.mismatches.length, retried: result.retried, macros: macros.length,
-    undo: source === 'undo' ? null : undoPayload,
-    // What was written, to tell whether the keyboard has changed since (see historyStale).
-    applied: { edits, kb: kb.map(c => ({ field: c.field, to: c.to })), keys: keys.map(c => ({ layer: c.layer, slot: c.slot, to: c.to })), light: light?.to ?? null },
+    undo: undoPayload, // every entry, Undo entries included, can be reversed while the keyboard still matches it
+    // What the keyboard has after this write (its read-back), to tell whether it has changed since
+    // (historyStale): Undo is only offered while it still matches.
+    applied: {
+      edits: edits.map(e => Object.fromEntries(Object.keys(e).map(f => [f, f === 'slot' ? e.slot : s.magnet[f]?.[e.slot]]))),
+      kb: kb.map(c => ({ field: c.field, to: KB_FIELDS[c.field].current(s) })),
+      keys: keys.map(c => ({ layer: c.layer, slot: c.slot, to: deviceBytes(c.layer, c.slot) ?? c.to })),
+      light: light ? s.lighting ?? light.to : null,
+    },
   };
-  const list = state.history.map(h => (h.id === undoOf ? { ...h, undoneBy: entry.id, undoneAt: entry.at } : h));
+  // The entry reversed is marked; a redo also clears the mark on the change it put back.
+  const list = state.history.map(h => (h.id === undoOf ? { ...h, undoneBy: entry.id, undoneAt: entry.at }
+    : redo && h.id === base.id ? { ...h, undoneBy: undefined, undoneAt: undefined } : h));
   list.push(entry);
   state.history = saveHistory(s.deviceId, s.demo, list);
   return entry;
@@ -2951,11 +2964,18 @@ function historyStale(h) {
   return n;
 }
 
-// Why an entry can't be undone right now, or '' if it can.
+// An Undo entry that was reversed was redone; anything else was undone.
+const reversedWord = h => (h.source === 'undo' && !h.redo ? 'Redone' : 'Undone');
+
+// Why an entry can't be undone right now, or '' if it can. Whether it was undone before doesn't
+// matter: only whether the keyboard still has what the entry left it with.
 function historyUndoBlocked(h) {
-  if (!h.undo || h.source === 'undo') return 'An Undo can’t be undone here.';
-  if (h.undoneBy) return 'Already undone.';
+  if (!h.undo) return 'This entry was saved without what Undo needs.';
   if (!editable()) return state.settings?.source === 'device' ? 'Writing…' : 'Connect the keyboard to undo.';
+  const stale = historyStale(h);
+  if (stale) return h.undoneBy && state.history.some(x => x.id === h.undoneBy)
+    ? `${reversedWord(h)} at ${timeLabel(h.undoneAt)}: the keyboard no longer has these values.`
+    : `The keyboard has changed since: ${stale} of these value${stale === 1 ? ' is' : 's are'} different now.`;
   if (state.saving) return 'Saving…';
   if (hasAnyPending()) return 'Write or discard your unsaved changes first.';
   if (h.profileSpecific && h.profile !== (state.settings.profile ?? 0)) return `Switch to Profile ${h.profile + 1} to undo this.`;
@@ -2984,8 +3004,6 @@ async function undoHistoryEntry(id) {
   if (!h) return;
   const blocked = historyUndoBlocked(h);
   if (blocked) { showNotice(blocked); return; }
-  const stale = historyStale(h);
-  if (stale && !confirm(`${stale === 1 ? 'One of these settings has' : `${stale} of these settings have`} changed since this write. Undo puts everything in it back to how it was before. Continue?`)) return;
   const a = undoArgs(h.undo);
   // Values the keyboard already has (changed back since, here or in qmk.top) aren't written again.
   const m = state.settings.magnet;
@@ -3002,7 +3020,7 @@ const AREA_HUES = { keys: 'var(--accent)', keymap: 'var(--mt)', lighting: 'var(-
 const SOURCE_NAMES = { review: 'Review', instant: 'Instant', undo: 'Undo' };
 
 function historyStatus(h) {
-  if (h.undoneBy) return { cls: 'is-muted', text: `Undone ${timeLabel(h.undoneAt)}` };
+  if (historyStale(h)) return { cls: 'is-muted', stale: true, text: h.undoneBy ? `${reversedWord(h)} ${timeLabel(h.undoneAt)}` : 'Changed since' };
   if (h.mismatches) return { cls: 'is-warn', text: `${h.mismatches} didn’t stick` };
   const retried = h.retried ? ` · ${h.retried} retried` : '';
   if (h.macros) return { cls: 'is-ok', text: `✓ written · macro steps can’t be read back${retried}` };
@@ -3024,18 +3042,31 @@ function renderHistory() {
     if (days.at(-1)?.label !== d) days.push({ label: d, entries: [] });
     days.at(-1).entries.push(h);
   }
+  const byId = id => state.history.find(x => x.id === id);
+  // Which change an Undo or Redo entry reversed, and what later reversed this one: links that jump there.
+  const refHtml = h => {
+    const refs = [];
+    const orig = h.undoOf && byId(h.undoOf);
+    const target = orig && h.redo ? byId(orig.undoOf) ?? orig : orig;
+    if (target) refs.push(`<button type="button" class="link" data-hist-jump="${target.id}">${h.redo ? 'Redid' : 'Undid'} the ${timeLabel(target.at)} change</button>`);
+    const later = h.undoneBy && byId(h.undoneBy);
+    if (later && historyStale(h)) refs.push(`<button type="button" class="link" data-hist-jump="${later.id}">${reversedWord(h)} at ${timeLabel(later.at)}</button>`);
+    return refs.length ? `<div class="hist-refs">${refs.join('')}</div>` : '';
+  };
   const entryHtml = h => {
     const open = state.historyExpanded.has(h.id), st = historyStatus(h), blocked = historyUndoBlocked(h);
-    const canShowUndo = h.undo && h.source !== 'undo' && !h.undoneBy;
-    return `<div class="hist-entry${h.undoneBy ? ' is-undone' : ''}">
+    // Reversing an Undo entry puts the change back, so it reads Redo.
+    const action = h.source === 'undo' && !h.redo ? 'Redo' : 'Undo';
+    return `<div class="hist-entry${st.stale ? ' is-undone' : ''}" data-hist-id="${h.id}">
       <div class="hist-top">
         <button type="button" class="hist-main" data-hist-toggle="${h.id}" aria-expanded="${open}">
           <span class="hist-title"><i class="hist-dot" style="--hue:${AREA_HUES[h.areas[0]] ?? 'var(--muted)'}"></i>${escapeHtml(h.title)}</span>
           <span class="hist-sum">${escapeHtml(h.summary)}</span>
           <span class="hist-meta"><span class="hist-time">${timeLabel(h.at)}</span><span class="hist-tag tag-${h.source}">${SOURCE_NAMES[h.source]}</span>${h.profileSpecific ? `<span>Profile ${h.profile + 1}</span>` : ''}<span class="hist-status ${st.cls}">${st.text}</span></span>
         </button>
-        ${canShowUndo ? `<button type="button" class="btn btn-small" data-hist-undo="${h.id}" ${blocked ? 'aria-disabled="true"' : ''} title="${escapeHtml(blocked || 'Write the Before values back')}">Undo</button>` : ''}
+        ${h.undo ? `<button type="button" class="btn btn-small" data-hist-undo="${h.id}" ${blocked ? 'aria-disabled="true"' : ''} title="${escapeHtml(blocked || (action === 'Redo' ? 'Put this change back' : 'Write the Before values back'))}">${action}</button>` : ''}
       </div>
+      ${refHtml(h)}
       ${open ? `<div class="hist-rows" role="table" aria-label="What changed">${h.rows.map(r => `<span role="cell">${escapeHtml(r[0])}</span><span role="cell" class="muted">${escapeHtml(r[1])}</span><span role="cell" class="hist-change">${escapeHtml(r[2])} → <strong>${escapeHtml(r[3])}</strong></span>`).join('')}</div>` : ''}
     </div>`;
   };
@@ -3058,6 +3089,15 @@ function renderHistory() {
     renderHistory();
   });
   el.querySelectorAll('[data-hist-undo]').forEach(b => b.onclick = () => undoHistoryEntry(b.dataset.histUndo));
+  el.querySelectorAll('[data-hist-jump]').forEach(b => b.onclick = () => {
+    const id = b.dataset.histJump;
+    if (!el.querySelector(`[data-hist-id="${id}"]`)) { state.historyFilter = 'all'; renderHistory(); }
+    const target = el.querySelector(`[data-hist-id="${id}"]`);
+    if (!target) return;
+    target.scrollIntoView({ block: 'nearest' });
+    target.classList.add('is-flash');
+    setTimeout(() => target.classList.remove('is-flash'), 1600);
+  });
   $('btnHistoryClear')?.addEventListener('click', () => {
     if (!confirm('Clear the history for this keyboard? Nothing on the keyboard changes.')) return;
     state.history = saveHistory(state.settings.deviceId, state.settings.demo, []);
@@ -3132,10 +3172,11 @@ function renderSaveStatus() {
   if (!show) return;
   const st = state.saveStatus;
   const latest = st?.entryId ? state.history.find(h => h.id === st.entryId) : null;
-  const canUndo = st?.kind === 'saved' && latest && latest.source !== 'undo' && !latest.undoneBy && !historyUndoBlocked(latest);
+  const canUndo = st?.kind === 'saved' && latest && !historyUndoBlocked(latest);
+  const undoLabel = latest?.source === 'undo' && !latest.redo ? 'Redo' : 'Undo';
   const text = st?.text ?? (editable() ? 'Instant save on' : 'Instant save on · connect to write');
   el.className = `save-status${st ? ` is-${st.kind}` : ''}`;
-  el.innerHTML = `<i class="save-dot" aria-hidden="true"></i><span class="save-text">${escapeHtml(text)}</span>${canUndo ? '<button type="button" class="link" id="btnSaveUndo">Undo</button>' : ''}${st?.kind === 'error' && !st.entryId ? '<button type="button" class="link" id="btnSaveRetry">Retry</button>' : ''}${st?.kind === 'error' && st.entryId ? '<button type="button" class="link" id="btnSaveHistory">History</button>' : ''}`;
+  el.innerHTML = `<i class="save-dot" aria-hidden="true"></i><span class="save-text">${escapeHtml(text)}</span>${canUndo ? `<button type="button" class="link" id="btnSaveUndo">${undoLabel}</button>` : ''}${st?.kind === 'error' && !st.entryId ? '<button type="button" class="link" id="btnSaveRetry">Retry</button>' : ''}${st?.kind === 'error' && st.entryId ? '<button type="button" class="link" id="btnSaveHistory">History</button>' : ''}`;
   el.title = text;
   $('btnSaveUndo')?.addEventListener('click', () => undoHistoryEntry(latest.id));
   $('btnSaveRetry')?.addEventListener('click', () => { instantFailedSig = null; state.saveStatus = null; showError(null); runInstantSave({ now: true }); });

@@ -207,9 +207,16 @@ scroll down; `MOUSE_ACTIONS` in actions.js) on base and Fn layers, never on mod-
 - **History** (clock button in the header) lists every write (Review, Instant or Undo), newest first by day,
   with filters (Key settings, Key map, Lighting, Keyboard), the rows as the review dialog words them,
   read-back status and **Undo** per entry. Kept in this browser per keyboard and survives a reload.
+- **Entries are restore points:** Undo is offered whenever the keyboard still has what that entry left
+  it with (`historyStale`, compared with the read-back stored as `applied`), whether or not it was undone
+  before; otherwise it's greyed out with how many values differ. Undo entries can be reversed too
+  (button reads **Redo**). Titles name the keys ("W, A, S, D · Rapid Trigger"); Undo/Redo entries link
+  to the change they reversed ("Undid the 09:07 change") and the reversed entry links back.
 - **Undo from History** writes the Before values back without the dialog and adds its own entry. It is
-  blocked while unsaved changes exist, from another profile for profile-specific entries, and it skips
-  values the keyboard already has; it asks first if the keyboard changed since.
+  blocked while unsaved changes exist and from another profile for profile-specific entries, and it
+  skips values the keyboard already has.
+- `writeKeySettings` now runs in the device queue (`exclusive`) like every other operation; before, a
+  write could interleave with the key map loading after startup ("A different keyboard is connected").
 - **Instant save** (header switch, off by default, `rt75-studio-save`): pending changes are written
   about 1 s after the last edit (not while a slider is held or a dialog is open), via
   `applyEdits(..., { quiet: true })`, which keeps the page editable and only clears pending values that

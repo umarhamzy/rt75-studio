@@ -5,17 +5,21 @@ let failures = 0;
 const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${n}${x ? ' — ' + x : ''}`); if (!ok) failures++; };
 
 const wasd = ['W', 'A', 'S', 'D'].map(k => [k, 'Actuation point', '1.20 mm', '0.80 mm']);
-check('same change on several keys is one line', summarize(wasd) === 'W, A, S, D: 1.20 mm → 0.80 mm', summarize(wasd));
+check('same change on several keys: just the change', summarize(wasd) === 'Actuation point: 1.20 mm → 0.80 mm', summarize(wasd));
+check('title names the keys', titleFor(wasd, ['keys']) === 'W, A, S, D · Actuation point', titleFor(wasd, ['keys']));
 const q = [['Q', 'Actuation point', '1.30 mm', '1.00 mm'], ['Q', 'Release point', '1.30 mm', '1.00 mm']];
-check('one key, two settings', summarize(q) === 'Q: actuation point 1.30 mm → 1.00 mm, release point 1.30 mm → 1.00 mm', summarize(q));
+check('one key, two settings', summarize(q) === 'Actuation point 1.30 mm → 1.00 mm, release point 1.30 mm → 1.00 mm', summarize(q));
+check('title: key and two settings', titleFor(q, ['keys']) === 'Q · Actuation point and Release point', titleFor(q, ['keys']));
+const remap = [['F2', 'Base', 'F2', 'Left click']];
+check('one remap', summarize(remap) === 'Base: F2 → Left click' && titleFor(remap, ['keymap']) === 'F2 · Key map', `${titleFor(remap, ['keymap'])} | ${summarize(remap)}`);
 const mixed = [['E', 'Base', 'E', 'Left click'], ['Keyboard', 'Polling rate', '1 kHz', '8 kHz'], ['F', 'Base', 'F', 'Mute']];
 check('mixed rows: first two and a count', summarize(mixed) === 'E Base: E → Left click · Polling rate: 1 kHz → 8 kHz · +1 more', summarize(mixed));
+check('title: several areas', titleFor(mixed, ['keymap', 'keyboard']) === 'E, F · Key map + Keyboard', titleFor(mixed, ['keymap', 'keyboard']));
 const many = 'QWERTYUIO'.split('').map(k => [k, 'Switch', 'Outemu', 'Magneto']);
-check('long key lists are cut', summarize(many).startsWith('Q, W, E, R, T +4: '), summarize(many));
-check('title: the setting', titleFor(wasd, ['keys']) === 'Actuation point');
-check('title: two settings', titleFor(q, ['keys']) === 'Actuation point and Release point');
-check('title: key map says Key map', titleFor([['E', 'Base', 'E', 'Left click']], ['keymap']) === 'Key map');
-check('title: several areas', titleFor(mixed, ['keymap', 'keyboard']) === 'Key map + Keyboard');
+check('long key lists are cut in the title', titleFor(many, ['keys']) === 'Q, W, E +6 · Switch', titleFor(many, ['keys']));
+const light = [['Lighting', 'Effect', 'Wave', 'Breathing']];
+check('lighting title', titleFor(light, ['lighting']) === 'Lighting · Effect' && summarize(light) === 'Effect: Wave → Breathing', titleFor(light, ['lighting']));
+check('keyboard title', titleFor([['Keyboard', 'Polling rate', '1 kHz', '8 kHz']], ['keyboard']) === 'Keyboard · Polling rate');
 
 // No localStorage in node: kept in memory for the visit, capped at MAX_ENTRIES.
 const list = Array.from({ length: MAX_ENTRIES + 25 }, (_, i) => ({ id: String(i) }));

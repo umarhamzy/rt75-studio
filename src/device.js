@@ -528,12 +528,17 @@ export function buildWritePackets(edits, bounds) {
 // Sends the edits, then reads the touched parameters back and compares. Values that read back
 // wrong are re-sent once after a pause, then checked again.
 // Returns { magnet: fresh arrays for the touched params, mismatches: [...], retried: count }.
+// Queued with the other device operations (exclusive), so it can't interleave with a background
+// read such as the key map loading after startup.
 export async function writeKeySettings(dev, settings, edits, onProgress = () => {}) {
   const bounds = writeBounds(settings.travelStep);
   if (!bounds) throw new Error(`Unknown travel precision (step ${settings.travelStep}); writing is disabled.`);
   const packets = buildWritePackets(edits, bounds); // validates everything before sending
   if (!packets.length) return { magnet: {}, mismatches: [], retried: 0 };
+  return exclusive(() => sendKeySettings(dev, settings, packets, bounds, onProgress));
+}
 
+async function sendKeySettings(dev, settings, packets, bounds, onProgress) {
   if (!dev.opened) await dev.open();
   const t = new Transport(dev);
   const touched = [...new Set(packets.map(p => p.field))];

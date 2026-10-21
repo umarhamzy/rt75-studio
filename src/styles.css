@@ -1270,3 +1270,8 @@ body.no-lanes .key.heat .key-marks { right: 4px; }
 .hist-empty { margin: 8px 0; font-size: 13px; }
 .hist-foot { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
 .hist-clear { align-self: flex-start; font-size: 12px; }
+.hist-refs { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 12px; }
+.hist-refs .link { font-size: 12px; font-weight: 500; }
+/* The entry a "Undid the 09:07 change" link jumped to. */
+.hist-entry.is-flash { animation: hist-flash 1.6s ease-out; }
+@keyframes hist-flash { 0%, 40% { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); } 100% { border-color: var(--line-soft); box-shadow: none; } }
