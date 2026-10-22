@@ -30,7 +30,8 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
   const store = () => profiles[profile];
 
   // Vendor report interface: while 0x1B 01 is on, push a repeating press cycle
-  // (a full press, then a light press that stops short of the actuation point).
+  // (a full press, then a light press that stops short of the actuation point and is held still
+  // for 0.7 s, for Set by pressing).
   const input = new EventTarget();
   Object.assign(input, {
     productName: 'YUNZII RT75 PRO Keyboard (demo)', vendorId: 0x3151, productId: 0x5030,
@@ -45,9 +46,9 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
     const t0 = performance.now();
     timer = setInterval(() => {
       const t = (performance.now() - t0) % 2400;
-      const peak = t < 1200 ? 3.3 : 0.9;
+      const full = t < 1200, peak = full ? 3.3 : 0.9, hold = full ? 200 : 700;
       const p = t % 1200;
-      const depth = p < 180 ? peak * p / 180 : p < 380 ? peak : p < 560 ? peak * (1 - (p - 380) / 180) : 0;
+      const depth = p < 180 ? peak * p / 180 : p < 180 + hold ? peak : p < 360 + hold ? peak * (1 - (p - 180 - hold) / 180) : 0;
       const raw = Math.round(depth * 200);
       const data = new Uint8Array(31);
       data.set([0x1b, raw & 255, raw >> 8]);

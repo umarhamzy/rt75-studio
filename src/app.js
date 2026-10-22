@@ -88,6 +88,7 @@ const state = {
   saveStatus: null,          // { kind: 'saving' | 'saved' | 'error', text, entryId? } for the header chip
   clip: null,                // a key's settings copied with Copy / Ctrl+C (design KC1): see copyKey
   clipParts: { travel: true, rt: true, dz: true, mode: false }, // what Paste takes from it
+  pressSet: null,            // "Set by pressing" running (design LD2): { slots, stop, depth, held, anchor, since }
 };
 const $ = id => document.getElementById(id);
 
@@ -765,6 +766,8 @@ function renderInspector() {
 
 function renderInspectorBody() {
   const el = $('inspector');
+  // Set by pressing belongs to the keys it started for, on a Configuration tab.
+  if (state.pressSet && (!CONFIG_VIEWS.has(state.view) || [...state.selected].sort().join() !== state.pressSet.slots.join())) stopPressSet();
   if (state.view === 'live' && state.settings) { renderLivePanel(); return; }
   if (state.view === 'lighting' && state.settings) { renderLightingPanel(); return; }
   if (state.view === 'macros' && state.settings) { renderLibraryPanel(); return; }
@@ -820,7 +823,7 @@ function renderInspectorBody() {
   }
   el.innerHTML = html;
   el.querySelector('[data-jump]')?.addEventListener('click', e => { state.selected = new Set([Number(e.currentTarget.dataset.jump)]); refresh(); });
-  if (editable()) { wireEditor(el); wireKeyCopy(el); }
+  if (editable()) { wireEditor(el); wireKeyCopy(el); wirePressSet(el); }
 }
 
 // The side panel's settings as sections, one per heading, separated by a rule; each heading has a
@@ -936,7 +939,9 @@ function editorHtml(datas) {
       ${travelSlider('act', linked ? 'Press & release' : 'Press (actuation)', act, T.min, deepest([...state.selected]), { ...dz, effective: true })}
       ${linked ? '' : travelSlider('rel', 'Release', rel, T.min, deepest([...state.selected]), { ...dz, tone: 'rel' })}
     </div>
-    <label class="check"><input type="checkbox" id="relLink" ${linked ? 'checked' : ''}> Release at the same point</label>    ${tdz > 0 && act !== null ? `<p class="note">With the ${mm(tdz)} mm top dead zone, this key triggers at about <strong>${mm(act + tdz)} mm</strong> (dashed line): the keyboard adds the two together (tested on the RT75).${act + tdz > LIMITS.travel.max - (bdz ?? 0) ? ' That’s inside the bottom dead zone, so the key may never trigger.' : ''}</p>` : ''}`}
+    <label class="check"><input type="checkbox" id="relLink" ${linked ? 'checked' : ''}> Release at the same point</label>
+    ${pressSetHtml(datas)}
+    ${tdz > 0 && act !== null ? `<p class="note">With the ${mm(tdz)} mm top dead zone, this key triggers at about <strong>${mm(act + tdz)} mm</strong> (dashed line): the keyboard adds the two together (tested on the RT75).${act + tdz > LIMITS.travel.max - (bdz ?? 0) ? ' That’s inside the bottom dead zone, so the key may never trigger.' : ''}</p>` : ''}`}
 
     <h3>Rapid Trigger</h3>
     <label class="switch"><input type="checkbox" id="rtToggle" ${rt ? 'checked' : ''}><span class="switch-track"></span>
@@ -2377,8 +2382,110 @@ function liveUnavailableReason() {
   return null;
 }
 
+// ---------- Set by pressing (design LD2) ----------
+// Uses the live test's depth reports for the selected keys: press one of them to where it should
+// trigger and hold it still; that depth is offered as the actuation point. The RT75 adds the top
+// dead zone to the actuation point (tested 2026-10-18), so the actuation is set to the pressed depth
+// minus each key's top dead zone, and the key triggers where it was pressed. Needs the USB cable.
+const PS_MIN = 0.15, PS_STILL = 0.04, PS_HOLD_MS = 450;
+
+async function startPressSet() {
+  const why = liveUnavailableReason();
+  if (why || state.live || state.pressSet) { if (why) showNotice(why); return; }
+  const ps = { slots: [...state.selected].sort(), stop: null, depth: 0, held: null, anchor: 0, since: 0 };
+  state.pressSet = ps;
+  refresh();
+  try {
+    ps.stop = await startLiveTravel(state.dev, state.settings, depth => {
+      if (state.pressSet !== ps) return;
+      const now = performance.now();
+      ps.depth = depth;
+      if (depth < PS_MIN) ps.since = 0;
+      else if (!ps.since || Math.abs(depth - ps.anchor) > PS_STILL) { ps.anchor = depth; ps.since = now; }
+      else if (now - ps.since >= PS_HOLD_MS) ps.held = depth;
+      updatePressSet();
+    }, state.dev.demoInput ?? null);
+  } catch (e) {
+    if (state.pressSet === ps) state.pressSet = null;
+    showError('Could not start Set by pressing: ' + e.message);
+    refresh();
+  }
+}
+
+async function stopPressSet() {
+  const ps = state.pressSet;
+  if (!ps) return;
+  state.pressSet = null;
+  try { await ps.stop?.(); } catch (e) { showError('Stopping the depth reports failed: ' + e.message + ' Unplugging the keyboard resets it.'); }
+  renderInspector();
+}
+
+// The depth to use: 0.05 mm steps, or 0.01 mm with Shift (as the sliders drag).
+const pressDepth = (held, fine) => (fine ? Math.round(held * 100) / 100 : Math.round(held / 0.05) * 0.05);
+
+function usePressSet(fine) {
+  const ps = state.pressSet;
+  if (!ps?.held || !editable()) return;
+  const depth = pressDepth(ps.held, fine), step = state.settings.travelStep, T = LIMITS.travel;
+  const linked = $('relLink')?.checked;
+  for (const s of ps.slots) {
+    if (ADVANCED.has(raw(s, 'mode') & 0x7f)) continue;
+    const act = depth - (raw(s, 'topDeadZone') ?? 0) / step;
+    setPending(s, 'actuation', toRaw(act, T.min, deepest([s])));
+    if (linked) setPending(s, 'release', toRaw(act, T.min, deepest([s])));
+  }
+  stopPressSet();
+  refresh();
+}
+
+function pressSetHtml(datas) {
+  if (datas.every(d => ADVANCED.has(d.modeId))) return '';
+  const ps = state.pressSet, why = liveUnavailableReason();
+  const tdz = common(datas, d => d.topDeadZone);
+  const who = datas.length === 1 ? keyBySlot([...state.selected][0])?.label ?? 'the key' : 'one of the selected keys';
+  if (!ps) {
+    return `<div class="ps-box"><div class="ps-head"><span class="ps-title">Set by pressing</span>
+      <button type="button" class="btn btn-small" id="btnPsStart" ${why ? 'disabled' : ''} title="${escapeHtml(why ?? 'Press the key to where it should trigger')}">Start</button></div>
+      ${why && /USB/.test(why) ? `<span class="ps-note">${escapeHtml(why)}</span>` : ''}</div>`;
+  }
+  return `<div class="ps-box is-on"><div class="ps-head"><span class="ps-title">Set by pressing</span>
+      <button type="button" class="btn btn-small" id="btnPsStop">Cancel</button></div>
+    <span class="ps-note">Press ${escapeHtml(who)} to where it should trigger and hold it still for a moment.</span>
+    <div class="ps-bar" aria-hidden="true"><span class="ps-fill" id="psFill"></span><span class="ps-held" id="psHeld"></span></div>
+    <div class="ps-read"><span id="psNow">now 0.00 mm</span><span id="psHeldText" class="ps-held-text">hold still…</span></div>
+    ${tdz ? `<span class="ps-note help">The ${mm(tdz)} mm top dead zone is taken off, so the key triggers where you press it.</span>` : ''}
+    <button type="button" class="btn btn-primary btn-small" id="btnPsUse" disabled title="Shift-click for 0.01 mm">Waiting for a held press</button>
+  </div>`;
+}
+
+// Updates the bar and buttons in place (depth reports arrive every few milliseconds).
+function updatePressSet() {
+  const ps = state.pressSet;
+  if (!ps) return;
+  const pct = v => `${Math.min(100, (v / MAX_TRAVEL_MM) * 100).toFixed(1)}%`;
+  const fill = $('psFill'), heldEl = $('psHeld'), use = $('btnPsUse');
+  if (!fill) return;
+  fill.style.width = pct(ps.depth);
+  $('psNow').textContent = `now ${mm(ps.depth)} mm`;
+  heldEl.hidden = !ps.held;
+  if (ps.held) {
+    heldEl.style.left = pct(ps.held);
+    $('psHeldText').textContent = `held ${mm(pressDepth(ps.held, false))} mm`;
+    use.disabled = false;
+    use.textContent = `Use ${mm(pressDepth(ps.held, false))} mm`;
+  }
+}
+
+function wirePressSet(el) {
+  el.querySelector('#btnPsStart')?.addEventListener('click', startPressSet);
+  el.querySelector('#btnPsStop')?.addEventListener('click', stopPressSet);
+  el.querySelector('#btnPsUse')?.addEventListener('click', e => usePressSet(e.shiftKey));
+  updatePressSet();
+}
+
 async function startLive() {
   if (liveUnavailableReason() || state.live) return;
+  if (state.pressSet) await stopPressSet();
   showError(null);
   const live = { stop: null, depth: 0, peak: 0, trace: [], focus: null, down: new Set(), raf: 0 };
   // Until a key is pressed, measure against the selected key (if exactly one).
@@ -2770,6 +2877,7 @@ function changeRows(edits, before) {
 }
 
 async function openReview() {
+  if (state.pressSet) stopPressSet();
   if (instantRun) await instantRun;
   if (!editable() || !hasAnyPending()) return;
   const edits = pendingEdits();
@@ -3349,7 +3457,7 @@ function scheduleInstantSave() {
 
 // Not while a slider is held, a key is being captured or a dialog is open: try again shortly.
 function instantPaused() {
-  return pointerHeld || !!state.capture || !!state.live || $('reviewDialog').open || $('macroDialog').open || $('presetDialog').open;
+  return pointerHeld || !!state.capture || !!state.live || !!state.pressSet || $('reviewDialog').open || $('macroDialog').open || $('presetDialog').open;
 }
 
 function runInstantSave({ now = false } = {}) {
@@ -4041,6 +4149,7 @@ function renderNav() {
 
 function setView(view) {
   if (view !== 'live' && state.live) stopLive();
+  if (state.pressSet) stopPressSet();
   state.view = view;
   if (CONFIG_VIEWS.has(view)) lastConfigView = view;
   refresh(); // the inspector differs per view (key map, macros, lighting, live test, keyboard settings)

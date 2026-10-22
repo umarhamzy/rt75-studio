@@ -1285,3 +1285,17 @@ body.no-lanes .key.heat .key-marks { right: 4px; }
 .kc-parts { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .kc-parts .check { margin: 0; font-size: 12px; }
 .similar-wrap[hidden] { display: none; }
+
+/* Set by pressing (design LD2): under the travel sliders. */
+.ps-box { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 4px; padding: 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line-soft); }
+.ps-box.is-on { border-color: color-mix(in oklab, var(--rt) 40%, var(--line)); }
+.ps-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ps-title { font-weight: 600; font-size: 13px; }
+.ps-note { font-size: 12px; color: var(--text-2); }
+.ps-bar { position: relative; height: 12px; border-radius: 6px; background: var(--surface-3); overflow: hidden; }
+.ps-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--rt); }
+.ps-held { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--accent); }
+.ps-held[hidden] { display: none; }
+.ps-read { display: flex; justify-content: space-between; font: 500 12px var(--mono); color: var(--text-2); }
+.ps-held-text { color: var(--accent-text); }
+.ps-box .btn-primary { align-self: stretch; }

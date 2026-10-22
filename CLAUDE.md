@@ -246,6 +246,13 @@ copies mod-tap's hold and hold time, toggle's type, DKS's moments, trigger point
 keeps its own key as tap/toggle/DKS action 1. Snap pairs aren't copied; travel and dead zones skip
 DKS/mod-tap/toggle keys. **Select similar…** next to Select… (same actuation, RT, key mode, everything).
 
+**Set by pressing (feature/press-depth, on top of feature/key-copy; demo-tested):** design LD2 (canvas
+Round 23). Under the travel sliders: Start runs the live test's depth reports (USB only); press a selected
+key and hold it still (±0.04 mm for 0.45 s) and "Use X mm" sets the actuation (and release when linked)
+as an unsaved edit, in 0.05 mm steps (Shift-click 0.01). The pressed depth is the trigger point, so each
+key's top dead zone is taken off. Stops on another selection, page, Review, live test or Esc; Instant save
+waits while it runs. The demo's light press now holds still for 0.7 s.
+
 **Next:** the user's choice.
 Knob remapping isn't wanted.
 
