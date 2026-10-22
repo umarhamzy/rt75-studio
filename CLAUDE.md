@@ -239,6 +239,13 @@ Ctrl+Enter opens Review, Ctrl+A selects every key (`onShortcut`). Ignored while 
 dialog, during the live test, key capture or macro recording; waits for a running write. Named in the
 History and Review button tooltips.
 
+**Copy and paste between keys (feature/key-copy, on top of feature/shortcuts; demo-tested):** design KC1
+(canvas Round 23). Side panel Copy / Paste (Ctrl+C / Ctrl+V on the Configuration tabs) with ticks for
+Travel, Rapid Trigger, Dead zones and Key mode (off by default); pasted as unsaved edits. Key mode
+copies mod-tap's hold and hold time, toggle's type, DKS's moments, trigger point and actions 2–4; each key
+keeps its own key as tap/toggle/DKS action 1. Snap pairs aren't copied; travel and dead zones skip
+DKS/mod-tap/toggle keys. **Select similar…** next to Select… (same actuation, RT, key mode, everything).
+
 **Next:** the user's choice.
 Knob remapping isn't wanted.
 

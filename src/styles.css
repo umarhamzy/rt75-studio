@@ -1275,3 +1275,13 @@ body.no-lanes .key.heat .key-marks { right: 4px; }
 /* The entry a "Undid the 09:07 change" link jumped to. */
 .hist-entry.is-flash { animation: hist-flash 1.6s ease-out; }
 @keyframes hist-flash { 0%, 40% { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); } 100% { border-color: var(--line-soft); box-shadow: none; } }
+
+/* Copy and paste between keys (design KC1): a row under the side panel's title, and what was copied. */
+.kc-row { display: flex; align-items: center; gap: 6px; margin: -2px 0 8px; }
+.kc-row .btn-small.is-ready { border-color: var(--accent); color: var(--accent-text); }
+.kc-from { font-size: 12px; color: var(--muted); }
+.kc-clip { display: flex; flex-direction: column; gap: 6px; margin: 0 0 10px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line-soft); }
+.kc-sum { font: 500 12px var(--mono); color: var(--text-2); }
+.kc-parts { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.kc-parts .check { margin: 0; font-size: 12px; }
+.similar-wrap[hidden] { display: none; }

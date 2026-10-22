@@ -86,6 +86,8 @@ const state = {
   historyExpanded: new Set(), // entry ids showing their rows
   saving: false,             // an Instant save write is running (the UI stays editable meanwhile)
   saveStatus: null,          // { kind: 'saving' | 'saved' | 'error', text, entryId? } for the header chip
+  clip: null,                // a key's settings copied with Copy / Ctrl+C (design KC1): see copyKey
+  clipParts: { travel: true, rt: true, dz: true, mode: false }, // what Paste takes from it
 };
 const $ = id => document.getElementById(id);
 
@@ -654,6 +656,12 @@ function renderSelectionTools() {
   $('selectCount').textContent = state.selected.size ? `${state.selected.size} selected` : 'Ctrl/Shift-click to select several';
   $('btnPresets').hidden = state.view === 'switches'; // presets hold travel settings, not switch types
   $('btnClearSel').disabled = !state.selected.size;
+  // Select similar: keys like the one selected (design KC1).
+  const sim = $('selectSimilar');
+  sim.parentElement.hidden = !CONFIG_VIEWS.has(state.view);
+  sim.disabled = state.selected.size !== 1;
+  const one = state.selected.size === 1 ? [...state.selected][0] : null;
+  for (const o of sim.options) if (SIMILAR[o.value]) o.dataset.meta = one === null ? '' : `${similarKeys(one, o.value).length} keys`;
 }
 
 function renderStats() {
@@ -793,7 +801,7 @@ function renderInspectorBody() {
   // Revert sits in the title row so showing it never moves the controls below.
   const revert = editable() && datas.some(d => d.pending)
     ? `<button class="revert-chip" id="btnRevertSel" type="button" title="Discard unsaved changes on ${keys.length === 1 ? 'this key' : 'these keys'}">Unsaved · Revert</button>` : '';
-  let html = `<div class="insp-head"><h2>${title}</h2>${revert}</div><p class="sub">${subtitle}</p>`;
+  let html = `<div class="insp-head"><h2>${title}</h2>${revert}</div><p class="sub">${subtitle}</p>${editable() ? keyCopyHtml(keys) : ''}`;
   if (single && !editable()) html += `<div class="travel" aria-hidden="true">${travelDiagram(single)}</div>`;
 
   let body = editable() ? editorHtml(datas) : readOnlyHtml(datas, single);
@@ -812,7 +820,7 @@ function renderInspectorBody() {
   }
   el.innerHTML = html;
   el.querySelector('[data-jump]')?.addEventListener('click', e => { state.selected = new Set([Number(e.currentTarget.dataset.jump)]); refresh(); });
-  if (editable()) wireEditor(el);
+  if (editable()) { wireEditor(el); wireKeyCopy(el); }
 }
 
 // The side panel's settings as sections, one per heading, separated by a rule; each heading has a
@@ -2928,6 +2936,120 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
   }
 }
 
+// ---------- Copy and paste between keys (design KC1) ----------
+// Copy takes one key's settings (a snapshot, so later edits to it don't change the copy); Paste
+// applies the ticked parts to the selected keys as unsaved edits. Key mode copies mod-tap's hold key
+// and hold time, toggle's type, and DKS's moments, trigger point and actions 2–4; each key keeps its
+// own key as the tap action, toggle action or DKS action 1. Snap Tap pairs aren't copied (they belong
+// to two keys), and travel and dead zones don't go onto DKS, mod-tap or toggle keys (read-only there).
+const KC_PARTS = [['travel', 'Travel'], ['rt', 'Rapid Trigger'], ['dz', 'Dead zones'], ['mode', 'Key mode']];
+
+function copyKey(slot) {
+  const mode = keyModeOf(slot), m = state.settings.magnet;
+  state.clip = {
+    from: slot, mode, modeByte: raw(slot, 'mode'),
+    actuation: raw(slot, 'actuation'), release: raw(slot, 'release'), rtPress: raw(slot, 'rtPress'), rtRelease: raw(slot, 'rtRelease'),
+    topDeadZone: raw(slot, 'topDeadZone') ?? 0, bottomDeadZone: raw(slot, 'bottomDeadZone'),
+    mt: mode === 'mt' ? { hold: layerBytes('base', slot), time: raw(slot, 'mtTime') } : null,
+    dks: mode === 'dks' && m.dksTriggers ? { triggers: raw(slot, 'dksTriggers'), travel: raw(slot, 'dksTravel'), layers: ['tap', 'sub2', 'sub3'].map(l => layerBytes(l, slot)) } : null,
+  };
+  showNotice(`Copied ${keyBySlot(slot).label}’s settings. Select keys, then Paste (Ctrl+V).`, 4000);
+}
+
+function clipSummary(c) {
+  const step = state.settings.travelStep, parts = [];
+  parts.push(`${mm3(c.actuation / step)}${c.release !== c.actuation ? `/${mm3(c.release / step)}` : ''} mm`);
+  if (c.modeByte & 0x80) parts.push(`RT ${mm3(c.rtPress / step)}${c.rtRelease !== c.rtPress ? `/${mm3(c.rtRelease / step)}` : ''}`);
+  parts.push(`dead zones ${mm(c.topDeadZone / step)}/${mm(c.bottomDeadZone / step)}`);
+  parts.push({ normal: 'Normal', mt: 'Mod-tap', dks: 'DKS', toggle: MODES[c.modeByte & 0x7f], snap: 'Snap Tap' }[c.mode] ?? 'Normal');
+  return parts.join(' · ');
+}
+
+// Pastes the ticked parts onto slots. Returns { changed, skipped } (skipped: keys a part couldn't go on).
+function pasteKey(slots) {
+  const c = state.clip, parts = state.clipParts;
+  if (!c) return { changed: 0, skipped: 0 };
+  let changed = 0, skipped = 0;
+  const step = state.settings.travelStep;
+  for (const t of slots) {
+    if (t === c.from || !MAGNETIC.some(k => k.slot === t)) continue;
+    const before = JSON.stringify([state.pending.get(t), ...DKS_LAYERS.map(l => state.pendingKeys.get(`${l}:${t}`))]);
+    if (parts.mode && ['normal', 'mt', 'dks', 'toggle'].includes(c.mode)) {
+      if (!modeEligible(t) || (c.mode === 'dks' && !dksReady())) skipped++;
+      else {
+        if (c.mode !== keyModeOf(t)) setKeyMode(t, c.mode, c.mode === 'toggle' ? c.modeByte & 0x7f : TG_HOLD);
+        if (c.mode === 'toggle') setMode(t, c.modeByte & 0x7f);
+        if (c.mode === 'mt' && c.mt) { setModTapSide([t], 'hold', c.mt.hold); setPending(t, 'mtTime', c.mt.time); }
+        if (c.mode === 'dks' && c.dks) {
+          setPending(t, 'dksTriggers', c.dks.triggers);
+          setPending(t, 'dksTravel', c.dks.travel);
+          ['tap', 'sub2', 'sub3'].forEach((l, i) => setKeyPending(l, t, c.dks.layers[i]));
+        }
+      }
+    } else if (parts.mode && c.mode === 'snap') skipped++;
+    if (parts.rt) {
+      const on = (c.modeByte & 0x80) !== 0;
+      setPending(t, 'mode', (raw(t, 'mode') & 0x7f) | (on ? 0x80 : 0));
+      if (on) { setPending(t, 'rtPress', c.rtPress); setPending(t, 'rtRelease', c.rtRelease); }
+    }
+    const fixed = ADVANCED.has(raw(t, 'mode') & 0x7f);
+    if ((parts.dz || parts.travel) && fixed) skipped++;
+    else {
+      if (parts.dz) { setPending(t, 'topDeadZone', c.topDeadZone); setPending(t, 'bottomDeadZone', c.bottomDeadZone); }
+      if (parts.travel) {
+        // Not deeper than this key's bottom dead zone allows (as the sliders do).
+        const limit = Math.round(deepest([t]) * step);
+        setPending(t, 'actuation', Math.min(c.actuation, limit));
+        setPending(t, 'release', Math.min(c.release, limit));
+      }
+    }
+    if (JSON.stringify([state.pending.get(t), ...DKS_LAYERS.map(l => state.pendingKeys.get(`${l}:${t}`))]) !== before) changed++;
+  }
+  return { changed, skipped };
+}
+
+function pasteToSelection() {
+  const c = state.clip;
+  if (!c || !editable()) return;
+  const targets = [...state.selected].filter(s => s !== c.from);
+  if (!targets.length) { showNotice('Select the keys to paste onto first.'); return; }
+  const { changed, skipped } = pasteKey(targets);
+  refresh();
+  const what = KC_PARTS.filter(([id]) => state.clipParts[id]).map(([id, l]) => (id === 'rt' ? l : l.toLowerCase())).join(', ');
+  showNotice(`Pasted ${keyBySlot(c.from).label}’s ${what || 'nothing'} to ${changed} key${changed === 1 ? '' : 's'}.${skipped ? ` ${skipped} part${skipped === 1 ? ' was' : 's were'} skipped: travel and dead zones don’t go onto DKS, mod-tap or toggle keys, and Snap Tap pairs aren’t copied.` : ''}`, 6000);
+}
+
+function keyCopyHtml(keys) {
+  const c = state.clip;
+  const targets = c ? keys.filter(k => k.slot !== c.from).length : 0;
+  const single = keys.length === 1;
+  return `<div class="kc-row">
+      <button type="button" class="btn btn-small" id="btnKeyCopy" ${single ? '' : 'disabled'} title="${single ? 'Copy this key’s settings (Ctrl+C)' : 'Select one key to copy'}">Copy</button>
+      <button type="button" class="btn btn-small${c && targets ? ' is-ready' : ''}" id="btnKeyPaste" ${c && targets ? '' : 'disabled'} title="Paste (Ctrl+V)">${c && targets ? `Paste to ${targets} key${targets === 1 ? '' : 's'}` : 'Paste'}</button>
+      ${c ? `<span class="kc-from">from <strong>${escapeHtml(keyBySlot(c.from).label)}</strong></span>` : ''}
+    </div>
+    ${c ? `<div class="kc-clip"><span class="kc-sum">${escapeHtml(clipSummary(c))}</span>
+      <div class="kc-parts" role="group" aria-label="What to paste">${KC_PARTS.map(([id, label]) => `<label class="check"><input type="checkbox" data-kc-part="${id}" ${state.clipParts[id] ? 'checked' : ''}> ${label}</label>`).join('')}</div></div>` : ''}`;
+}
+
+function wireKeyCopy(el) {
+  el.querySelector('#btnKeyCopy')?.addEventListener('click', () => { copyKey([...state.selected][0]); refresh(); });
+  el.querySelector('#btnKeyPaste')?.addEventListener('click', pasteToSelection);
+  el.querySelectorAll('[data-kc-part]').forEach(cb => cb.onchange = () => { state.clipParts[cb.dataset.kcPart] = cb.checked; });
+}
+
+// Select similar: every magnetic key with the same setting as this one (pending edits included).
+const SIMILAR = {
+  act: (a, b) => a.actuation === b.actuation && a.release === b.release,
+  rt: (a, b) => a.rt === b.rt && (!a.rt || (a.rtPress === b.rtPress && a.rtRelease === b.rtRelease)),
+  mode: (a, b) => a.modeId === b.modeId,
+  all: (a, b) => SIMILAR.act(a, b) && SIMILAR.rt(a, b) && SIMILAR.mode(a, b) && a.topDeadZone === b.topDeadZone && a.bottomDeadZone === b.bottomDeadZone,
+};
+function similarKeys(slot, kind) {
+  const ref = keyData(keyBySlot(slot));
+  return MAGNETIC.filter(k => SIMILAR[kind](ref, keyData(k))).map(k => k.slot);
+}
+
 // Takes a write's values as the keyboard's (Instant save) and clears them from pending. Returns a
 // function that restores the old values and queues the write's values again, unless an edit made
 // since replaced them. Values read back after the write overwrite these either way.
@@ -4094,10 +4216,20 @@ $('selectPreset').onchange = e => {
   refresh();
 };
 $('btnClearSel').onclick = () => { state.selected.clear(); refresh(); };
+$('selectSimilar').onchange = e => {
+  const kind = e.target.value;
+  e.target.value = '';
+  if (!SIMILAR[kind] || state.selected.size !== 1) return;
+  state.knob = false;
+  state.picking = null;
+  state.selected = new Set(similarKeys([...state.selected][0], kind));
+  refresh();
+};
 
 // ---------- Keyboard shortcuts ----------
 // Ctrl+Z undoes the newest change the keyboard still has (again for the one before), Ctrl+Y or
-// Ctrl+Shift+Z redoes the latest Undo, Ctrl+Enter opens Review, Ctrl+A selects every key. They stay
+// Ctrl+Shift+Z redoes the latest Undo, Ctrl+Enter opens Review, Ctrl+A selects every key, Ctrl+C /
+// Ctrl+V copy one key's settings and paste them onto the selection (Configuration tabs). They stay
 // out of the way while typing in a field, in a dialog, during the live test, key capture or macro
 // recording (those handlers see keys first).
 const isRedoEntry = h => h.source === 'undo' && !h.redo; // reversing it puts a change back
@@ -4122,6 +4254,14 @@ function onShortcut(e) {
   if (k === 'z' || k === 'y') {
     e.preventDefault();
     historyShortcut(k === 'y' || e.shiftKey);
+  } else if ((k === 'c' || k === 'v') && CONFIG_VIEWS.has(state.view) && editable() && !window.getSelection()?.toString()) {
+    e.preventDefault();
+    if (k === 'c') {
+      if (state.selected.size !== 1) { showNotice('Select one key to copy its settings.'); return; }
+      copyKey([...state.selected][0]);
+      refresh();
+    } else if (state.clip) pasteToSelection();
+    else showNotice('Copy a key’s settings first (Ctrl+C).');
   } else if (e.key === 'Enter') {
     e.preventDefault();
     if (hasAnyPending()) openReview();
