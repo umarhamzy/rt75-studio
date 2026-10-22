@@ -10,6 +10,9 @@ touching device code.
 
 - **App:** `python serve.py` (no-cache static server), then open http://127.0.0.1:5180 in Chrome
   or Edge. Close qmk.top first; only one page can hold the keyboard.
+- **Live site:** https://umarhamzy.github.io/rt75-studio/ (GitHub Pages, served from `main` of the
+  public repo github.com/umarhamzy/rt75-studio; `.nojekyll` serves files as-is). Pushing `main`
+  redeploys it, so only push verified merges.
 - **Demo:** `?demo` runs everything against a simulated keyboard (`src/demo.js`), including the
   live test, profiles and sleep timers. `?dongle=classic` uses qmk.top's slower 2.4G timing (for
   comparing load times; the source chip shows the last load time). `?demo&ignore=15:7` makes it drop writes to slot 15 /
