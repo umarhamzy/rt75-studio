@@ -493,7 +493,7 @@ function followProfile() {
   const s = state.settings;
   if (!s || s.source !== 'device' || !state.dev) return;
   profileFollow = setTimeout(async function check() {
-    if (state.settings !== s) return; // re-read meanwhile
+    if (state.settings !== s || copyRun) return; // re-read meanwhile, or a copy is switching profiles
     if (state.busy) { profileFollow = setTimeout(check, 500); return; }
     try {
       const now = await readCurrentProfile(state.dev, s);
@@ -718,10 +718,17 @@ function renderProfiles() {
   el.hidden = !s || s.profile === undefined;
   if (el.hidden) return;
   const can = editable();
+  const others = Array.from({ length: PROFILE_COUNT }, (_, i) => i + 1).filter(n => n !== s.profile + 1).join(' · ');
+  const menuOpen = profileMenuOpen && can;
   el.innerHTML = Array.from({ length: PROFILE_COUNT }, (_, i) =>
-    `<button type="button" data-profile="${i}" aria-pressed="${s.profile === i}" ${can ? '' : 'disabled'}>Profile ${i + 1}</button>`).join('');
+    `<button type="button" data-profile="${i}" aria-pressed="${s.profile === i}" ${can ? '' : 'disabled'}>Profile ${i + 1}</button>`).join('') +
+    `<button type="button" class="profile-more" id="btnProfileMenu" aria-label="Profile actions" aria-haspopup="menu" aria-expanded="${menuOpen}" ${can ? '' : 'disabled'}>⋯</button>` +
+    (menuOpen ? `<div class="profile-menu" role="menu"><button type="button" role="menuitem" id="btnCopyProfile">Copy Profile ${s.profile + 1} to…<span class="muted">${others}</span></button></div>` : '');
   el.querySelectorAll('[data-profile]').forEach(b => b.onclick = () => changeProfile(Number(b.dataset.profile)));
+  $('btnProfileMenu').onclick = () => { profileMenuOpen = !profileMenuOpen; renderProfiles(); };
+  $('btnCopyProfile')?.addEventListener('click', () => { profileMenuOpen = false; renderProfiles(); openCopyProfile(); });
 }
+let profileMenuOpen = false;
 
 // ---------- Review button (header) ----------
 // One count for everything waiting to be written: each key setting, keyboard setting, key mapping,
@@ -2903,7 +2910,7 @@ async function openReview() {
 // source ('review' | 'instant' | 'undo') and undoOf (a History entry id) go into History.
 // Returns true once written (even with mismatches), false if the write failed.
 async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChanges(), light = lightChange(), macros = macroWrites(), patterns = patternChanges(),
-  quiet = false, source = 'review', undoOf = null }) {
+  quiet = false, source = 'review', undoOf = null, title = null }) {
   // What each macro slot held before (when RT75 Studio wrote it), for Undo.
   for (const w of macros) w.before ??= w.entry.slot === w.slot && w.entry.written ? w.entry.written : null;
   const before = new Map(edits.map(e => [e.slot, Object.fromEntries(Object.keys(e).filter(f => f !== 'slot').map(f => [f, state.settings.magnet[f][e.slot]]))]));
@@ -3018,7 +3025,7 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
       undoMacros: macros.filter(w => w.before).map(w => ({ slot: w.slot, entry: w.entry, macro: w.before, before: w.macro })),
       undoLight: light && isOffered(effectById(light.from.effect)) ? { from: light.to, to: normalizeLighting(light.from), fields: light.fields } : null,
       undoPatterns: patterns.map(c => ({ layer: c.layer, from: c.to, to: c.from, undo: true })) };
-    const entry = recordHistory({ source, undoOf, rowsHtml, undoPayload, result, profile, edits, kb, keys, light, macros, patterns });
+    const entry = recordHistory({ source, undoOf, rowsHtml, undoPayload, result, profile, edits, kb, keys, light, macros, patterns, title });
     if (quiet) {
       state.saveStatus = result.mismatches.length
         ? { kind: 'error', text: `${result.mismatches.length} didn’t stick`, entryId: entry.id }
@@ -3229,7 +3236,7 @@ function rowsFromHtml(html) {
   return [...body.rows].map(r => [...r.cells].map(c => c.textContent.replace(/\s+/g, ' ').trim()));
 }
 
-function recordHistory({ source, undoOf, rowsHtml, undoPayload, result, profile, edits, kb, keys, light, macros, patterns }) {
+function recordHistory({ source, undoOf, rowsHtml, undoPayload, result, profile, edits, kb, keys, light, macros, patterns, title = null }) {
   const s = state.settings;
   const areas = [edits.length && 'keys', (keys.length || macros.length) && 'keymap', (light || patterns.length) && 'lighting', kb.length && 'keyboard'].filter(Boolean);
   // Rows whose before and after read the same (a key's action moved between layouts, say) say nothing.
@@ -3245,7 +3252,7 @@ function recordHistory({ source, undoOf, rowsHtml, undoPayload, result, profile,
     // Magnet settings (except switch types) and the key matrix belong to one profile.
     profileSpecific: edits.some(e => Object.keys(e).some(f => f !== 'slot' && f !== 'switchType')) || keys.some(c => !LAYERS[c.layer].fn),
     areas, rows, summary: summarize(rows),
-    title: base ? `${redo ? 'Redo' : 'Undo'}: ${plainTitle(base)}` : titleFor(rows, areas),
+    title: title ?? (base ? `${redo ? 'Redo' : 'Undo'}: ${plainTitle(base)}` : titleFor(rows, areas)),
     mismatches: result.mismatches.length, retried: result.retried, macros: macros.length,
     undo: undoPayload, // every entry, Undo entries included, can be reversed while the keyboard still matches it
     // What the keyboard has after this write (its read-back), to tell whether it has changed since
@@ -3333,7 +3340,7 @@ async function undoHistoryEntry(id) {
 }
 
 const AREA_HUES = { keys: 'var(--accent)', keymap: 'var(--mt)', lighting: 'var(--rt)', keyboard: 'var(--muted)' };
-const SOURCE_NAMES = { review: 'Review', instant: 'Instant', undo: 'Undo' };
+const SOURCE_NAMES = { review: 'Review', instant: 'Instant', undo: 'Undo', copy: 'Copy' };
 
 function historyStatus(h) {
   if (historyStale(h)) return { cls: 'is-muted', stale: true, text: h.undoneBy ? `${reversedWord(h)} ${timeLabel(h.undoneAt)}` : 'Changed since' };
@@ -3457,7 +3464,7 @@ function scheduleInstantSave() {
 
 // Not while a slider is held, a key is being captured or a dialog is open: try again shortly.
 function instantPaused() {
-  return pointerHeld || !!state.capture || !!state.live || !!state.pressSet || $('reviewDialog').open || $('macroDialog').open || $('presetDialog').open;
+  return pointerHeld || !!state.capture || !!state.live || !!state.pressSet || !!document.querySelector('dialog[open]') || copyRun;
 }
 
 function runInstantSave({ now = false } = {}) {
@@ -3682,6 +3689,90 @@ async function restoreFromFile(file) {
     await openRestore(dump, file.name.replace(/\.json$/i, ''));
   } catch (e) {
     showError('That file is not a backup: ' + e.message);
+  }
+}
+
+// ---------- Copy a profile (design CP1) ----------
+// Makes other profiles match this one: for each target it switches the keyboard there, reads it,
+// compares it with a snapshot of this profile (backupChanges, so every value is validated), keeps a
+// backup of the target, writes the differences with read-back (one History entry each), then
+// switches back. Only steps qmk.top uses and RT75 Studio already verified: profile switch, per-key
+// magnet writes, key-map writes. The Fn layer, lighting and switch types are shared already.
+let copyRun = false;
+const COPY_AREAS = [['keys', 'Key settings', 'Travel, Rapid Trigger, dead zones, Snap Tap, key modes'], ['keymap', 'Key map', 'Base layer and the key-mode layers']];
+let copyPick = null; // { targets: Set, areas: Set, lines: { [profile]: text }, done }
+
+function openCopyProfile() {
+  if (!editable()) return;
+  const from = state.settings.profile ?? 0;
+  copyPick = { from, targets: new Set([(from + 1) % PROFILE_COUNT]), areas: new Set(['keys', 'keymap']), lines: {}, done: false, error: '' };
+  renderCopyProfile();
+  $('copyDialog').showModal();
+}
+
+function renderCopyProfile() {
+  const c = copyPick, from = c.from;
+  $('copyTitle').textContent = `Copy Profile ${from + 1} to…`;
+  const lock = copyRun || c.done ? 'disabled' : '';
+  $('copyBody').innerHTML = `
+    <p>Profile ${from + 1}’s settings are written to each profile you tick, replacing what’s there. A backup of each is kept first (Keyboard settings › Backups), and every write is in History with Undo.</p>
+    <div class="rs-areas">${Array.from({ length: PROFILE_COUNT }, (_, i) => i).filter(i => i !== from).map(i => `<label class="rs-area"><input type="checkbox" data-copy-to="${i}" ${c.targets.has(i) ? 'checked' : ''} ${lock}>
+      <span class="rs-text"><strong>Profile ${i + 1}</strong></span><span class="rs-count">${escapeHtml(c.lines[i] ?? '')}</span></label>`).join('')}</div>
+    <div class="cp-what">${COPY_AREAS.map(([id, label, note]) => `<label class="check"><input type="checkbox" data-copy-area="${id}" ${c.areas.has(id) ? 'checked' : ''} ${lock}> <strong>${label}</strong> <span class="muted">${note}</span></label>`).join('')}</div>
+    <p class="muted rs-foot help">Key modes use both. The Fn layer, lighting and switch types are shared by every profile already. The keyboard switches to each profile to write it, then back to Profile ${from + 1}.</p>
+    ${c.error ? `<p class="review-status is-error">${escapeHtml(c.error)}</p>` : ''}`;
+  const go = $('btnCopyGo');
+  go.hidden = c.done;
+  go.disabled = copyRun || !c.targets.size || !c.areas.size;
+  go.textContent = copyRun ? 'Copying…' : c.targets.size ? `Copy to Profile ${[...c.targets].sort().map(i => i + 1).join(', ')}` : 'Pick a profile';
+  $('btnCopyCancel').textContent = c.done ? 'Close' : 'Cancel';
+  $('btnCopyCancel').disabled = copyRun;
+  $('copyBody').querySelectorAll('[data-copy-to]').forEach(cb => cb.onchange = () => { const i = Number(cb.dataset.copyTo); cb.checked ? c.targets.add(i) : c.targets.delete(i); renderCopyProfile(); });
+  $('copyBody').querySelectorAll('[data-copy-area]').forEach(cb => cb.onchange = () => { cb.checked ? c.areas.add(cb.dataset.copyArea) : c.areas.delete(cb.dataset.copyArea); renderCopyProfile(); });
+}
+
+async function runCopyProfile() {
+  const c = copyPick;
+  if (!c || copyRun) return;
+  if (hasAnyPending()) { c.error = 'Write or discard your unsaved changes first.'; renderCopyProfile(); return; }
+  copyRun = true;
+  c.error = '';
+  renderCopyProfile();
+  const from = c.from, line = (i, t) => { c.lines[i] = t; renderCopyProfile(); };
+  try {
+    // A complete snapshot of this profile: its key map and (if any key uses DKS) the DKS settings.
+    await ensureKeymaps();
+    const usesDks = s => (s.magnet.mode ?? []).some(m => (m & 0x7f) === DKS);
+    if (usesDks(state.settings)) await ensureDks();
+    const snap = backupDump();
+    for (const t of [...c.targets].sort()) {
+      line(t, 'switching…');
+      if (!await switchAndLoad(t)) throw new Error(`Couldn’t switch to Profile ${t + 1}.`);
+      line(t, 'reading…');
+      await ensureKeymaps();
+      if (usesDks({ magnet: snap.magnet }) || usesDks(state.settings)) await ensureDks();
+      const ch = backupChanges(snap);
+      if (c.areas.has('keys')) for (const x of ch.keys) setPending(x.slot, x.field, x.value);
+      if (c.areas.has('keymap')) for (const x of ch.keymap) setKeyPending(x.layer, x.slot, x.bytes);
+      const n = pendingCount();
+      if (!n) { line(t, 'already the same'); continue; }
+      keepBackup(backupDump(), `Before copying Profile ${from + 1} here`);
+      line(t, `writing ${n} change${n === 1 ? '' : 's'}…`);
+      const ok = await applyEdits(pendingEdits(), { backup: false, quiet: true, source: 'copy', title: `Copied from Profile ${from + 1}` });
+      if (!ok) throw new Error(`Writing Profile ${t + 1} failed; its unsaved changes are kept there. ${state.saveStatus?.text ?? ''}`);
+      const h = state.history.at(-1);
+      line(t, h?.mismatches ? `${h.mismatches} didn’t stick` : `✓ ${n} change${n === 1 ? '' : 's'} written`);
+      if (ch.skipped) line(t, `${c.lines[t]} · ${ch.skipped} skipped`);
+    }
+  } catch (e) {
+    c.error = e.message;
+  } finally {
+    // Back to where the copy started (unless a write failed and left changes to look at).
+    if ((state.settings.profile ?? 0) !== from && !hasAnyPending()) await switchAndLoad(from);
+    copyRun = false;
+    c.done = !c.error;
+    renderCopyProfile();
+    refresh();
   }
 }
 
@@ -4251,7 +4342,12 @@ async function changeProfile(index) {
   if (instantRun) await instantRun;
   if (hasAnyPending() && !confirm(`Switching to profile ${index + 1} discards your unsaved changes. Continue?`)) return;
   showError(null);
-  const dev = state.dev;
+  await switchAndLoad(index);
+}
+
+// Switches the keyboard to a profile and reads it. Returns true once it's loaded.
+async function switchAndLoad(index) {
+  const s = state.settings, dev = state.dev;
   state.busy = true;
   refresh();
   try {
@@ -4262,8 +4358,10 @@ async function changeProfile(index) {
     settings.demo = s.demo;
     state.busy = false;
     load(settings, dev);
+    return true;
   } catch (e) {
     showError('Profile switch failed: ' + e.message);
+    return false;
   } finally {
     state.busy = false;
     setBusy(null);
@@ -4572,6 +4670,11 @@ document.addEventListener('keyup', onRecordKey, true);
 $('btnApply').onclick = () => applyEdits(pendingEdits(), { backup: $('chkBackup')?.checked });
 $('btnUndo').onclick = undoLast;
 $('btnRestoreGo').onclick = applyRestore;
+$('btnCopyGo').onclick = runCopyProfile;
+$('btnCopyCancel').onclick = () => { if (!copyRun) { $('copyDialog').close(); copyPick = null; } };
+$('copyDialog').addEventListener('cancel', e => { if (copyRun) e.preventDefault(); });
+// The profile menu closes on a click elsewhere.
+document.addEventListener('pointerdown', e => { if (profileMenuOpen && !e.target.closest?.('#profiles')) { profileMenuOpen = false; renderProfiles(); } });
 $('btnRestoreCancel').onclick = () => { $('restoreDialog').close(); restoring = null; };
 $('btnInstant').onclick = () => setInstantSave(!instantSave);
 $('btnHistory').onclick = () => { state.historyOpen = !state.historyOpen; renderHistory(); };
@@ -4587,6 +4690,7 @@ document.querySelector('[data-nav="config"]').onclick = () => setView(lastConfig
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape' || $('reviewDialog').open || $('presetDialog').open) return;
   if (state.historyOpen) { state.historyOpen = false; renderHistory(); $('btnHistory').focus(); return; }
+  if (profileMenuOpen) { profileMenuOpen = false; renderProfiles(); $('btnProfileMenu')?.focus(); return; }
   if (state.picking !== null) { state.picking = null; refresh(); return; }
   if (state.selected.size || state.knob) { state.selected.clear(); state.knob = false; refresh(); }
 });

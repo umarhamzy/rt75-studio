@@ -261,6 +261,17 @@ profile; Fn layer, switch types, lighting, polling/sleep shared) and loads the t
 changes. Each value must pass the write validators (`buildWritePackets`, `isWritableAction`, rate/sleep
 limits) or it's skipped and counted. Custom patterns and macro steps aren't in backups.
 
+**Copy a profile (feature/copy-profile, on top of feature/restore; demo-tested):** design CP1 (canvas
+Round 23). A ⋯ button in the profiles group › Copy Profile N to…: tick targets and Key settings / Key map.
+For each target: switch there and read it (`switchAndLoad`, shared with changeProfile), compare with a
+snapshot of the source (`backupChanges`, so every value is validated), keep a backup of the target, write
+the differences quietly with read-back (History source "Copy", "Copied from Profile N"), then switch
+back. No new commands. A large copy is one long per-key batch (save flag on its last packet only); not
+yet tried on the real keyboard. The header chip is 220 px wide now so the header keeps one row.
+
+**Merge order:** shortcuts → key-copy → press-depth → restore → copy-profile (each branch is on top of
+the one before).
+
 **Next:** the user's choice.
 Knob remapping isn't wanted.
 

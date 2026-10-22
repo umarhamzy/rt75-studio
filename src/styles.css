@@ -1213,7 +1213,7 @@ body.no-lanes .key.heat .key-marks { right: 4px; }
 .instant-toggle[aria-checked="true"] .instant-track::after { transform: translateX(16px); background: var(--accent-ink); }
 
 /* Its status in the header (first in .actions, so its changing width never moves the buttons). */
-.save-status { display: inline-flex; align-items: center; gap: 8px; width: 240px; min-height: 36px; padding: 0 12px; box-sizing: border-box;
+.save-status { display: inline-flex; align-items: center; gap: 8px; width: 220px; min-height: 36px; padding: 0 12px; box-sizing: border-box;
   border-radius: 6px; background: var(--surface-2); color: var(--text-2); font-size: 12px; white-space: nowrap; }
 .save-status[hidden] { display: none; }
 .save-text { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -1315,3 +1315,15 @@ body.no-lanes .key.heat .key-marks { right: 4px; }
 .rs-text .muted { font-size: 12px; }
 .rs-count { flex: none; font: 500 12px var(--mono); color: var(--text-2); }
 .rs-foot { font-size: 12px; }
+
+/* Copy a profile (design CP1): the ⋯ menu in the profiles group, and the dialog. */
+.profiles { position: relative; }
+.profiles .profile-more { min-width: 30px; padding: 0 8px; font-size: 15px; letter-spacing: 1px; }
+.profile-menu { position: absolute; left: 0; top: calc(100% + 6px); z-index: 30; min-width: 250px; padding: 4px; border-radius: 8px;
+  background: var(--surface-2); border: 1px solid var(--line); box-shadow: 0 10px 30px color-mix(in oklab, var(--bg) 60%, transparent); }
+.profile-menu button { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 34px; padding: 0 10px;
+  border: 0; border-radius: 6px; background: transparent; color: var(--text); font: 500 13px var(--sans); text-align: left; cursor: pointer; }
+.profile-menu button:hover, .profile-menu button:focus-visible { background: var(--surface-3); outline: none; }
+.profile-menu .muted { font: 500 11px var(--mono); }
+.cp-what { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 8px; }
+.cp-what .check { margin: 0; font-size: 13px; }
