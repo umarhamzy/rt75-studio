@@ -253,6 +253,14 @@ as an unsaved edit, in 0.05 mm steps (Shift-click 0.01). The pressed depth is th
 key's top dead zone is taken off. Stops on another selection, page, Review, live test or Esc; Instant save
 waits while it runs. The demo's light press now holds still for 0.7 s.
 
+**Restore a backup (feature/restore, on top of feature/press-depth; demo-tested):** design RB1 (canvas
+Round 23). Backups made before Review writes are also kept in this browser (last 10 per keyboard,
+`rt75-studio-backups-<id>`, labelled "Before writing …"); Keyboard settings › Backups lists them with
+Back up now and From a file…. Restore… compares area by area (key settings and key map for the current
+profile; Fn layer, switch types, lighting, polling/sleep shared) and loads the ticked areas as unsaved
+changes. Each value must pass the write validators (`buildWritePackets`, `isWritableAction`, rate/sleep
+limits) or it's skipped and counted. Custom patterns and macro steps aren't in backups.
+
 **Next:** the user's choice.
 Knob remapping isn't wanted.
 

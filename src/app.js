@@ -4,7 +4,7 @@ import {
   isSupported, requestKeyboard, findGrantedKeyboard, readSettings, readKeymaps, settingsFromDump, setDongleTiming,
   writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, writeSleepTimes,
   writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot, watchKeyboardEvents, readKbOption, readCurrentProfile, readUserPic, writeUserPic, readDksSettings,
-  LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS, SWITCH_TYPES,
+  LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS, SWITCH_TYPES, buildWritePackets,
 } from './device.js';
 import { EFFECTS, effectById, isOffered, normalizeLighting, lightingDiff, lightingFields, hex, MAX_LEVEL } from './lighting.js';
 import { MACRO_MODES, MOUSE_BUTTONS, MAX_DELAY, MAX_REPEAT, MACRO_BYTES, stepLabel, macroSummary, macroProblem, macroSize, heldAtEnd } from './macros.js';
@@ -2915,7 +2915,7 @@ async function applyEdits(edits, { backup, kb = kbChanges(), keys = keymapChange
   // a key to DKS and straight back to Normal is then a change, not a no-op), and key modes work out
   // their layers from them. A failed write puts everything back (rollback).
   const rollback = quiet ? showAsWritten({ edits, kb, keys, light, patterns }) : null;
-  if (backup) downloadBackup();
+  if (backup) downloadBackup(`Before writing ${titleFor(rowsFromHtml(rowsHtml), [edits.length && 'keys', (keys.length || macros.length) && 'keymap', (light || patterns.length) && 'lighting', kb.length && 'keyboard'].filter(Boolean))}`);
   if (quiet) state.saving = true; else state.busy = true;
   refresh();
   if (!quiet) {
@@ -3517,8 +3517,20 @@ async function undoLast() {
   $('btnUndo').hidden = true;
 }
 
-// Saves current (keyboard) settings in dump.html's format, so "Open dump…" can show it later.
-function downloadBackup() {
+// Saves current (keyboard) settings in dump.html's format, so "Open dump…" can show it later, and keeps
+// a copy in this browser (Keyboard settings › Backups) so it can be restored without finding the file.
+function downloadBackup(label = 'Backup') {
+  const dump = backupDump();
+  keepBackup(dump, label);
+  const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `rt75-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function backupDump() {
   const s = state.settings;
   const id = [0x8f, ...new Uint8Array(new Uint32Array([s.deviceId]).buffer), 0, 0, (s.usbVersion ?? 0) & 0xff, (s.usbVersion ?? 0) >> 8];
   const dump = {
@@ -3528,12 +3540,164 @@ function downloadBackup() {
     featureListSupported: false, profile: s.profile, reportRateHz: s.reportRateHz, debounce: s.debounce, sleep: s.sleep, lighting: s.lighting,
     keymap: { 0: s.keymap }, tapLayer: s.tapLayer, sub2Layer: s.sub2Layer, sub3Layer: s.sub3Layer, fnWin: s.fnWin, fnMac: s.fnMac, magnet: s.magnet, savedAt: new Date().toISOString(),
   };
-  const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `rt75-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  return dump;
+}
+
+// ---------- Restore a backup (design RB1) ----------
+// The last BACKUPS_KEPT backups per keyboard are kept in this browser. Restoring compares a backup
+// with the keyboard area by area, and loads the ticked areas as unsaved changes (Review, History and
+// Undo as usual). Every value is checked with the write validators first; ones that wouldn't pass are
+// skipped. Key settings and the key map go into the current profile.
+const BACKUPS_KEPT = 10;
+const backupsKey = () => `rt75-studio-backups-${state.settings?.demo ? 'demo-' : ''}${state.settings?.deviceId ?? 'none'}`;
+let backupsMemory = [];
+function loadBackups() {
+  try { const l = JSON.parse(localStorage.getItem(backupsKey()) ?? 'null'); return Array.isArray(l) ? l : backupsMemory; } catch { return backupsMemory; }
+}
+function storeBackups(list) {
+  let keep = list.slice(-BACKUPS_KEPT);
+  backupsMemory = keep;
+  for (let i = 0; i < 4 && keep.length; i++) {
+    try { localStorage.setItem(backupsKey(), JSON.stringify(keep)); return; } catch (e) {
+      if (e?.name !== 'QuotaExceededError') return;
+      keep = keep.slice(1); // storage full: drop the oldest and try again
+      backupsMemory = keep;
+    }
+  }
+}
+function keepBackup(dump, label) {
+  if (!state.settings || state.settings.source !== 'device') return;
+  storeBackups([...loadBackups(), { id: `${Date.now().toString(36)}`, at: dump.savedAt, label, profile: dump.profile ?? 0, dump }]);
+}
+
+const RESTORE_AREAS = [
+  ['keys', 'Key settings', 'Travel, Rapid Trigger, dead zones, Snap Tap, key modes · this profile'],
+  ['keymap', 'Key map', 'Base layer and the key-mode layers · this profile'],
+  ['fn', 'Fn layer', 'Shared by every profile'],
+  ['switches', 'Switch types', 'Shared by every profile'],
+  ['lighting', 'Lighting', 'Effect, brightness, speed, colour · every profile'],
+  ['keyboard', 'Polling rate and sleep timers', 'Shared by every profile'],
+];
+const RESTORE_FIELDS = ['mode', 'actuation', 'release', 'bottomDeadZone', 'rtPress', 'rtRelease', 'topDeadZone', 'snapPartner', 'mtTime', 'dksTravel', 'dksTriggers'];
+
+// What restoring this backup would change, per area, with values that pass the write validators.
+function backupChanges(dump) {
+  const s = state.settings, b = bounds(), out = { keys: [], keymap: [], fn: [], switches: [], lighting: null, keyboard: [], skipped: 0 };
+  const okMagnet = (slot, f, v) => { try { buildWritePackets([{ slot, [f]: v }], b); return true; } catch { return false; } };
+  const dm = dump.magnet ?? {};
+  for (const k of MAGNETIC) {
+    for (const f of RESTORE_FIELDS) {
+      const v = dm[f]?.[k.slot];
+      if (v === undefined || !s.magnet[f] || v === s.magnet[f][k.slot]) continue;
+      // Never-set sensitivities (0) and leftovers that are never sent can't be written; they don't matter.
+      if ((f === 'rtPress' || f === 'rtRelease') && v === 0) continue;
+      if (okMagnet(k.slot, f, v)) out.keys.push({ slot: k.slot, field: f, value: v }); else out.skipped++;
+    }
+    const sw = dm.switchType?.[k.slot];
+    if (sw !== undefined && s.magnet.switchType && fittedSwitch(sw) !== fittedSwitch(s.magnet.switchType[k.slot])) {
+      if (SWITCH_TYPES.includes(fittedSwitch(sw))) out.switches.push({ slot: k.slot, value: fittedSwitch(sw) }); else out.skipped++;
+    }
+  }
+  for (const [layer, L] of Object.entries(LAYERS)) {
+    const from = layer === 'base' ? dump.keymap?.['0'] ?? dump.keymap?.[0] : dump[L.field];
+    if (!from || !s[L.field]) continue;
+    for (const k of MAGNETIC) {
+      const want = from.slice(k.slot * 4, k.slot * 4 + 4), now = deviceBytes(layer, k.slot);
+      if (want.length !== 4 || !now || want.join() === now.join()) continue;
+      if (isWritableAction(want, layer, k.slot)) (L.fn ? out.fn : out.keymap).push({ layer, slot: k.slot, bytes: want });
+      else out.skipped++;
+    }
+  }
+  if (dump.lighting && s.lighting && lightingDiff(s.lighting, dump.lighting).length) {
+    if (isOffered(effectById(dump.lighting.effect))) out.lighting = normalizeLighting(dump.lighting); else out.skipped++;
+  }
+  if (dump.reportRateHz !== undefined && dump.reportRateHz !== s.reportRateHz) {
+    if (RATE_OPTIONS.includes(dump.reportRateHz)) out.keyboard.push({ field: 'reportRateHz', value: dump.reportRateHz }); else out.skipped++;
+  }
+  for (const f of ['time_bt', 'deepTime_bt', 'time_24']) {
+    const v = dump.sleep?.[f];
+    if (v === undefined || !s.sleep || v === s.sleep[f]) continue;
+    const [lo, hi] = uiSleepLimits(f);
+    if (v >= lo && v <= hi) out.keyboard.push({ field: f, value: v }); else out.skipped++;
+  }
+  return out;
+}
+
+const restoreCount = (c, area) => (area === 'lighting' ? (c.lighting ? 1 : 0)
+  : area === 'keyboard' ? c.keyboard.length : new Set(c[area].map(x => x.slot)).size);
+const restoreUnit = (area, n) => (area === 'lighting' ? (n ? 'differs' : 'same as now')
+  : area === 'keyboard' ? (n ? `${n} setting${n === 1 ? '' : 's'} differ${n === 1 ? 's' : ''}` : 'same as now')
+  : n ? `${n} key${n === 1 ? '' : 's'} differ${n === 1 ? 's' : ''}` : 'same as now');
+
+let restoring = null; // { label, dump, changes }
+async function openRestore(dump, label) {
+  if (!editable()) { showNotice('Connect the keyboard to restore a backup.'); return; }
+  if (dump.deviceId !== state.settings.deviceId) { showError(`That backup is from another keyboard (device ${dump.deviceId}).`); return; }
+  // The key map (loaded in the background) and the DKS settings are needed to compare.
+  await ensureKeymaps();
+  if (Object.values(dump.magnet?.mode ?? []).some(m => (m & 0x7f) === DKS)) await ensureDks();
+  restoring = { label, dump, changes: backupChanges(dump) };
+  renderRestore();
+  $('restoreDialog').showModal();
+}
+
+function renderRestore() {
+  const r = restoring, c = r.changes, s = state.settings;
+  const otherProfile = (r.dump.profile ?? 0) !== (s.profile ?? 0);
+  $('restoreTitle').textContent = `Restore: ${r.label}`;
+  $('restoreBody').innerHTML = `
+    <p>Pick what to take from this backup${r.dump.savedAt ? ` (saved ${new Date(r.dump.savedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })})` : ''}. It becomes unsaved changes${instantSave ? ', which Instant save writes straight away' : '; you review them before anything is written'}.</p>
+    ${otherProfile ? `<p class="hint-warn">This backup is from Profile ${(r.dump.profile ?? 0) + 1}. Key settings and the key map go into Profile ${(s.profile ?? 0) + 1}, the one shown now.</p>` : ''}
+    <div class="rs-areas">${RESTORE_AREAS.map(([id, label, note]) => {
+      const n = restoreCount(c, id);
+      return `<label class="rs-area${n ? '' : ' is-same'}"><input type="checkbox" data-rs="${id}" ${n ? 'checked' : 'disabled'}>
+        <span class="rs-text"><strong>${label}</strong><span class="muted">${note}</span></span><span class="rs-count">${restoreUnit(id, n)}</span></label>`;
+    }).join('')}</div>
+    <p class="muted rs-foot">Not in backups: custom lighting patterns and macro steps (the keyboard can’t give macros back).${c.skipped ? ` ${c.skipped} value${c.skipped === 1 ? '' : 's'} in this backup can’t be written by RT75 Studio and will be left as they are.` : ''}</p>`;
+  const any = RESTORE_AREAS.some(([id]) => restoreCount(c, id));
+  $('btnRestoreGo').disabled = !any;
+  $('btnRestoreGo').textContent = any ? 'Load as unsaved changes' : 'Already the same';
+}
+
+function applyRestore() {
+  const c = restoring.changes, picked = new Set([...$('restoreBody').querySelectorAll('[data-rs]:checked')].map(x => x.dataset.rs));
+  const before = pendingCount();
+  if (picked.has('keys')) for (const x of c.keys) setPending(x.slot, x.field, x.value);
+  if (picked.has('switches')) for (const x of c.switches) setSwitch(x.slot, x.value);
+  if (picked.has('keymap')) for (const x of c.keymap) setKeyPending(x.layer, x.slot, x.bytes);
+  if (picked.has('fn')) for (const x of c.fn) setKeyPending(x.layer, x.slot, x.bytes);
+  if (picked.has('lighting') && c.lighting) state.pendingLight = c.lighting;
+  if (picked.has('keyboard')) for (const x of c.keyboard) state.pendingKb[x.field] = x.value;
+  $('restoreDialog').close();
+  restoring = null;
+  refresh();
+  const n = pendingCount() - before;
+  showNotice(n > 0 ? `${n} change${n === 1 ? '' : 's'} from the backup ${instantSave ? 'are being written' : 'are ready · Review changes to write them'}.` : 'Nothing to change.', 6000);
+}
+
+async function restoreFromFile(file) {
+  try {
+    const dump = JSON.parse(await file.text());
+    if (!dump?.magnet || !dump?.raw?.id) throw new Error('not a backup or dump');
+    await openRestore(dump, file.name.replace(/\.json$/i, ''));
+  } catch (e) {
+    showError('That file is not a backup: ' + e.message);
+  }
+}
+
+function backupsTile(can) {
+  const list = [...loadBackups()].reverse();
+  const when = iso => new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return tile('Restore a backup', `
+      <div class="bk-actions">
+        <button type="button" class="btn btn-small" id="btnBackupNow" ${can ? '' : 'disabled'}>Back up now</button>
+        <button type="button" class="btn btn-small" id="btnRestoreFile" ${can ? '' : 'disabled'}>From a file…</button>
+        <input type="file" id="restoreFile" accept="application/json,.json" hidden>
+      </div>
+      <p class="set-note help">A backup is saved before every Review write (when its box is ticked). The last ${BACKUPS_KEPT} are also kept in this browser, so you don’t have to find the file.</p>
+      ${list.length ? `<div class="bk-list">${list.map(b => `<div class="bk-row"><span class="bk-when">${when(b.at)}</span><span class="bk-label">${escapeHtml(b.label)}</span><span class="bk-profile">Profile ${(b.profile ?? 0) + 1}</span>
+        <button type="button" class="btn btn-small" data-restore="${b.id}" ${can ? '' : 'disabled'}>Restore…</button></div>`).join('')}</div>`
+        : '<p class="set-note">No backups kept in this browser yet.</p>'}`, { full: true });
 }
 
 // ---------- Lighting ----------
@@ -3969,7 +4133,8 @@ function renderKeyboardSettings() {
       sleepTile(tile, 'deepTime_bt', 'Bluetooth deep sleep', can) +
       sleepTile(tile, 'time_24', '2.4G backlight off', can),
       'Backlight off: the lights go off after this long idle. Deep sleep: the keyboard sleeps until you press a key.') : '';
-    el.innerHTML = `<div class="set-stack">${kb}${power}${studio}
+    const backups = s.source === 'device' ? group('Backups', 'this keyboard', backupsTile(can)) : '';
+    el.innerHTML = `<div class="set-stack">${kb}${power}${backups}${studio}
       ${s.source !== 'device' ? '<p class="set-foot">Viewing a file. Connect the keyboard to change these.</p>' : ''}</div>`;
 
     const setSleep = (field, minutes) => {
@@ -3982,6 +4147,13 @@ function renderKeyboardSettings() {
     el.querySelectorAll('[data-step]').forEach(b => b.onclick = () => {
       const field = b.dataset.step, cur = (state.pendingKb[field] ?? s.sleep[field]) / 60;
       setSleep(field, Math.max(0, Math.round(cur) + Number(b.dataset.dir)));
+    });
+    el.querySelector('#btnBackupNow')?.addEventListener('click', () => { downloadBackup('Backed up by hand'); renderKeyboardSettings(); showNotice('Backup saved (downloaded and kept in this browser).'); });
+    el.querySelector('#btnRestoreFile')?.addEventListener('click', () => $('restoreFile').click());
+    el.querySelector('#restoreFile')?.addEventListener('change', e => { if (e.target.files[0]) restoreFromFile(e.target.files[0]); e.target.value = ''; });
+    el.querySelectorAll('[data-restore]').forEach(b => b.onclick = () => {
+      const bk = loadBackups().find(x => x.id === b.dataset.restore);
+      if (bk) openRestore(bk.dump, bk.label);
     });
     el.querySelectorAll('[data-rate]').forEach(b => b.onclick = () => {
       const hz = Number(b.dataset.rate);
@@ -4399,6 +4571,8 @@ document.addEventListener('keydown', onRecordKey, true);
 document.addEventListener('keyup', onRecordKey, true);
 $('btnApply').onclick = () => applyEdits(pendingEdits(), { backup: $('chkBackup')?.checked });
 $('btnUndo').onclick = undoLast;
+$('btnRestoreGo').onclick = applyRestore;
+$('btnRestoreCancel').onclick = () => { $('restoreDialog').close(); restoring = null; };
 $('btnInstant').onclick = () => setInstantSave(!instantSave);
 $('btnHistory').onclick = () => { state.historyOpen = !state.historyOpen; renderHistory(); };
 // A slider (or a key being painted) held down isn't finished yet: Instant save waits for the release.
