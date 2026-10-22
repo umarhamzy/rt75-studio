@@ -97,7 +97,7 @@ touching device code.
   http://127.0.0.1:5180/?demo.
 - Demo presets use their own storage key (`rt75-studio-presets-demo-2865`).
 
-## Status (2026-10-21)
+## Status (2026-10-22)
 
 **Verified on the real keyboard:**
 - reads and decoding
@@ -233,27 +233,27 @@ scroll down; `MOUSE_ACTIONS` in actions.js) on base and Fn layers, never on mod-
 sliders (and the small mm sliders: RT sensitivity, dead zones, DKS trigger point) moves in 0.05 mm
 steps; Shift+drag moves in their fine steps. Arrow keys and typed values are unchanged; no help text.
 
-**Keyboard shortcuts (feature/shortcuts, not merged; demo-tested):** Ctrl+Z undoes the newest History
+**Keyboard shortcuts (merged 2026-10-22; checked by the user on the keyboard):** Ctrl+Z undoes the newest History
 entry the keyboard still matches (repeat to step back), Ctrl+Y / Ctrl+Shift+Z redoes the latest Undo,
 Ctrl+Enter opens Review, Ctrl+A selects every key (`onShortcut`). Ignored while typing in a field, in a
 dialog, during the live test, key capture or macro recording; waits for a running write. Named in the
 History and Review button tooltips.
 
-**Copy and paste between keys (feature/key-copy, on top of feature/shortcuts; demo-tested):** design KC1
+**Copy and paste between keys (merged 2026-10-22; verified on the real keyboard):** design KC1
 (canvas Round 23). Side panel Copy / Paste (Ctrl+C / Ctrl+V on the Configuration tabs) with ticks for
 Travel, Rapid Trigger, Dead zones and Key mode (off by default); pasted as unsaved edits. Key mode
 copies mod-tap's hold and hold time, toggle's type, DKS's moments, trigger point and actions 2–4; each key
 keeps its own key as tap/toggle/DKS action 1. Snap pairs aren't copied; travel and dead zones skip
 DKS/mod-tap/toggle keys. **Select similar…** next to Select… (same actuation, RT, key mode, everything).
 
-**Set by pressing (feature/press-depth, on top of feature/key-copy; demo-tested):** design LD2 (canvas
+**Set by pressing (merged 2026-10-22; verified on the real keyboard):** design LD2 (canvas
 Round 23). Under the travel sliders: Start runs the live test's depth reports (USB only); press a selected
 key and hold it still (±0.04 mm for 0.45 s) and "Use X mm" sets the actuation (and release when linked)
 as an unsaved edit, in 0.05 mm steps (Shift-click 0.01). The pressed depth is the trigger point, so each
 key's top dead zone is taken off. Stops on another selection, page, Review, live test or Esc; Instant save
 waits while it runs. The demo's light press now holds still for 0.7 s.
 
-**Restore a backup (feature/restore, on top of feature/press-depth; demo-tested):** design RB1 (canvas
+**Restore a backup (merged 2026-10-22; verified on the real keyboard):** design RB1 (canvas
 Round 23). Backups made before Review writes are also kept in this browser (last 10 per keyboard,
 `rt75-studio-backups-<id>`, labelled "Before writing …"); Keyboard settings › Backups lists them with
 Back up now and From a file…. Restore… compares area by area (key settings and key map for the current
@@ -261,16 +261,13 @@ profile; Fn layer, switch types, lighting, polling/sleep shared) and loads the t
 changes. Each value must pass the write validators (`buildWritePackets`, `isWritableAction`, rate/sleep
 limits) or it's skipped and counted. Custom patterns and macro steps aren't in backups.
 
-**Copy a profile (feature/copy-profile, on top of feature/restore; demo-tested):** design CP1 (canvas
+**Copy a profile (merged 2026-10-22; verified on the real keyboard):** design CP1 (canvas
 Round 23). A ⋯ button in the profiles group › Copy Profile N to…: tick targets and Key settings / Key map.
 For each target: switch there and read it (`switchAndLoad`, shared with changeProfile), compare with a
 snapshot of the source (`backupChanges`, so every value is validated), keep a backup of the target, write
 the differences quietly with read-back (History source "Copy", "Copied from Profile N"), then switch
-back. No new commands. A large copy is one long per-key batch (save flag on its last packet only); not
-yet tried on the real keyboard. The header chip is 220 px wide now so the header keeps one row.
-
-**Merge order:** shortcuts → key-copy → press-depth → restore → copy-profile (each branch is on top of
-the one before).
+back. No new commands. A large copy is one long per-key batch (save flag on its last packet only),
+which worked on the real keyboard. The header chip is 220 px wide now so the header keeps one row.
 
 **Next:** the user's choice.
 Knob remapping isn't wanted.

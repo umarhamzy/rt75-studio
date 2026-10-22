@@ -834,6 +834,15 @@ same read-back; only the review dialog is skipped (CLAUDE.md, rule 3).
   Re-checked after the restore-point and mid-save fixes (Undo/Redo by keyboard state, edits made
   during a write kept): the user reported History works (2026-10-21).
 
+## Shortcuts, copy/paste, set by pressing, restore, copy profile (2026-10-22)
+
+App-level only: no new commands. Copy/paste and restore load unsaved edits that go through the usual
+validated writes; set by pressing uses the live test's `0x1B` depth reports (USB only); copying a profile
+chains profile switches (`0x04`), reads and per-key/key-map writes that were already verified.
+
+- **Verified on the real keyboard (2026-10-22):** the user reported all five work (keyboard shortcuts,
+  copy and paste between keys, set by pressing, restoring a backup, copying a profile).
+
 ## Gamepad mode (not supported, 2026-10-17)
 
 The user asked for a Wootility / Keychron style gamepad (key depth as analog controller input).
