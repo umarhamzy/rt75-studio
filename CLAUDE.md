@@ -273,7 +273,7 @@ the differences quietly with read-back (History source "Copy", "Copied from Prof
 back. No new commands. A large copy is one long per-key batch (save flag on its last packet only),
 which worked on the real keyboard. The header chip is 220 px wide now so the header keeps one row.
 
-**Model file (refactor/model-file, 2026-10-23; no behaviour change, not merged yet):** step 1 of
+**Model file (merged 2026-10-23; no behaviour change, checked by the user on the keyboard):** step 1 of
 preparing for other RY5088 keyboards. The RT75's constants moved from layout.js, device.js,
 lighting.js, app.js, demo.js and the macro/pattern storage keys into `src/models/rt75pro.js`, read through
 `src/model.js`. The golden packet test, recorded on main beforehand, matches byte for byte, and every
