@@ -1,21 +1,21 @@
-// RY5088 protocol for the Yunzii RT75 Pro. See protocol-notes.md.
+// RY5088 protocol, driving the model in src/model.js (the Yunzii RT75 Pro). See protocol-notes.md.
 // Reads go through query(), which only accepts READ_COMMANDS. Writes go through send() with a
 // validator for their command: per-key magnet (0x65, single-key form), polling rate, profile,
 // sleep timers, key map and lighting. Every packet in a batch is validated before the first
 // one is sent.
 
-import { KEYS, DEFAULT_MATRIX, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX } from './layout.js';
+import { MODEL, KEYS, DEFAULT_MATRIX, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX } from './model.js';
 import { FUNCTIONS, MODIFIERS, HID_NAMES, MOUSE_ACTIONS } from './actions.js';
 import { effectById, isOffered, decodeLighting, lightingBytes, lightingFields, MAX_LEVEL } from './lighting.js';
 import { MAX_MACROS, MACRO_MODES, MACRO_CHUNK, encodeMacro, macroSize, macroRefs } from './macros.js';
 
 const MACRO_MODE_IDS = new Set(Object.keys(MACRO_MODES).map(Number));
 
-const VID = 0x3151;
+const VID = MODEL.usb.vendorId;
 // Matrix slots of real magnetic keys (the knob entries are excluded).
 const KEY_SLOTS = new Set(KEYS.filter(k => !k.knob).map(k => k.slot));
 const KEY_MODES = new Set([0, 2, 3, 4, 5, 7]);
-const DONGLE_PIDS = new Set([0x5037, 0x5038, 0x503d]);
+const DONGLE_PIDS = new Set(MODEL.usb.dongleProductIds);
 
 const CMD = {
   GET_RF_VERSION: 0x80,
@@ -50,9 +50,9 @@ export const WRITABLE = {
   dksTriggers: 8, // DKS trigger table: four bytes per key (read back as param 10)
   switchType: 252, // which switch is fitted (qmk.top's 轴体 / Switch Settings)
 };
-// Switch-type bytes the RT75 Pro offers (qmk.top/v4's enum, its supportedSwitchTypes), in qmk.top's
-// order. qmk.top shows any other value (the keyboard reports 0xFF on keys never set) as Outemu, 0.
-export const SWITCH_TYPES = [0, 1, 2, 3, 4, 5, 46];
+// Switch-type bytes the model offers, in qmk.top's order. qmk.top shows any other value (the
+// keyboard reports 0xFF on keys never set) as Outemu, 0.
+export const SWITCH_TYPES = MODEL.switchTypes;
 // One byte per key; the rest are uint16 LE.
 const NARROW_PARAMS = new Set([WRITABLE.mode, WRITABLE.topDeadZone, WRITABLE.snapPartner, WRITABLE.mtTime, WRITABLE.switchType]);
 // Four bytes per key (kept as one packed number, byte 0 lowest): the DKS trigger table.
@@ -61,15 +61,9 @@ const QUAD_PARAMS = new Set([WRITABLE.dksTriggers]);
 // switch type 252 (setMagnetismInfoSimple); Snap partners (9) are sent last (setMultiMagnetismInfo).
 const WRITE_ORDER = ['mode', 'actuation', 'release', 'bottomDeadZone', 'rtPress', 'rtRelease', 'dksTravel', 'dksTriggers', 'mtTime', 'topDeadZone', 'switchType', 'snapPartner'];
 
-// Setting ranges in mm, from qmk.top/v4 for this device: actuation/release 0.1 to 3.3,
-// Rapid Trigger sensitivity one step (0.005) to 2.0, top and bottom dead zone 0 to 1.
-export const LIMITS = {
-  travel: { min: 0.1, max: 3.3 },
-  rt: { max: 2.0 },
-  deadZone: { min: 0, max: 1 },
-  mtTime: { min: 10, max: 1000, default: 200 }, // mod-tap hold time in ms, stored ÷ 10 (qmk.top's 按键时间)
-  dks: { min: 0.5, max: 2.5, default: 0.7, bottom: 3.2 }, // DKS trigger point in mm (qmk.top's 触发行程, 最大行程)
-};
+// The model's setting ranges: travel, Rapid Trigger sensitivity and dead zones in mm, mod-tap hold
+// time in ms, DKS trigger point in mm.
+export const LIMITS = MODEL.limits;
 
 // Magnet parameters: [param, name, pages, 16-bit values]
 const MAGNET_PARAMS = [
@@ -116,10 +110,9 @@ export function isDksAction(byte) {
 }
 
 const REPORT_RATES = { 0: 8000, 1: 4000, 2: 2000, 3: 1000, 4: 500, 5: 250, 6: 125 };
-// The RT75 Pro's USB and dongle filters in qmk.top/v4 declare reportRate 8000, so every rate is offered.
-export const RATE_OPTIONS = [8000, 4000, 2000, 1000, 500, 250, 125];
-// qmk.top's "Profile 1–4" are the device's key layers (deviceType.layer = 4).
-export const PROFILE_COUNT = 4;
+// Polling rates the model offers, and its profiles (qmk.top's key layers).
+export const RATE_OPTIONS = MODEL.reportRates;
+export const PROFILE_COUNT = MODEL.profiles;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -499,7 +492,7 @@ function assertAllowedWrite(p, bounds) {
       range(bounds.dksMin, bounds.dksMax);
       break;
     case WRITABLE.switchType:
-      if (!SWITCH_TYPES.includes(v)) fail(`switch type ${v} is not one the RT75 Pro offers`);
+      if (!SWITCH_TYPES.includes(v)) fail(`switch type ${v} is not one the ${MODEL.name} offers`);
       break;
     case WRITABLE.dksTriggers:
       for (let i = 0; i < 4; i++) if (!isDksAction((v >>> (i * 8)) & 0xff)) fail(`DKS action ${i + 1} has a trigger pattern qmk.top can't make`);
@@ -764,11 +757,11 @@ export function readCurrentProfile(dev, settings) {
 // ---------- Sleep timers ----------
 // [0x11, 0…, checksum, BT backlight-off, 2.4G backlight-off, BT deep sleep, 2.4G deep sleep],
 // each uint16 LE seconds at bytes 8–15 (qmk.top setSleepTime / getSleepTime, read 0x91).
-// RT75 Pro ranges: backlight-off 0 (never) to 18 h; BT deep sleep 10 s to 18 h. 2.4G deep sleep
-// is not offered for this keyboard and is always written back unchanged.
+// The model's ranges (seconds); a timer it doesn't offer (the RT75 Pro's 2.4G deep sleep) has none and
+// is always written back unchanged.
 const SET_SLEEPTIME = 0x11;
 const SLEEP_FIELDS = ['time_bt', 'time_24', 'deepTime_bt', 'deepTime_24'];
-export const SLEEP_LIMITS = { time_bt: [0, 64800], time_24: [0, 64800], deepTime_bt: [10, 64800] };
+export const SLEEP_LIMITS = MODEL.sleepLimits;
 
 function decodeSleep(r) {
   if (r[0] !== CMD.GET_SLEEPTIME) return undefined;
@@ -994,10 +987,10 @@ export async function writeLighting(dev, settings, light) {
 // The Custom effect (LightUserPicture) shows one of five per-key colour patterns stored on the
 // keyboard (protocol-notes.md, "Custom lighting"). A pattern is R, G, B per key-matrix slot.
 // Write (qmk.top _setLightPic): [0x0C, pattern, 0xFF, page 0–6, length, isLast, 0, Bit7 cs, data],
-// 56 bytes a page and 42 in the last (378 = 126 slots), then vendorSleep 100 ms.
+// 56 bytes a page and 42 in the last (the RT75 Pro's 378 = 126 slots), then vendorSleep 100 ms.
 // Read (getLightPic): [0x8C, pattern, 0xFF, page 0–5], 6 × 64 bytes of data, no header.
-export const USERPIC_LAYERS = 5;
-export const USERPIC_BYTES = 378;
+export const USERPIC_LAYERS = MODEL.customPatterns.count;
+export const USERPIC_BYTES = MODEL.customPatterns.bytes;
 const SET_USERPIC = 0x0c;
 const USERPIC_PAGE = 56;
 

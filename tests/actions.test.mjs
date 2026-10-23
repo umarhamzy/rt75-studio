@@ -1,6 +1,6 @@
 // Key action decoding/encoding (src/actions.js) against qmk.top's byte layouts.
 const { decodeAction, encodeKey, splitKey } = await import(new URL('../src/actions.js', import.meta.url).href);
-const { DEFAULT_MATRIX, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX } = await import(new URL('../src/layout.js', import.meta.url).href);
+const { DEFAULT_MATRIX, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX } = await import(new URL('../src/model.js', import.meta.url).href);
 
 let failures = 0;
 const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${n}${x ? ' — ' + x : ''}`); if (!ok) failures++; };

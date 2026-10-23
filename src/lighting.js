@@ -1,38 +1,15 @@
-// RT75 Pro backlight effects. The list, order and per-effect controls are qmk.top/v4's
-// lightLayout for this keyboard (the shared layout `v` its RT75PRO entry points at); the ids are
-// the RY5088 LightList and the English names are qmk.top's own. Brightness and speed are 0–4.
+// Backlight settings. The effects (list, order, per-effect controls) and the brightness and speed
+// range are the model's (src/models/).
 //
 // Packet (setLightSetting / getLightSetting, 0x07 / 0x87):
 //   [cmd, effect id, 4 - speed, brightness, option << 4 | colour mode, r, g, b, checksum]
 // Writes use the Bit8 checksum: byte 8 = 255 - (sum(bytes 0..7) & 0xFF). Colour mode 7 = the
 // colour in bytes 5–7, 8 = rainbow ("dazzle"); 0–6 appear only in reads (preset colours).
 
-export const MAX_LEVEL = 4;
+import { MODEL } from './model.js';
 
-export const EFFECTS = [
-  { id: 4, key: 'LightWave', name: 'Flowing Light', speed: true, color: true, options: ['Right', 'Left', 'Down', 'Up'], motion: 'wave' },
-  { id: 5, key: 'LightRipple', name: 'Water Ripple', speed: true, color: true, motion: 'react' },
-  { id: 6, key: 'LightRaindrop', name: 'Star Dots', speed: true, color: true, motion: 'twinkle' },
-  { id: 7, key: 'LightSnake', name: 'Flow', speed: true, color: true, options: ['Zigzag', 'Spiral'], motion: 'wave' },
-  { id: 8, key: 'LightPressAction', name: 'Shadow', speed: true, color: true, motion: 'react' },
-  { id: 9, key: 'LightConverage', name: 'Layers', speed: true, color: true, motion: 'rows' },
-  { id: 10, key: 'LightSineWave', name: 'Sine Wave', speed: true, color: true, motion: 'wave' },
-  { id: 11, key: 'LightKaleidoscope', name: 'Color Spring', speed: true, color: true, options: ['Outward', 'Inward'], motion: 'radial' },
-  { id: 19, key: 'LightPressActionOff', name: 'Silent Snow', speed: true, color: true, motion: 'react' },
-  { id: 12, key: 'LightLineWave', name: 'Neon', speed: true, color: true, options: ['Right', 'Left'], motion: 'wave' },
-  { id: 14, key: 'LightLaser', name: 'Radiant', speed: true, color: true, motion: 'react' },
-  { id: 15, key: 'LightCircleWave', name: 'Loop', speed: true, color: true, options: ['Counter-clockwise', 'Clockwise'], motion: 'spin' },
-  { id: 16, key: 'LightDazzing', name: 'Color Grid', speed: true, color: true, motion: 'twinkle' },
-  { id: 17, key: 'LightRainDown', name: 'Snowfall', speed: true, color: true, motion: 'fall' },
-  { id: 18, key: 'LightMeteor', name: 'Meteor', speed: true, color: true, motion: 'fall' },
-  { id: 1, key: 'LightAlwaysOn', name: 'Constant Light', speed: false, color: true, motion: 'none' },
-  { id: 2, key: 'LightBreath', name: 'Breathing', speed: true, color: true, motion: 'breathe' },
-  { id: 3, key: 'LightNeon', name: 'Spectrum Cycle', speed: true, color: false, motion: 'cycle' },
-  { id: 13, key: 'LightUserPicture', name: 'Custom', speed: false, color: false, options: ['Pattern 1', 'Pattern 2', 'Pattern 3', 'Pattern 4', 'Pattern 5'], motion: 'none' },
-  // These two are driven by qmk.top's music and screen sync, so RT75 Studio shows them but doesn't set them.
-  { id: 22, key: 'LightMusicFollow2', name: 'Music Sync', speed: false, color: true, options: ['Upright', 'Separate', 'Intersect'], motion: 'none', offered: false },
-  { id: 21, key: 'LightScreenColor', name: 'Light Shadow', speed: false, color: false, motion: 'none', offered: false },
-];
+export const MAX_LEVEL = MODEL.lighting.maxLevel;
+export const EFFECTS = MODEL.lighting.effects;
 export const effectById = id => EFFECTS.find(e => e.id === id);
 export const isOffered = e => !!e && e.offered !== false;
 

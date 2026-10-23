@@ -1,4 +1,4 @@
-import { KEYS, DEFAULT_MATRIX, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX, LAYOUT_WIDTH, LAYOUT_HEIGHT, DEVICE_ID } from './layout.js';
+import { MODEL, KEYS, DEFAULT_MATRIX, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX, LAYOUT_WIDTH, LAYOUT_HEIGHT, DEVICE_ID } from './model.js';
 import { decodeAction, encodeKey, encodeModTap, splitKey, FUNCTIONS, MOUSE_ACTIONS, RISKY, KEY_CHOICES, CODE_TO_HID, MODIFIERS, keyName, DISABLED, HID_NAMES } from './actions.js';
 import {
   isSupported, requestKeyboard, findGrantedKeyboard, readSettings, readKeymaps, settingsFromDump, setDongleTiming,
@@ -692,8 +692,9 @@ function renderDevice() {
   $('badgeMode').textContent = 'Read-only';
   renderProfiles();
   if (!s) return;
-  // The RT75 Pro shows Yunzii's wordmark (assets/yunzii-logo.png, from yunzii.com) before the model.
-  if (s.deviceId === DEVICE_ID) $('deviceName').innerHTML = '<span class="maker-logo" role="img" aria-label="Yunzii"></span>RT75 Pro';
+  // The maker's wordmark before the model's name (the RT75 Pro's is Yunzii's, assets/yunzii-logo.png,
+  // from yunzii.com).
+  if (s.deviceId === DEVICE_ID) $('deviceName').innerHTML = `<span class="maker-logo" role="img" aria-label="${MODEL.maker}"></span>${MODEL.name}`;
   else $('deviceName').textContent = s.productName ?? 'Keyboard';
   $('deviceDot').className = 'status-dot' + (s.source === 'device' && state.dev ? ' is-live' : '');
   $('chipFirmware').textContent = s.usbVersion ? `${(s.usbVersion >> 8).toString(16)}.${(s.usbVersion & 0xff).toString(16).padStart(2, '0')}` : '?';
@@ -1621,9 +1622,9 @@ function wireEditor(el) {
   el.querySelector('#btnFixPair')?.addEventListener('click', () => { makePair(slots[0], keyData(keyBySlot(slots[0])).partner.slot); apply(); });
 }
 
-// Deepest settable actuation point. qmk.top/v4 returns 3.3 mm for every switch type
-// (轴体行程最大值); it only allows 4 mm on firmware older than 0x0300.
-const MAX_TRAVEL_MM = 3.3;
+// Deepest settable actuation point, the model's travel limit. For the RT75 Pro qmk.top/v4 returns
+// 3.3 mm for every switch type (轴体行程最大值); it only allows 4 mm on firmware older than 0x0300.
+const MAX_TRAVEL_MM = LIMITS.travel.max;
 
 // Vertical travel bar: 0 mm at the top, the deepest setting at the bottom.
 function travelDiagram(d) {
@@ -4531,7 +4532,7 @@ async function connect() {
     if (!dev) return;
     setBusy(0, 'Connecting…');
     const settings = await readSettings(dev, (f, label) => setBusy(f, `Reading ${label}…`), { keymaps: false });
-    if (settings.deviceId !== DEVICE_ID) showError(`This device reports ID ${settings.deviceId}, not the RT75 Pro (2865). Values may be wrong, so editing is off.`);
+    if (settings.deviceId !== DEVICE_ID) showError(`This device reports ID ${settings.deviceId}, not the ${MODEL.name} (${DEVICE_ID}). Values may be wrong, so editing is off.`);
     load(settings, settings.deviceId === DEVICE_ID ? dev : null);
   } catch (e) {
     showError(e.name === 'NotAllowedError' || /open/i.test(e.message)
@@ -4560,7 +4561,7 @@ $('btnSample').onclick = async () => {
   try { load(settingsFromDump(await (await fetch('fixtures/sample-dump.json')).json())); }
   catch (e) { showError('Could not load the sample: ' + e.message); }
 };
-// Key groups for the "Select…" menu, by browser key code (see layout.js).
+// Key groups for the "Select…" menu, by browser key code (see src/models/).
 const KEY_GROUPS = {
   all: () => true,
   wasd: k => ['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(k.code),

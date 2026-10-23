@@ -18,7 +18,10 @@ touching device code.
   comparing load times; the source chip shows the last load time). `?demo&ignore=15:7` makes it drop writes to slot 15 /
   param 7, which reproduces a failed write.
 - **Tests:** `node tests/run.mjs` runs all suites. They drive `src/device.js` against simulated
-  keyboards and check exact packets, read-back and the blocked cases.
+  keyboards and check exact packets, read-back and the blocked cases. `tests/packets.test.mjs` is a
+  golden test: every device operation's packets, the validators' accept/block patterns and the
+  model's constants must match `fixtures/packets-golden.json`. Refresh it with `--update` only when a
+  packet change is intended, and say why in the commit.
 - **Reference code:** `node tools/fetch-qmk.mjs` downloads qmk.top's GearHub and v4 bundles plus
   the RY5088 base class (the whole protocol), the RT75 device module and the layout chunk, into
   `reference/qmk/` (git-ignored).
@@ -31,10 +34,11 @@ touching device code.
 |---|---|
 | `src/device.js` | Everything that touches HID: transport (wired and 2.4G dongle relay), reads, validated writes, live depth, keyboard-wide settings |
 | `src/app.js` | UI state and rendering: sidebar and header, board, knob mode, inspector/editor (travel sliders), pending edits, review dialog, Undo, live test, presets, keyboard settings, switch types |
-| `src/layout.js` | RT75 key positions (from qmk.top) and the factory key matrix; `slot` = key-matrix index |
+| `src/models/rt75pro.js` | Everything specific to the RT75 Pro: ID, USB IDs, key positions (from qmk.top), factory key matrix and Fn layers, profiles, setting limits, switch types, polling rates, sleep limits, lighting effects, custom-pattern size; `slot` = key-matrix index |
+| `src/model.js` | The model the app drives (only the RT75 Pro for now) and the layout exports (`KEYS`, `DEFAULT_MATRIX`, …) the rest of the code imports |
 | `src/macros.js` | Macro buffer encoding (mirrors qmk.top), checks, modes, step labels |
 | `src/library.js` | Macro library in this browser: storage, export/import, out-of-date check |
-| `src/lighting.js` | Lighting effects table (from qmk.top's RT75 entry), packet encode/decode, diffs |
+| `src/lighting.js` | Lighting packet encode/decode and diffs (the effects table is the model's) |
 | `src/patterns.js` | Custom lighting patterns: per-key colour helpers, quick fills, saved-design storage |
 | `src/dks.js` | DKS trigger patterns: the editor's clicks, descriptions and the scrubbed press |
 | `src/demo.js` | Simulated keyboard (per-profile settings, polling rate, sleep timers, lighting, live reports) |
@@ -268,6 +272,14 @@ snapshot of the source (`backupChanges`, so every value is validated), keep a ba
 the differences quietly with read-back (History source "Copy", "Copied from Profile N"), then switch
 back. No new commands. A large copy is one long per-key batch (save flag on its last packet only),
 which worked on the real keyboard. The header chip is 220 px wide now so the header keeps one row.
+
+**Model file (refactor/model-file, 2026-10-23; no behaviour change, not merged yet):** step 1 of
+preparing for other RY5088 keyboards. The RT75's constants moved from layout.js, device.js,
+lighting.js, app.js, demo.js and the macro/pattern storage keys into `src/models/rt75pro.js`, read through
+`src/model.js`. The golden packet test, recorded on main beforehand, matches byte for byte, and every
+suite's output is unchanged. Still RT75-only: read page counts and ranges assume 128 slots (step 2), the
+model is fixed at import (a registry picking it at connect is step 3), and UI text about tested
+RT75 behaviour (top dead zone adds, toggle at 0.5 mm, shared switch types) isn't flagged per model yet.
 
 **Next:** the user's choice.
 Knob remapping isn't wanted.

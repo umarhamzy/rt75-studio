@@ -7,8 +7,9 @@
 //   written  { repeat, steps } as last written, to tell when the keyboard's copy is out of date
 
 import { macroProblem, sameMacro, MAX_MACROS } from './macros.js';
+import { DEVICE_ID } from './model.js';
 
-const storageKey = demo => `rt75-studio-macros-${demo ? 'demo-' : ''}2865`;
+const storageKey = demo => `rt75-studio-macros-${demo ? 'demo-' : ''}${DEVICE_ID}`;
 const FILE_TYPE = 'rt75-studio-macro-library';
 
 export function loadLibrary(demo) {

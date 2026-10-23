@@ -2,11 +2,11 @@
 // lighting"). A pattern is 384 bytes, R, G, B per key-matrix slot (the keyboard stores 378).
 // Saved designs live in this browser, like the macro library: { id, name, colors (384 numbers) }.
 
-import { KEYS, LAYOUT_WIDTH, LAYOUT_HEIGHT } from './layout.js';
+import { DEVICE_ID, KEYS, LAYOUT_WIDTH, LAYOUT_HEIGHT } from './model.js';
 
 export const PATTERN_BYTES = 384;
 const MAGNETIC = KEYS.filter(k => !k.knob);
-const storageKey = demo => `rt75-studio-patterns-${demo ? 'demo-' : ''}2865`;
+const storageKey = demo => `rt75-studio-patterns-${demo ? 'demo-' : ''}${DEVICE_ID}`;
 
 export function loadPatternLibrary(demo) {
   try {

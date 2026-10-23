@@ -1,4 +1,7 @@
-import { DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX } from './layout.js';
+import { MODEL, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX } from './model.js';
+
+const { vendorId, productId } = MODEL.usb;
+const productName = `${MODEL.usb.productName} (demo)`;
 
 // In-memory stand-in for the RT75 Pro, used by ?demo. It answers the same HID reports as
 // the real keyboard (IDs, settings reads, single-key magnet writes) from a saved dump,
@@ -11,7 +14,7 @@ const WIDE = new Set([0, 1, 6, 2, 3, 4]);
 // options.ignore: [{ slot, param }] writes the simulated keyboard silently drops, to reproduce
 // failed writes (e.g. ?demo&ignore=15:7 drops mode writes to S).
 export function createDemoDevice(dump, { ignore = [] } = {}) {
-  const profiles = Array.from({ length: 4 }, () => structuredClone(dump.magnet));
+  const profiles = Array.from({ length: MODEL.profiles }, () => structuredClone(dump.magnet));
   profiles[1].actuation = profiles[1].actuation.map(v => (v ? 200 : 0));
   profiles[1].release = profiles[1].release.map(v => (v ? 200 : 0));
   profiles[1].mode = profiles[1].mode.map(() => 0);
@@ -34,7 +37,7 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
   // for 0.7 s, for Set by pressing).
   const input = new EventTarget();
   Object.assign(input, {
-    productName: 'YUNZII RT75 PRO Keyboard (demo)', vendorId: 0x3151, productId: 0x5030,
+    productName, vendorId, productId,
     collections: [{ usagePage: 0xffff, usage: 1, inputReports: [{ reportId: 0 }] }],
     opened: false, async open() { this.opened = true; }, async close() { this.opened = false; },
   });
@@ -60,7 +63,7 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
   };
   // Each profile's key matrix has four sub-layers: 0 is the base layer, 1 holds mod-tap tap
   // actions; 1–3 are all zeros from the factory.
-  const keymaps = Array.from({ length: 4 }, () => [[...dump.keymap['0']], ...Array.from({ length: 3 }, () => new Array(dump.keymap['0'].length).fill(0))]);
+  const keymaps = Array.from({ length: MODEL.profiles }, () => [[...dump.keymap['0']], ...Array.from({ length: 3 }, () => new Array(dump.keymap['0'].length).fill(0))]);
   // Fn layers per profile: [windows, mac]
   // One Fn layer (index 0) shared by every profile, like the real keyboard: [windows, mac].
   const fnLayers = [[[...(dump.fnWin ?? DEFAULT_FN_MATRIX)], [...(dump.fnMac ?? DEFAULT_FN_MAC_MATRIX)]]];
@@ -70,14 +73,14 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
   const macros = new Map();
   // Custom lighting patterns 1–5 (128 slots × R, G, B). Pattern 1 starts as a gradient, like a
   // keyboard that has had one set; the rest are dark.
-  const userPics = Array.from({ length: 5 }, (_, n) => Array.from({ length: 384 }, (_, i) =>
+  const userPics = Array.from({ length: MODEL.customPatterns.count }, (_, n) => Array.from({ length: 384 }, (_, i) =>
     n === 0 ? [(i / 3) * 2 % 256, 80, 255 - (i / 3) * 2 % 256][i % 3] | 0 : 0));
   let last = new Uint8Array(64);
 
   return {
-    productName: 'YUNZII RT75 PRO Keyboard (demo)',
-    vendorId: 0x3151,
-    productId: 0x5030,
+    productName,
+    vendorId,
+    productId,
     collections: [{ usagePage: 0xffff, usage: 2, featureReports: [{}] }],
     opened: false,
     async open() { this.opened = true; },

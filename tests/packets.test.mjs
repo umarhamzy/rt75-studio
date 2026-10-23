@@ -12,7 +12,7 @@ const D = await import(ROOT + 'device.js');
 const L = await import(ROOT + 'lighting.js');
 const P = await import(ROOT + 'patterns.js');
 const M = await import(ROOT + 'macros.js');
-const layout = await import(ROOT + 'model.js').catch(() => import(ROOT + 'layout.js'));
+const layout = await import(ROOT + 'model.js');
 const { createDemoDevice } = await import(ROOT + 'demo.js');
 const { DEFAULT_TRIGGERS } = await import(ROOT + 'dks.js');
 const GOLDEN = new URL('../fixtures/packets-golden.json', import.meta.url);

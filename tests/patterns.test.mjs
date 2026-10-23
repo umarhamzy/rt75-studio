@@ -1,6 +1,6 @@
 // Custom lighting helpers: fills, built-in designs, and per-key colours from a picture.
 const { colorsFromImage, keyColor, BUILT_IN_DESIGNS, PATTERN_BYTES, applyFill } = await import(new URL('../src/patterns.js', import.meta.url).href);
-const { KEYS, LAYOUT_WIDTH, LAYOUT_HEIGHT } = await import(new URL('../src/layout.js', import.meta.url).href);
+const { KEYS, LAYOUT_WIDTH, LAYOUT_HEIGHT } = await import(new URL('../src/model.js', import.meta.url).href);
 
 let failures = 0;
 const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${n}${x ? ' — ' + x : ''}`); if (!ok) failures++; };
