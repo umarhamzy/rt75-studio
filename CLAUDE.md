@@ -277,9 +277,18 @@ which worked on the real keyboard. The header chip is 220 px wide now so the hea
 preparing for other RY5088 keyboards. The RT75's constants moved from layout.js, device.js,
 lighting.js, app.js, demo.js and the macro/pattern storage keys into `src/models/rt75pro.js`, read through
 `src/model.js`. The golden packet test, recorded on main beforehand, matches byte for byte, and every
-suite's output is unchanged. Still RT75-only: read page counts and ranges assume 128 slots (step 2), the
-model is fixed at import (a registry picking it at connect is step 3), and UI text about tested
-RT75 behaviour (top dead zone adds, toggle at 0.5 mm, shared switch types) isn't flagged per model yet.
+suite's output is unchanged. Still RT75-only: the model is fixed at import (a registry picking it at
+connect is step 3), and UI text about tested RT75 behaviour (top dead zone adds, toggle at 0.5 mm,
+shared switch types) isn't flagged per model yet.
+
+**Protocol sizes (refactor/protocol-sizes, 2026-10-23; no behaviour change, not merged yet):** step 2.
+qmk.top's RY5088 base class fixes the table sizes for every board on the chip, whatever its key count,
+so they are named once in device.js: `MATRIX_SLOTS = 128`, read 64 bytes a page (`NARROW_PAGES` 2,
+`WIDE_PAGES` 4, `MATRIX_PAGES` 8), and custom patterns of 378 bytes written in 7 packets and read in 6
+pages. Reads, `query()`'s ranges, the DKS table, presets, patterns and the demo use them. The pattern
+size moved back from the model; the model keeps only the pattern count. Golden test identical. Not
+yet checked: whether any other board's qmk.top module overrides these sizes (needs downloading a few
+modules, with the user's OK).
 
 **Next:** the user's choice.
 Knob remapping isn't wanted.

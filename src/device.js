@@ -35,6 +35,15 @@ const CMD = {
 const READ_COMMANDS = new Set(Object.values(CMD));
 const SET_MAGNETISM = 0x65;
 
+// RY5088 table sizes. qmk.top's base class fixes them for every board on this chip, whatever its key
+// count: per-key tables have 128 key-matrix slots (unused slots stay empty) and are read 64 bytes a
+// page. Which slots are real keys is the model's (its key list).
+export const MATRIX_SLOTS = 128;
+const pagesFor = bytesPerSlot => Math.ceil(MATRIX_SLOTS * bytesPerSlot / 64);
+const NARROW_PAGES = pagesFor(1); // one byte per slot: 2 pages
+const WIDE_PAGES = pagesFor(2);   // uint16 per slot: 4 pages
+const MATRIX_PAGES = pagesFor(4); // four bytes per slot (key matrix, Fn layer, DKS table): 8 pages
+
 // Magnet params this app may write, keyed by the settings field they come from.
 export const WRITABLE = {
   mode: 7,
@@ -67,31 +76,32 @@ export const LIMITS = MODEL.limits;
 
 // Magnet parameters: [param, name, pages, 16-bit values]
 const MAGNET_PARAMS = [
-  [7, 'mode', 2, false],
-  [0, 'actuation', 4, true],
-  [1, 'release', 4, true],
-  [6, 'bottomDeadZone', 4, true],
-  [2, 'rtPress', 4, true],
-  [3, 'rtRelease', 4, true],
-  [251, 'topDeadZone', 2, false],
-  [9, 'snapPartner', 2, false],
-  [5, 'mtTime', 2, false],
-  [252, 'switchType', 2, false],
+  [7, 'mode', NARROW_PAGES, false],
+  [0, 'actuation', WIDE_PAGES, true],
+  [1, 'release', WIDE_PAGES, true],
+  [6, 'bottomDeadZone', WIDE_PAGES, true],
+  [2, 'rtPress', WIDE_PAGES, true],
+  [3, 'rtRelease', WIDE_PAGES, true],
+  [251, 'topDeadZone', NARROW_PAGES, false],
+  [9, 'snapPartner', NARROW_PAGES, false],
+  [5, 'mtTime', NARROW_PAGES, false],
+  [252, 'switchType', NARROW_PAGES, false],
 ];
 
 // DKS settings, read only when a key uses DKS (as qmk.top does) or when the DKS editor needs them.
-// The trigger table is written per key as param 8 but read for all keys as param 10: 4 × 128 bytes,
+// The trigger table is written per key as param 8 but read for all keys as param 10: 4 × 128 bytes (one per slot),
 // action by action (qmk.top getMultiMagnetismInfo).
 const DKS_TRIGGER_READ = 10;
 const DKS_FIELDS = ['dksTravel', 'dksTriggers'];
-const DKS_READS = 4 + 8;
+const DKS_READS = WIDE_PAGES + MATRIX_PAGES;
 
 async function readMagnetParam(t, field) {
   if (field === 'dksTriggers') {
-    const b = await t.readPages([CMD.GET_MAGNETISM, DKS_TRIGGER_READ, 1, 0], 8);
-    return Array.from({ length: 128 }, (_, k) => (b[k] | (b[128 + k] << 8) | (b[256 + k] << 16) | (b[384 + k] << 24)) >>> 0);
+    const b = await t.readPages([CMD.GET_MAGNETISM, DKS_TRIGGER_READ, 1, 0], MATRIX_PAGES);
+    const at = (action, k) => b[action * MATRIX_SLOTS + k];
+    return Array.from({ length: MATRIX_SLOTS }, (_, k) => (at(0, k) | (at(1, k) << 8) | (at(2, k) << 16) | (at(3, k) << 24)) >>> 0);
   }
-  if (field === 'dksTravel') return u16(await t.readPages([CMD.GET_MAGNETISM, WRITABLE.dksTravel, 1, 0], 4));
+  if (field === 'dksTravel') return u16(await t.readPages([CMD.GET_MAGNETISM, WRITABLE.dksTravel, 1, 0], WIDE_PAGES));
   const [param, , pages, wide] = MAGNET_PARAMS.find(m => m[1] === field);
   const bytes = await t.readPages([CMD.GET_MAGNETISM, param, 1, 0], pages);
   return wide ? u16(bytes) : bytes;
@@ -194,17 +204,17 @@ class Transport {
     // Reads stay inside the ranges qmk.top uses: firmware doesn't bounds-check them (a macro read at
     // index 254/255 hung the keyboard until it was power-cycled, 2026-10-15).
     // Sub-layer (byte 4): 0 is the base layer; 1–3 hold mod-tap and DKS actions (qmk.top reads 0–3).
-    if (cmd[0] === CMD.GET_KEYMATRIX && !(cmd[1] < PROFILE_COUNT && cmd[3] < 8 && (cmd[4] ?? 0) <= 3)) {
+    if (cmd[0] === CMD.GET_KEYMATRIX && !(cmd[1] < PROFILE_COUNT && cmd[3] < MATRIX_PAGES && (cmd[4] ?? 0) <= 3)) {
       throw new Error(`Blocked key-map read outside profiles 1–${PROFILE_COUNT} (profile ${cmd[1]}, page ${cmd[3]}, sub ${cmd[4]})`);
     }
     // Only Fn layer 0 exists on this keyboard (see FN_LAYER); OS 0/1, pages 0–7.
-    if (cmd[0] === CMD.GET_FN && !(cmd[1] <= 1 && cmd[2] === 0 && cmd[4] < 8)) {
+    if (cmd[0] === CMD.GET_FN && !(cmd[1] <= 1 && cmd[2] === 0 && cmd[4] < MATRIX_PAGES)) {
       throw new Error(`Blocked Fn-layer read outside layer 0 (os ${cmd[1]}, layer ${cmd[2]}, page ${cmd[4]})`);
     }
     // Magnet tables are 4 pages; the DKS trigger table (param 10) is 8, as qmk.top reads it.
-    if (cmd[0] === CMD.GET_MAGNETISM && !(cmd[3] < (cmd[1] === DKS_TRIGGER_READ ? 8 : 4))) throw new Error(`Blocked magnet read beyond its pages (param ${cmd[1]}, page ${cmd[3]})`);
+    if (cmd[0] === CMD.GET_MAGNETISM && !(cmd[3] < (cmd[1] === DKS_TRIGGER_READ ? MATRIX_PAGES : WIDE_PAGES))) throw new Error(`Blocked magnet read beyond its pages (param ${cmd[1]}, page ${cmd[3]})`);
     // Custom lighting patterns: the Custom effect's five patterns, 6 pages each (qmk.top getLightPic).
-    if (cmd[0] === CMD.GET_USERPIC && !(cmd[1] < USERPIC_LAYERS && cmd[2] === 0xff && cmd[3] < 6)) {
+    if (cmd[0] === CMD.GET_USERPIC && !(cmd[1] < USERPIC_LAYERS && cmd[2] === 0xff && cmd[3] < USERPIC_READ_PAGES)) {
       throw new Error(`Blocked custom-pattern read outside patterns 1–${USERPIC_LAYERS} (pattern ${cmd[1]}, page ${cmd[3]})`);
     }
     const pkt = encode(cmd);
@@ -302,7 +312,7 @@ function decodeKbOption(r) {
 export function readKbOption(dev, settings) {
   return withDevice(dev, settings, async t => decodeKbOption(await t.query([CMD.GET_KBOPTION])));
 }
-const KEYMAP_READS = 8 * 4 + 16; // the key matrix's four sub-layers + two Fn layers
+const KEYMAP_READS = MATRIX_PAGES * 4 + MATRIX_PAGES * 2; // the key matrix's four sub-layers + two Fn layers
 
 // Reads everything the keyboard view needs. onProgress(fraction, label) is optional; the label
 // names what is being read now. With { keymaps: false } the base layer and Fn layers (24 reads)
@@ -374,10 +384,10 @@ export function readSettings(dev, onProgress = () => {}, { keymaps = true } = {}
 // 2–4; qmk.top reads all four), then the shared Fn layers ([0x90, os, Fn layer 0, 0xFF, page]).
 async function readLayers(t, profile, reading = () => {}) {
   reading('Key map');
-  const keymap = await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, 0], 8);
-  const tapLayer = await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, 1], 8);
-  const sub2Layer = await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, 2], 8);
-  const sub3Layer = await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, 3], 8);
+  const keymap = await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, 0], MATRIX_PAGES);
+  const tapLayer = await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, 1], MATRIX_PAGES);
+  const sub2Layer = await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, 2], MATRIX_PAGES);
+  const sub3Layer = await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, 3], MATRIX_PAGES);
   reading('Fn layers');
   const fnWin = await readFnLayer(t, 0);
   const fnMac = await readFnLayer(t, 1);
@@ -800,7 +810,7 @@ const FN_LAYER = 0;
 
 async function readFnLayer(t, os) {
   const out = [];
-  for (let page = 0; page < 8; page++) out.push(...await t.query([CMD.GET_FN, os, FN_LAYER, 0xff, page]));
+  for (let page = 0; page < MATRIX_PAGES; page++) out.push(...await t.query([CMD.GET_FN, os, FN_LAYER, 0xff, page]));
   return out;
 }
 
@@ -909,7 +919,7 @@ export async function writeKeymap(dev, settings, edits, onProgress = () => {}) {
   const check = p => assertAllowedKeymapWrite(p, { profile: settings.profile });
   return withDevice(dev, settings, async t => {
     const readLayer = layer => KEYMAP_LAYERS[layer].sub !== undefined
-      ? t.readPages([CMD.GET_KEYMATRIX, settings.profile, 0xff, 0, KEYMAP_LAYERS[layer].sub], 8)
+      ? t.readPages([CMD.GET_KEYMATRIX, settings.profile, 0xff, 0, KEYMAP_LAYERS[layer].sub], MATRIX_PAGES)
       : readFnLayer(t, KEYMAP_LAYERS[layer].os);
     const sendAll = async (pkts, label) => {
       for (const [i, p] of pkts.entries()) { await t.send(p.pkt, null, check); onProgress((i + 1) / pkts.length, label); }
@@ -987,19 +997,22 @@ export async function writeLighting(dev, settings, light) {
 // The Custom effect (LightUserPicture) shows one of five per-key colour patterns stored on the
 // keyboard (protocol-notes.md, "Custom lighting"). A pattern is R, G, B per key-matrix slot.
 // Write (qmk.top _setLightPic): [0x0C, pattern, 0xFF, page 0–6, length, isLast, 0, Bit7 cs, data],
-// 56 bytes a page and 42 in the last (the RT75 Pro's 378 = 126 slots), then vendorSleep 100 ms.
-// Read (getLightPic): [0x8C, pattern, 0xFF, page 0–5], 6 × 64 bytes of data, no header.
+// 56 bytes a page and 42 in the last (378 = 126 slots, fixed by qmk.top's RY5088 base class), then
+// vendorSleep 100 ms. Read (getLightPic): [0x8C, pattern, 0xFF, page 0–5], 6 × 64 bytes of data
+// (R, G, B for all 128 slots), no header. How many patterns there are is the model's.
 export const USERPIC_LAYERS = MODEL.customPatterns.count;
-export const USERPIC_BYTES = MODEL.customPatterns.bytes;
+export const USERPIC_BYTES = 378;
 const SET_USERPIC = 0x0c;
 const USERPIC_PAGE = 56;
+const USERPIC_LAST = Math.ceil(USERPIC_BYTES / USERPIC_PAGE) - 1; // page 6
+const USERPIC_READ_PAGES = pagesFor(3);                            // 6
 
 function assertAllowedUserPicWrite(p) {
   const fail = why => { throw new Error(`Blocked custom-pattern write (${why}): ${[...p.slice(0, 8)].map(b => b.toString(16).padStart(2, '0')).join(' ')}`); };
   if (p.length !== 64 || p[0] !== SET_USERPIC) fail('not the custom-pattern command');
-  if (p[1] >= USERPIC_LAYERS || p[2] !== 0xff || p[3] > 6) fail('header');
-  const len = p[3] === 6 ? USERPIC_BYTES - 6 * USERPIC_PAGE : USERPIC_PAGE;
-  if (p[4] !== len || p[5] !== (p[3] === 6 ? 1 : 0) || p[6] !== 0) fail('length or last flag');
+  if (p[1] >= USERPIC_LAYERS || p[2] !== 0xff || p[3] > USERPIC_LAST) fail('header');
+  const len = p[3] === USERPIC_LAST ? USERPIC_BYTES - USERPIC_LAST * USERPIC_PAGE : USERPIC_PAGE;
+  if (p[4] !== len || p[5] !== (p[3] === USERPIC_LAST ? 1 : 0) || p[6] !== 0) fail('length or last flag');
   if (p[7] !== 255 - (p.slice(0, 7).reduce((a, b) => a + b, 0) & 0xff)) fail('checksum');
   if (p.slice(8 + len).some(b => b !== 0)) fail('trailing bytes');
 }
@@ -1008,9 +1021,9 @@ function assertAllowedUserPicWrite(p) {
 export function buildUserPicPackets(colors, layer) {
   if (!(layer >= 0 && layer < USERPIC_LAYERS)) throw new Error('Unknown pattern');
   if (colors.length < USERPIC_BYTES || colors.some(v => !Number.isInteger(v) || v < 0 || v > 255)) throw new Error('Bad pattern colours');
-  return Array.from({ length: 7 }, (_, page) => {
-    const len = page === 6 ? USERPIC_BYTES - 6 * USERPIC_PAGE : USERPIC_PAGE;
-    const pkt = encode([SET_USERPIC, layer, 0xff, page, len, page === 6 ? 1 : 0, 0, 0, ...colors.slice(page * USERPIC_PAGE, page * USERPIC_PAGE + len)]);
+  return Array.from({ length: USERPIC_LAST + 1 }, (_, page) => {
+    const len = page === USERPIC_LAST ? USERPIC_BYTES - USERPIC_LAST * USERPIC_PAGE : USERPIC_PAGE;
+    const pkt = encode([SET_USERPIC, layer, 0xff, page, len, page === USERPIC_LAST ? 1 : 0, 0, 0, ...colors.slice(page * USERPIC_PAGE, page * USERPIC_PAGE + len)]);
     assertAllowedUserPicWrite(pkt);
     return pkt;
   });
@@ -1018,7 +1031,7 @@ export function buildUserPicPackets(colors, layer) {
 
 // Reads one pattern: 384 bytes (128 slots × R, G, B; only the first 378 are written).
 export function readUserPic(dev, settings, layer) {
-  return withDevice(dev, settings, t => t.readPages([CMD.GET_USERPIC, layer, 0xff, 0], 6));
+  return withDevice(dev, settings, t => t.readPages([CMD.GET_USERPIC, layer, 0xff, 0], USERPIC_READ_PAGES));
 }
 
 // Writes a pattern, reads it back and re-sends once if it differs.
@@ -1029,7 +1042,7 @@ export async function writeUserPic(dev, settings, layer, colors, onProgress = ()
     const write = async label => {
       for (const [i, pkt] of packets.entries()) { await t.send(pkt, null, assertAllowedUserPicWrite); onProgress((i + 1) / 8, label); }
       await sleep(100); // qmk.top: vendorSleep
-      const got = await t.readPages([CMD.GET_USERPIC, layer, 0xff, 0], 6);
+      const got = await t.readPages([CMD.GET_USERPIC, layer, 0xff, 0], USERPIC_READ_PAGES);
       onProgress(1, 'Verifying');
       return got;
     };
@@ -1095,7 +1108,7 @@ export async function readMacroSlotsInUse(dev, settings, onProgress = () => {}) 
     const used = new Set();
     for (let profile = 0; profile < PROFILE_COUNT; profile++) {
       onProgress(profile / (PROFILE_COUNT + 1), `Checking profile ${profile + 1}`);
-      macroRefs(await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, 0], 8)).forEach(i => used.add(i));
+      macroRefs(await t.readPages([CMD.GET_KEYMATRIX, profile, 0xff, 0, 0], MATRIX_PAGES)).forEach(i => used.add(i));
     }
     onProgress(PROFILE_COUNT / (PROFILE_COUNT + 1), 'Checking the Fn layers');
     macroRefs(await readFnLayer(t, 0), await readFnLayer(t, 1)).forEach(i => used.add(i));

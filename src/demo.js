@@ -1,4 +1,5 @@
 import { MODEL, DEFAULT_FN_MATRIX, DEFAULT_FN_MAC_MATRIX } from './model.js';
+import { MATRIX_SLOTS } from './device.js';
 
 const { vendorId, productId } = MODEL.usb;
 const productName = `${MODEL.usb.productName} (demo)`;
@@ -73,7 +74,7 @@ export function createDemoDevice(dump, { ignore = [] } = {}) {
   const macros = new Map();
   // Custom lighting patterns 1–5 (128 slots × R, G, B). Pattern 1 starts as a gradient, like a
   // keyboard that has had one set; the rest are dark.
-  const userPics = Array.from({ length: MODEL.customPatterns.count }, (_, n) => Array.from({ length: 384 }, (_, i) =>
+  const userPics = Array.from({ length: MODEL.customPatterns.count }, (_, n) => Array.from({ length: MATRIX_SLOTS * 3 }, (_, i) =>
     n === 0 ? [(i / 3) * 2 % 256, 80, 255 - (i / 3) * 2 % 256][i % 3] | 0 : 0));
   let last = new Uint8Array(64);
 

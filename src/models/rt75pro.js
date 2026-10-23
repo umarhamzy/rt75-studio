@@ -158,6 +158,6 @@ export default {
   sleepLimits: { time_bt: [0, 64800], time_24: [0, 64800], deepTime_bt: [10, 64800] },
   // Main backlight only (a lightLayout, no sideLightLayout); brightness and speed 0–4.
   lighting: { maxLevel: 4, effects: EFFECTS },
-  // The Custom effect's five per-key colour patterns: 378 bytes each (R, G, B for 126 slots).
-  customPatterns: { count: 5, bytes: 378 },
+  // The Custom effect's five per-key colour patterns (their size is the RY5088 protocol's, device.js).
+  customPatterns: { count: 5 },
 };

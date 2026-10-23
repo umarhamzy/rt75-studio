@@ -4,7 +4,7 @@ import {
   isSupported, requestKeyboard, findGrantedKeyboard, readSettings, readKeymaps, settingsFromDump, setDongleTiming,
   writeBounds, writeKeySettings, startLiveTravel, writeReportRate, switchProfile, writeSleepTimes,
   writeKeymap, isWritableAction, LOCKED_SLOTS, writeLighting, writeMacros, readMacroSlotsInUse, pickFreeSlot, watchKeyboardEvents, readKbOption, readCurrentProfile, readUserPic, writeUserPic, readDksSettings,
-  LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS, SWITCH_TYPES, buildWritePackets,
+  LIMITS, RATE_OPTIONS, PROFILE_COUNT, SLEEP_LIMITS, SWITCH_TYPES, MATRIX_SLOTS, buildWritePackets,
 } from './device.js';
 import { EFFECTS, effectById, isOffered, normalizeLighting, lightingDiff, lightingFields, hex, MAX_LEVEL } from './lighting.js';
 import { MACRO_MODES, MOUSE_BUTTONS, MAX_DELAY, MAX_REPEAT, MACRO_BYTES, stepLabel, macroSummary, macroProblem, macroSize, heldAtEnd } from './macros.js';
@@ -2825,7 +2825,7 @@ function exportPreset(p) {
 async function importPreset(file) {
   try {
     const p = JSON.parse(await file.text());
-    if (p.format !== PRESET_FORMAT || !p.magnet || !PRESET_FIELDS.every(f => Array.isArray(p.magnet[f]) && p.magnet[f].length === 128)) throw new Error('not an RT75 Studio preset');
+    if (p.format !== PRESET_FORMAT || !p.magnet || !PRESET_FIELDS.every(f => Array.isArray(p.magnet[f]) && p.magnet[f].length === MATRIX_SLOTS)) throw new Error('not an RT75 Studio preset');
     if (p.deviceId !== state.settings.deviceId) throw new Error(`it was made for device ${p.deviceId}, not ${state.settings.deviceId}`);
     const list = loadPresets();
     let name = String(p.name || 'Imported').slice(0, 40);

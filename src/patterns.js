@@ -3,8 +3,9 @@
 // Saved designs live in this browser, like the macro library: { id, name, colors (384 numbers) }.
 
 import { DEVICE_ID, KEYS, LAYOUT_WIDTH, LAYOUT_HEIGHT } from './model.js';
+import { MATRIX_SLOTS } from './device.js';
 
-export const PATTERN_BYTES = 384;
+export const PATTERN_BYTES = MATRIX_SLOTS * 3;
 const MAGNETIC = KEYS.filter(k => !k.knob);
 const storageKey = demo => `rt75-studio-patterns-${demo ? 'demo-' : ''}${DEVICE_ID}`;
 
