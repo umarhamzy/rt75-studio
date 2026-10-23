@@ -34,7 +34,7 @@ touching device code.
 |---|---|
 | `src/device.js` | Everything that touches HID: transport (wired and 2.4G dongle relay), reads, validated writes, live depth, keyboard-wide settings |
 | `src/app.js` | UI state and rendering: sidebar and header, board, knob mode, inspector/editor (travel sliders), pending edits, review dialog, Undo, live test, presets, keyboard settings, switch types |
-| `src/models/rt75pro.js` | Everything specific to the RT75 Pro: ID, USB IDs, key positions (from qmk.top), factory key matrix and Fn layers, profiles, setting limits, switch types, polling rates, sleep limits, lighting effects, custom-pattern size; `slot` = key-matrix index |
+| `src/models/rt75pro.js` | Everything specific to the RT75 Pro: ID, USB IDs, key positions (from qmk.top), factory key matrix and Fn layers, profiles, setting limits, switch types, polling rates, sleep limits, lighting effects, custom-pattern count; `slot` = key-matrix index (table sizes are the RY5088 protocol's, `MATRIX_SLOTS` in device.js) |
 | `src/model.js` | The model the app drives (only the RT75 Pro for now) and the layout exports (`KEYS`, `DEFAULT_MATRIX`, …) the rest of the code imports |
 | `src/macros.js` | Macro buffer encoding (mirrors qmk.top), checks, modes, step labels |
 | `src/library.js` | Macro library in this browser: storage, export/import, out-of-date check |
@@ -281,7 +281,7 @@ suite's output is unchanged. Still RT75-only: the model is fixed at import (a re
 connect is step 3), and UI text about tested RT75 behaviour (top dead zone adds, toggle at 0.5 mm,
 shared switch types) isn't flagged per model yet.
 
-**Protocol sizes (refactor/protocol-sizes, 2026-10-23; no behaviour change, not merged yet):** step 2.
+**Protocol sizes (merged 2026-10-23; no behaviour change, checked by the user on the keyboard):** step 2.
 qmk.top's RY5088 base class fixes the table sizes for every board on the chip, whatever its key count,
 so they are named once in device.js: `MATRIX_SLOTS = 128`, read 64 bytes a page (`NARROW_PAGES` 2,
 `WIDE_PAGES` 4, `MATRIX_PAGES` 8), and custom patterns of 378 bytes written in 7 packets and read in 6
