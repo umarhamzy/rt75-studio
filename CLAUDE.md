@@ -290,6 +290,9 @@ size moved back from the model; the model keeps only the pattern count. Golden t
 yet checked: whether any other board's qmk.top module overrides these sizes (needs downloading a few
 modules, with the user's OK).
 
+**Favicon (merged 2026-10-26):** `assets/favicon.svg`, the sidebar's RT mark as a solid amber tile with
+dark letters (readable on light and dark tab bars), linked from index.html and the diagnostic pages.
+
 **Next:** the user's choice.
 Knob remapping isn't wanted.
 
